@@ -22,14 +22,14 @@ jobs:
 
       - name: Install and Build
         run: |
-          cd MasterBuyer-2026
+          cd app
           npm install
           npm run build
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: MasterBuyer-2026/dist
+          path: app/dist
 
   deploy:
     needs: build
