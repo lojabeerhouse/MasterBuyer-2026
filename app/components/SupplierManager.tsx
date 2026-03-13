@@ -12,9 +12,10 @@ interface SupplierManagerProps {
   setGlobalPackRules: React.Dispatch<React.SetStateAction<PackRule[]>>;
   globalNamingRules: NamingRule[];
   setGlobalNamingRules: React.Dispatch<React.SetStateAction<NamingRule[]>>;
+  onBatchCompleted?: (batch: QuoteBatch, supplierId: string) => void;
 }
 
-const SupplierManager: React.FC<SupplierManagerProps> = ({ suppliers, setSuppliers, globalPackRules, setGlobalPackRules, globalNamingRules, setGlobalNamingRules }) => {
+const SupplierManager: React.FC<SupplierManagerProps> = ({ suppliers, setSuppliers, globalPackRules, setGlobalPackRules, globalNamingRules, setGlobalNamingRules, onBatchCompleted }) => {
   const [newSupplierName, setNewSupplierName] = useState('');
   const [activeTab, setActiveTab] = useState<string | null>(null);
   const [textInput, setTextInput] = useState('');
@@ -350,7 +351,9 @@ const SupplierManager: React.FC<SupplierManagerProps> = ({ suppliers, setSupplie
                       quotes = applyRulesToQuotes(quotes, supplierExceptions, globalPackRules, globalNamingRules);
 
                       const initializedQuotes = quotes.map(q => recalculateItem({...q, priceStrategy: 'pack'}, 'pack'));
-                      updateSupplierQuotes(supplierId, { ...newBatch, status: 'completed', items: initializedQuotes });
+                      const completedBatch = { ...newBatch, status: 'completed' as const, items: initializedQuotes };
+                      updateSupplierQuotes(supplierId, completedBatch);
+                      onBatchCompleted?.(completedBatch, supplierId);
                   } catch (error) {
                       console.error(error);
                       updateSupplierQuotes(supplierId, { ...newBatch, status: 'error', errorMessage: 'Falha na análise IA.' });
@@ -995,7 +998,9 @@ const SupplierManager: React.FC<SupplierManagerProps> = ({ suppliers, setSupplie
                 quotes = applyRulesToQuotes(quotes, supplierExceptions, globalPackRules, globalNamingRules);
 
                 const initializedQuotes = quotes.map(q => recalculateItem({...q, priceStrategy: 'pack'}, 'pack'));
-                updateSupplierQuotes(supplierId, { ...newBatch, status: 'completed', items: initializedQuotes, fileName: `Nuvem (${quotes.length} itens)` });
+                const completedBatch = { ...newBatch, status: 'completed' as const, items: initializedQuotes, fileName: `Nuvem (${quotes.length} itens)` };
+                updateSupplierQuotes(supplierId, completedBatch);
+                onBatchCompleted?.(completedBatch, supplierId);
             } catch (aiError) {
                 updateSupplierQuotes(supplierId, { ...newBatch, status: 'error', errorMessage: 'Erro na análise IA.' });
             }
@@ -1042,7 +1047,9 @@ const SupplierManager: React.FC<SupplierManagerProps> = ({ suppliers, setSupplie
       quotes = applyRulesToQuotes(quotes, supplierExceptions, globalPackRules, globalNamingRules);
 
       const initializedQuotes = quotes.map(q => recalculateItem({...q, priceStrategy: 'pack'}, 'pack'));
-      updateSupplierQuotes(supplierId, { ...newBatch, status: 'completed', items: initializedQuotes });
+      const completedBatch = { ...newBatch, status: 'completed' as const, items: initializedQuotes };
+      updateSupplierQuotes(supplierId, completedBatch);
+      onBatchCompleted?.(completedBatch, supplierId);
     } catch (error) {
       updateSupplierQuotes(supplierId, { ...newBatch, status: 'error', errorMessage: 'Falha ao processar texto.' });
     }

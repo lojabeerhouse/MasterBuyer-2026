@@ -88,8 +88,17 @@ const ProductCatalog: React.FC<ProductCatalogProps> = ({ suppliers, cart, setCar
       let items = catalogItems;
 
       if (searchTerm.trim()) {
-          const term = searchTerm.toLowerCase();
-          items = items.filter(i => (i.name || '').toLowerCase().includes(term) || (i.sku || '').toLowerCase().includes(term));
+          const searchNormalize = (str: string) =>
+            str.toLowerCase()
+              .replace(/ç/g, '\x00')
+              .normalize('NFD')
+              .replace(/[\u0300-\u036f]/g, '')
+              .replace(/\x00/g, 'ç');
+          const term = searchNormalize(searchTerm);
+          items = items.filter(i =>
+            searchNormalize(i.name || '').includes(term) ||
+            searchNormalize(i.sku || '').includes(term)
+          );
       }
 
       return items.sort((a, b) => {

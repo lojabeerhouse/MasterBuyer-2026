@@ -3,6 +3,7 @@ import { signInWithPopup, signOut, onAuthStateChanged, User } from 'firebase/aut
 import { auth, googleProvider } from './firebaseConfig';
 import { saveUserData, loadUserData } from './services/firebaseService';
 import { loadNotifications, saveNotifications, processBatchIntoHistory, resolveDuplicate } from './services/historyService';
+import { loadAllCatalogs, processBatchIntoCatalog } from './services/supplierCatalogService';
 import NotificationCenter from './components/NotificationCenter';
 import SalesAnalyzer from './components/SalesAnalyzer';
 import QuoteComparator from './components/QuoteComparator';
@@ -11,6 +12,7 @@ import ProductCatalog from './components/ProductCatalog';
 import ProductDatabase from './components/ProductDatabase';
 import OfferFlyer from './components/OfferFlyer';
 import SupplierManager from './components/SupplierManager';
+import SupplierCatalogView from './components/SupplierCatalogView';
 import {
   Supplier,
   ForecastItem,
@@ -21,7 +23,9 @@ import {
   NamingRule,
   PackRule,
   QuoteBatch,
-  AppNotification
+  AppNotification,
+  SupplierCatalog,
+  PriceValidityConfig,
 } from './types';
 import { ShoppingCart, BarChart3, Users, FileText, Database, Tag, Scale, LogIn, LogOut } from 'lucide-react';
 import BuyingAssistant from './components/BuyingAssistant';
@@ -144,6 +148,12 @@ const App: React.FC = () => {
   // --- NOTIFICATIONS ---
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
 
+  // Catálogos de fornecedores (por supplierId)
+  const [supplierCatalogs, setSupplierCatalogs] = useState<Record<string, SupplierCatalog>>({});
+  const [priceValidityConfig, setPriceValidityConfig] = useState<PriceValidityConfig>({ globalDays: 7 });
+  // aba do catálogo atualmente selecionada (supplierId ou 'master')
+  const [catalogTab, setCatalogTab] = useState<string>('master');
+
   // --- AUTH LISTENER ---
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
@@ -207,6 +217,16 @@ const App: React.FC = () => {
     const savedNotifications = await loadNotifications(uid);
     setNotifications(savedNotifications);
 
+    // Load supplier catalogs + price validity config
+    const [allCatalogs, savedValidityConfig] = await Promise.all([
+      loadAllCatalogs(uid),
+      loadUserData<PriceValidityConfig>(uid, 'priceValidityConfig', { globalDays: 7 }),
+    ]);
+    const catalogsMap: Record<string, SupplierCatalog> = {};
+    allCatalogs.forEach(c => { catalogsMap[c.supplierId] = c; });
+    setSupplierCatalogs(catalogsMap);
+    setPriceValidityConfig(savedValidityConfig);
+
     setDataLoading(false);
     setIsLoaded(true); // libera os useEffects de salvamento
   };
@@ -227,6 +247,7 @@ const App: React.FC = () => {
   useEffect(() => { if (uid && isLoaded) saveUserData(uid, 'considerStock', considerStock); }, [considerStock, uid, isLoaded]);
   useEffect(() => { if (uid && isLoaded) saveUserData(uid, 'globalPackRules', globalPackRules); }, [globalPackRules, uid, isLoaded]);
   useEffect(() => { if (uid && isLoaded) saveUserData(uid, 'globalNamingRules', globalNamingRules); }, [globalNamingRules, uid, isLoaded]);
+  useEffect(() => { if (uid && isLoaded) saveUserData(uid, 'priceValidityConfig', priceValidityConfig); }, [priceValidityConfig, uid, isLoaded]);
   useEffect(() => { if (uid) saveNotifications(uid, notifications); }, [notifications, uid]);
 
   // --- NOTIFICATION HANDLERS ---
@@ -249,13 +270,36 @@ const App: React.FC = () => {
     if (!user?.uid) return;
     const supplier = suppliers.find(s => s.id === supplierId);
     if (!supplier) return;
+
+    // Histórico de preços (sistema antigo — notificações de duplicatas)
     const { newNotifications } = await processBatchIntoHistory(
       user.uid, batch, supplier, productMappings, notifications
     );
     if (newNotifications.length > 0) {
       setNotifications(prev => [...newNotifications, ...prev]);
     }
-  }, [user?.uid, suppliers, productMappings, notifications]);
+
+    // Catálogo do fornecedor (novo sistema)
+    const { catalog, newProducts, updatedProducts } = await processBatchIntoCatalog(
+      user.uid, batch, supplierId, supplier.name, masterProducts
+    );
+    setSupplierCatalogs(prev => ({ ...prev, [supplierId]: catalog }));
+
+    // Log no console de notificações
+    if (newProducts > 0 || updatedProducts > 0) {
+      setNotifications(prev => [{
+        id: `catalog-${batch.id}`,
+        type: 'console',
+        title: 'Catálogo atualizado',
+        message: `${supplier.name}: ${newProducts} novo(s), ${updatedProducts} atualizado(s)`,
+        timestamp: Date.now(),
+        resolved: false,
+        supplierId,
+        supplierName: supplier.name,
+        batchId: batch.id,
+      }, ...prev]);
+    }
+  }, [user?.uid, suppliers, productMappings, notifications, masterProducts]);
 
   // --- LOGIN / LOGOUT ---
   const handleLogin = async () => {
@@ -369,10 +413,87 @@ const App: React.FC = () => {
         {activeTab === 'sales' && <SalesAnalyzer setForecast={setForecast} salesData={salesData} setSalesData={setSalesData} csvContent={salesCsvContent} setCsvContent={setSalesCsvContent} salesConfig={salesConfig} setSalesConfig={setSalesConfig} salesUrl={salesUrl} setSalesUrl={setSalesUrl} />}
         {activeTab === 'comparator' && <QuoteComparator suppliers={suppliers} forecast={forecast} cart={cart} setCart={setCart} updateForecast={updateForecast} productMappings={productMappings} ignoredMappings={ignoredMappings} addMapping={addMapping} removeMapping={removeMapping} ignoreMapping={ignoreMapping} salesConfig={salesConfig} considerStock={considerStock} setConsiderStock={setConsiderStock} masterProducts={masterProducts} />}
         {activeTab === 'orders' && <OrderManager cart={cart} setCart={setCart} />}
-        {activeTab === 'catalog' && <ProductCatalog suppliers={suppliers} cart={cart} setCart={setCart} forecast={forecast} />}
+        {activeTab === 'catalog' && (
+          <div className="flex flex-col h-full overflow-hidden gap-4">
+            {/* Tabs: Catálogo Geral + um card por fornecedor */}
+            <div className="flex items-center gap-2 flex-wrap shrink-0">
+              {/* Validade global */}
+              <div className="flex items-center gap-2 ml-auto">
+                <span className="text-slate-500 text-xs">Validade global:</span>
+                <input
+                  type="number"
+                  value={priceValidityConfig.globalDays}
+                  onChange={e => setPriceValidityConfig({ globalDays: Number(e.target.value) })}
+                  className="w-14 bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-white text-xs text-center focus:outline-none focus:border-amber-500"
+                  min={1} max={365}
+                />
+                <span className="text-slate-500 text-xs">dias</span>
+              </div>
+            </div>
+
+            {/* Sub-tabs */}
+            <div className="flex gap-2 overflow-x-auto pb-1 shrink-0">
+              <button
+                onClick={() => setCatalogTab('master')}
+                className={`px-4 py-2 rounded-xl text-sm font-medium whitespace-nowrap transition-all ${
+                  catalogTab === 'master'
+                    ? 'bg-amber-600 text-white'
+                    : 'bg-slate-900 border border-slate-700 text-slate-400 hover:text-white'
+                }`}
+              >
+                📦 Catálogo Geral
+              </button>
+              {suppliers.filter(s => s.isEnabled).map(s => (
+                <button
+                  key={s.id}
+                  onClick={() => setCatalogTab(s.id)}
+                  className={`px-4 py-2 rounded-xl text-sm font-medium whitespace-nowrap transition-all ${
+                    catalogTab === s.id
+                      ? 'bg-amber-600 text-white'
+                      : 'bg-slate-900 border border-slate-700 text-slate-400 hover:text-white'
+                  }`}
+                >
+                  {s.name}
+                  {supplierCatalogs[s.id] && (
+                    <span className="ml-2 text-[10px] opacity-70">
+                      {supplierCatalogs[s.id].products.length}
+                    </span>
+                  )}
+                </button>
+              ))}
+            </div>
+
+            {/* Conteúdo */}
+            <div className="flex-1 overflow-y-auto">
+              {catalogTab === 'master' ? (
+                <ProductCatalog suppliers={suppliers} cart={cart} setCart={setCart} forecast={forecast} />
+              ) : (
+                supplierCatalogs[catalogTab] ? (
+                  <SupplierCatalogView
+                    catalog={supplierCatalogs[catalogTab]}
+                    masterProducts={masterProducts}
+                    uid={user!.uid}
+                    globalValidityDays={priceValidityConfig.globalDays}
+                    onCatalogUpdate={updated =>
+                      setSupplierCatalogs(prev => ({ ...prev, [updated.supplierId]: updated }))
+                    }
+                  />
+                ) : (
+                  <div className="text-center py-20 text-slate-600">
+                    <span className="text-4xl block mb-3">📋</span>
+                    <p className="text-sm">Catálogo vazio</p>
+                    <p className="text-xs mt-1 text-slate-700">
+                      Processe uma cotação deste fornecedor para popular o catálogo
+                    </p>
+                  </div>
+                )
+              )}
+            </div>
+          </div>
+        )}
         {activeTab === 'database' && <ProductDatabase masterProducts={masterProducts} setMasterProducts={setMasterProducts} sheetUrl={dbSheetUrl} setSheetUrl={setDbSheetUrl} />}
         {activeTab === 'flyer' && <OfferFlyer products={masterProducts} />}
-        {activeTab === 'suppliers' && <SupplierManager suppliers={suppliers} setSuppliers={setSuppliers} globalPackRules={globalPackRules} setGlobalPackRules={setGlobalPackRules} globalNamingRules={globalNamingRules} setGlobalNamingRules={setGlobalNamingRules} />}
+        {activeTab === 'suppliers' && <SupplierManager suppliers={suppliers} setSuppliers={setSuppliers} globalPackRules={globalPackRules} setGlobalPackRules={setGlobalPackRules} globalNamingRules={globalNamingRules} setGlobalNamingRules={setGlobalNamingRules} onBatchCompleted={handleBatchCompleted} />}
       </main>
 
       {/* Assistente flutuante */}

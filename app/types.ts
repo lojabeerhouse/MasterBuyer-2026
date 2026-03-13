@@ -207,3 +207,56 @@ export interface ProductPriceHistory {
   masterSku?: string;     // linked SKU if mapped
   records: PriceRecord[];
 }
+// ─── SUPPLIER CATALOG ────────────────────────────────────────────────────────
+
+/** Modo de validade de preços por fornecedor */
+export type PriceValidityMode = 'global' | 'frozen' | 'custom';
+
+/** Uma entrada de preço no histórico do produto do fornecedor */
+export interface SupplierPriceEntry {
+  date: number;           // timestamp da cotação
+  batchId: string;        // referência ao QuoteBatch
+  unitPrice: number;      // preço por unidade
+  packPrice: number;      // preço da embalagem
+  packQuantity: number;   // unidades na embalagem
+}
+
+/** Produto no catálogo de um fornecedor */
+export interface SupplierCatalogProduct {
+  id: string;                         // chave normalizada do nome ou SKU
+  supplierSku?: string;               // SKU do fornecedor (se vier na cotação)
+  ean?: string;                       // EAN/GTIN se disponível
+  name: string;                       // nome como veio na última cotação
+  nameNormalized: string;             // nome normalizado para matching
+  packQuantity: number;               // último lote conhecido
+  priceHistory: SupplierPriceEntry[]; // histórico completo de preços
+  lastSeenDate: number;               // última vez que apareceu numa cotação
+  lastUnitPrice: number;              // último preço unitário
+  lastPackPrice: number;              // último preço de embalagem
+
+  // Link com MEU catálogo
+  masterSku?: string;           // SKU do meu produto linkado
+  masterProductName?: string;   // nome do meu produto (cache para display)
+  masterTags?: string;          // tags herdadas do meu produto
+  masterCategory?: string;      // categoria herdada do meu produto
+  linkConfirmed?: boolean;      // true = usuário confirmou o link manualmente
+  linkSuggestion?: string;      // SKU sugerido automaticamente (aguardando confirmação)
+  linkSuggestionScore?: number; // % de similaridade da sugestão
+}
+
+/** Catálogo completo de um fornecedor */
+export interface SupplierCatalog {
+  supplierId: string;
+  supplierName: string;
+  products: SupplierCatalogProduct[];
+
+  // Configuração de validade de preços deste fornecedor
+  priceValidityMode: PriceValidityMode;
+  priceValidityDays?: number; // só usado quando mode = 'custom'
+  updatedAt: number;
+}
+
+/** Configuração global de validade de preços */
+export interface PriceValidityConfig {
+  globalDays: number; // padrão: 7 dias
+}
