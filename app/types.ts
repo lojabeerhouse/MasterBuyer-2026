@@ -260,3 +260,18 @@ export interface SupplierCatalog {
 export interface PriceValidityConfig {
   globalDays: number; // padrão: 7 dias
 }
+/** Produto oculto globalmente (catálogo + comparador) */
+export interface HiddenProduct {
+  id: string;               // normalizedKey do produto do fornecedor
+  supplierId: string;
+  supplierName: string;
+  productName: string;
+  masterSku?: string;       // se estava linkado ao meu catálogo
+  hiddenAt: number;         // timestamp
+}
+
+/** Configurações globais do app */
+export interface AppSettings {
+  showInactiveProducts: boolean;   // exibir produtos ocultos
+  priceValidityDays: number;       // validade global de preços (dias)
+}

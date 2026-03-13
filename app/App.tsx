@@ -13,6 +13,7 @@ import ProductDatabase from './components/ProductDatabase';
 import OfferFlyer from './components/OfferFlyer';
 import SupplierManager from './components/SupplierManager';
 import SupplierCatalogView from './components/SupplierCatalogView';
+import AppSettingsPanel from './components/AppSettings';
 import {
   Supplier,
   ForecastItem,
@@ -26,8 +27,10 @@ import {
   AppNotification,
   SupplierCatalog,
   PriceValidityConfig,
+  HiddenProduct,
+  AppSettings,
 } from './types';
-import { ShoppingCart, BarChart3, Users, FileText, Database, Tag, Scale, LogIn, LogOut } from 'lucide-react';
+import { ShoppingCart, BarChart3, Users, FileText, Database, Tag, Scale, LogIn, LogOut, Settings } from 'lucide-react';
 import BuyingAssistant from './components/BuyingAssistant';
 
 const defaultGlobalPackRules: PackRule[] = [
@@ -129,7 +132,7 @@ const App: React.FC = () => {
   const [isLoaded, setIsLoaded] = useState(false); // flag: só salva após carregar
 
   // --- APP STATE ---
-  const [activeTab, setActiveTab] = useState<'sales' | 'comparator' | 'orders' | 'catalog' | 'suppliers' | 'database' | 'flyer'>('suppliers');
+  const [activeTab, setActiveTab] = useState<'sales' | 'comparator' | 'orders' | 'catalog' | 'suppliers' | 'database' | 'flyer' | 'settings'>('suppliers');
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [salesData, setSalesData] = useState<SalesRecord[]>([]);
   const [salesConfig, setSalesConfig] = useState({ historyDays: 60, inflation: 10, forecastDays: 7 });
@@ -153,6 +156,10 @@ const App: React.FC = () => {
   const [priceValidityConfig, setPriceValidityConfig] = useState<PriceValidityConfig>({ globalDays: 7 });
   // aba do catálogo atualmente selecionada (supplierId ou 'master')
   const [catalogTab, setCatalogTab] = useState<string>('master');
+
+  // Produtos ocultos + configurações gerais
+  const [hiddenProducts, setHiddenProducts] = useState<HiddenProduct[]>([]);
+  const [appSettings, setAppSettings] = useState<AppSettings>({ showInactiveProducts: false, priceValidityDays: 7 });
 
   // --- AUTH LISTENER ---
   useEffect(() => {
@@ -227,6 +234,13 @@ const App: React.FC = () => {
     setSupplierCatalogs(catalogsMap);
     setPriceValidityConfig(savedValidityConfig);
 
+    const [savedHidden, savedAppSettings] = await Promise.all([
+      loadUserData<HiddenProduct[]>(uid, 'hiddenProducts', []),
+      loadUserData<AppSettings>(uid, 'appSettings', { showInactiveProducts: false, priceValidityDays: 7 }),
+    ]);
+    setHiddenProducts(savedHidden);
+    setAppSettings(savedAppSettings);
+
     setDataLoading(false);
     setIsLoaded(true); // libera os useEffects de salvamento
   };
@@ -248,6 +262,8 @@ const App: React.FC = () => {
   useEffect(() => { if (uid && isLoaded) saveUserData(uid, 'globalPackRules', globalPackRules); }, [globalPackRules, uid, isLoaded]);
   useEffect(() => { if (uid && isLoaded) saveUserData(uid, 'globalNamingRules', globalNamingRules); }, [globalNamingRules, uid, isLoaded]);
   useEffect(() => { if (uid && isLoaded) saveUserData(uid, 'priceValidityConfig', priceValidityConfig); }, [priceValidityConfig, uid, isLoaded]);
+  useEffect(() => { if (uid && isLoaded) saveUserData(uid, 'hiddenProducts', hiddenProducts); }, [hiddenProducts, uid, isLoaded]);
+  useEffect(() => { if (uid && isLoaded) saveUserData(uid, 'appSettings', appSettings); }, [appSettings, uid, isLoaded]);
   useEffect(() => { if (uid) saveNotifications(uid, notifications); }, [notifications, uid]);
 
   // --- NOTIFICATION HANDLERS ---
@@ -301,7 +317,28 @@ const App: React.FC = () => {
     }
   }, [user?.uid, suppliers, productMappings, notifications, masterProducts]);
 
-  // --- LOGIN / LOGOUT ---
+  // --- HIDDEN PRODUCTS ---
+  const handleHideProduct = useCallback((product: import('./types').SupplierCatalogProduct, supplierId: string, supplierName: string) => {
+    setHiddenProducts(prev => {
+      if (prev.some(h => h.id === product.id)) return prev;
+      return [...prev, {
+        id: product.id,
+        supplierId,
+        supplierName,
+        productName: product.name,
+        masterSku: product.masterSku,
+        hiddenAt: Date.now(),
+      }];
+    });
+  }, []);
+
+  const handleUnhideProduct = useCallback((productId: string) => {
+    setHiddenProducts(prev => prev.filter(h => h.id !== productId));
+  }, []);
+
+  const handleClearAllHidden = useCallback(() => {
+    setHiddenProducts([]);
+  }, []);
   const handleLogin = async () => {
     setLoginLoading(true);
     try {
@@ -386,6 +423,7 @@ const App: React.FC = () => {
 
           <div className="flex items-center gap-2">
             <button onClick={() => setActiveTab('flyer')} className={`px-4 py-1.5 rounded-md text-xs font-bold flex items-center gap-2 transition-all whitespace-nowrap border ${activeTab === 'flyer' ? 'bg-red-600 text-white border-red-500 shadow' : 'bg-slate-900 text-red-500 border-red-900/50 hover:bg-red-900/20'}`}><Tag className="w-3.5 h-3.5" /> Ofertas</button>
+            <button onClick={() => setActiveTab('settings')} className={`p-1.5 rounded-md transition-all ${activeTab === 'settings' ? 'bg-slate-700 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`} title="Configurações"><Settings className="w-4 h-4" /></button>
             
             {/* Notificações + usuário */}
             <div className="flex items-center gap-2 ml-2 pl-2 border-l border-slate-700">
@@ -411,82 +449,47 @@ const App: React.FC = () => {
 
       <main className="flex-1 overflow-hidden p-4 md:p-6 max-w-7xl mx-auto w-full">
         {activeTab === 'sales' && <SalesAnalyzer setForecast={setForecast} salesData={salesData} setSalesData={setSalesData} csvContent={salesCsvContent} setCsvContent={setSalesCsvContent} salesConfig={salesConfig} setSalesConfig={setSalesConfig} salesUrl={salesUrl} setSalesUrl={setSalesUrl} />}
-        {activeTab === 'comparator' && <QuoteComparator suppliers={suppliers} forecast={forecast} cart={cart} setCart={setCart} updateForecast={updateForecast} productMappings={productMappings} ignoredMappings={ignoredMappings} addMapping={addMapping} removeMapping={removeMapping} ignoreMapping={ignoreMapping} salesConfig={salesConfig} considerStock={considerStock} setConsiderStock={setConsiderStock} masterProducts={masterProducts} />}
+        {activeTab === 'comparator' && <QuoteComparator suppliers={suppliers} forecast={forecast} cart={cart} setCart={setCart} updateForecast={updateForecast} productMappings={productMappings} ignoredMappings={ignoredMappings} addMapping={addMapping} removeMapping={removeMapping} ignoreMapping={ignoreMapping} salesConfig={salesConfig} considerStock={considerStock} setConsiderStock={setConsiderStock} masterProducts={masterProducts} hiddenProductIds={new Set(hiddenProducts.map(h => h.id))} showInactive={appSettings.showInactiveProducts} />}
         {activeTab === 'orders' && <OrderManager cart={cart} setCart={setCart} />}
         {activeTab === 'catalog' && (
-          <div className="flex flex-col h-full overflow-hidden gap-4">
-            {/* Tabs: Catálogo Geral + um card por fornecedor */}
-            <div className="flex items-center gap-2 flex-wrap shrink-0">
-              {/* Validade global */}
-              <div className="flex items-center gap-2 ml-auto">
-                <span className="text-slate-500 text-xs">Validade global:</span>
-                <input
-                  type="number"
-                  value={priceValidityConfig.globalDays}
-                  onChange={e => setPriceValidityConfig({ globalDays: Number(e.target.value) })}
-                  className="w-14 bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-white text-xs text-center focus:outline-none focus:border-amber-500"
-                  min={1} max={365}
-                />
-                <span className="text-slate-500 text-xs">dias</span>
-              </div>
-            </div>
-
-            {/* Sub-tabs */}
-            <div className="flex gap-2 overflow-x-auto pb-1 shrink-0">
+          <div className="flex flex-col h-full overflow-hidden gap-3">
+            {/* Sub-tabs: Geral | Fornecedores (sidebar) */}
+            <div className="flex gap-2 shrink-0">
               <button
                 onClick={() => setCatalogTab('master')}
                 className={`px-4 py-2 rounded-xl text-sm font-medium whitespace-nowrap transition-all ${
-                  catalogTab === 'master'
-                    ? 'bg-amber-600 text-white'
-                    : 'bg-slate-900 border border-slate-700 text-slate-400 hover:text-white'
+                  catalogTab === 'master' ? 'bg-amber-600 text-white' : 'bg-slate-900 border border-slate-700 text-slate-400 hover:text-white'
                 }`}
               >
                 📦 Catálogo Geral
               </button>
-              {suppliers.filter(s => s.isEnabled).map(s => (
-                <button
-                  key={s.id}
-                  onClick={() => setCatalogTab(s.id)}
-                  className={`px-4 py-2 rounded-xl text-sm font-medium whitespace-nowrap transition-all ${
-                    catalogTab === s.id
-                      ? 'bg-amber-600 text-white'
-                      : 'bg-slate-900 border border-slate-700 text-slate-400 hover:text-white'
-                  }`}
-                >
-                  {s.name}
-                  {supplierCatalogs[s.id] && (
-                    <span className="ml-2 text-[10px] opacity-70">
-                      {supplierCatalogs[s.id].products.length}
-                    </span>
-                  )}
-                </button>
-              ))}
+              <button
+                onClick={() => setCatalogTab('suppliers')}
+                className={`px-4 py-2 rounded-xl text-sm font-medium whitespace-nowrap transition-all ${
+                  catalogTab === 'suppliers' ? 'bg-amber-600 text-white' : 'bg-slate-900 border border-slate-700 text-slate-400 hover:text-white'
+                }`}
+              >
+                🏪 Por Fornecedor
+              </button>
             </div>
-
-            {/* Conteúdo */}
-            <div className="flex-1 overflow-y-auto">
+            <div className="flex-1 overflow-hidden min-h-0">
               {catalogTab === 'master' ? (
-                <ProductCatalog suppliers={suppliers} cart={cart} setCart={setCart} forecast={forecast} />
+                <div className="h-full overflow-y-auto">
+                  <ProductCatalog suppliers={suppliers} cart={cart} setCart={setCart} forecast={forecast} />
+                </div>
               ) : (
-                supplierCatalogs[catalogTab] ? (
-                  <SupplierCatalogView
-                    catalog={supplierCatalogs[catalogTab]}
-                    masterProducts={masterProducts}
-                    uid={user!.uid}
-                    globalValidityDays={priceValidityConfig.globalDays}
-                    onCatalogUpdate={updated =>
-                      setSupplierCatalogs(prev => ({ ...prev, [updated.supplierId]: updated }))
-                    }
-                  />
-                ) : (
-                  <div className="text-center py-20 text-slate-600">
-                    <span className="text-4xl block mb-3">📋</span>
-                    <p className="text-sm">Catálogo vazio</p>
-                    <p className="text-xs mt-1 text-slate-700">
-                      Processe uma cotação deste fornecedor para popular o catálogo
-                    </p>
-                  </div>
-                )
+                <SupplierCatalogView
+                  suppliers={suppliers}
+                  catalogs={supplierCatalogs}
+                  masterProducts={masterProducts}
+                  uid={user!.uid}
+                  globalValidityDays={appSettings.priceValidityDays}
+                  showInactive={appSettings.showInactiveProducts}
+                  hiddenProducts={hiddenProducts}
+                  onCatalogUpdate={updated => setSupplierCatalogs(prev => ({ ...prev, [updated.supplierId]: updated }))}
+                  onHideProduct={handleHideProduct}
+                  onUnhideProduct={handleUnhideProduct}
+                />
               )}
             </div>
           </div>
@@ -494,6 +497,23 @@ const App: React.FC = () => {
         {activeTab === 'database' && <ProductDatabase masterProducts={masterProducts} setMasterProducts={setMasterProducts} sheetUrl={dbSheetUrl} setSheetUrl={setDbSheetUrl} />}
         {activeTab === 'flyer' && <OfferFlyer products={masterProducts} />}
         {activeTab === 'suppliers' && <SupplierManager suppliers={suppliers} setSuppliers={setSuppliers} globalPackRules={globalPackRules} setGlobalPackRules={setGlobalPackRules} globalNamingRules={globalNamingRules} setGlobalNamingRules={setGlobalNamingRules} onBatchCompleted={handleBatchCompleted} />}
+        {activeTab === 'settings' && (
+          <div className="h-full overflow-y-auto">
+            <div className="flex items-center gap-3 mb-5">
+              <Settings className="w-5 h-5 text-amber-400" />
+              <h2 className="text-white font-bold text-lg">Configurações</h2>
+            </div>
+            <AppSettingsPanel
+              settings={appSettings}
+              onSettingsChange={s => { setAppSettings(s); setPriceValidityConfig({ globalDays: s.priceValidityDays }); }}
+              globalPackRules={globalPackRules}
+              onPackRulesChange={setGlobalPackRules}
+              hiddenProducts={hiddenProducts}
+              onUnhide={handleUnhideProduct}
+              onClearAllHidden={handleClearAllHidden}
+            />
+          </div>
+        )}
       </main>
 
       {/* Assistente flutuante */}
