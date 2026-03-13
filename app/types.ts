@@ -20,12 +20,19 @@ export interface QuoteBatch {
   status: 'pending' | 'analyzing' | 'completed' | 'error';
   items: ProductQuote[];
   errorMessage?: string;
+  savedAt?: number;       // timestamp de quando o usuário clicou em "Salvar cotação"
+  isSaved?: boolean;      // true = cotação foi confirmada/salva manualmente
+  detectedDate?: number;  // data extraída do arquivo (XML dhEmi, PDF Gemini)
 }
 
 export interface PackRule {
   id: string;
-  term: string; // "Longneck", "Lata", "269ml"
-  quantity: number; // 24, 12, 15
+  term: string;        // "Longneck", "Lata", "269ml"
+  quantity: number;    // 24, 12, 15
+  supplierId?: string; // se preenchido = exceção para fornecedor específico
+  supplierName?: string; // cache do nome para exibição
+  learnedAt?: number;  // timestamp de quando foi aprendido automaticamente
+  isLearned?: boolean; // true = criado por aprendizado automático
 }
 
 export interface NamingRule {
@@ -35,14 +42,55 @@ export interface NamingRule {
   suffix?: string; // Suffix to force (e.g. "LATA")
 }
 
-export interface Supplier {
+export interface BusinessDayHours {
+  open: boolean;           // true = aberto neste dia
+  hours: string;           // ex: "08:00-12:00, 14:00-18:00" (texto livre, até 4 horários)
+}
+
+export interface BusinessHours {
+  sun: BusinessDayHours;
+  mon: BusinessDayHours;
+  tue: BusinessDayHours;
+  wed: BusinessDayHours;
+  thu: BusinessDayHours;
+  fri: BusinessDayHours;
+  sat: BusinessDayHours;
+}
+
+
   id: string;
   name: string;
   isEnabled: boolean;
   location?: string;
   quotes: QuoteBatch[];
-  blacklist?: string[]; // Names of products to automatically ignore/delete
-  packRules?: PackRule[]; // Rules to auto-correct pack quantities
+  blacklist?: string[];
+  packRules?: PackRule[];
+
+  // Contato
+  whatsapp?: string;        // "44999998888" — sem +55, só DDD+número
+
+  // Endereço (string única para abrir no Maps)
+  address?: string;         // "Rua das Flores, 123, Centro, Maringá-PR"
+
+  // Logística
+  deliveryType?: 'pickup' | 'delivery' | 'both';
+  orderFrequency?: 'daily' | 'weekly' | 'biweekly' | 'monthly' | 'custom';
+  orderFrequencyDays?: number;   // para custom: a cada X dias
+  orderWeekDay?: number;         // 0=dom … 6=sab
+  orderDays?: string;            // descrição livre: "toda quarta-feira"
+  deliveryDays?: string;         // descrição livre: "toda quinta-feira" / "dia seguinte"
+  deliveryUncertain?: boolean;   // true = sem garantia de data (ex: Asteca)
+  deliveryMinDays?: number;      // mínimo de dias para entrega incerta
+  deliveryMaxDays?: number;      // máximo de dias para entrega incerta
+
+  // Tempos (para cronograma de rotas)
+  pickupReadyMinutes?: number;   // tempo médio até o pedido ficar pronto para retirada
+  pickupStayMinutes?: number;    // tempo médio de permanência na retirada
+  expectedDeliveryTime?: string; // horário esperado de entrega (ex: "10:30")
+
+  // Comunicação
+  orderTemplate?: string;        // template da mensagem. Variáveis: [DATA], [HORA], [ITENS], [TOTAL], [TIPO], [PREVISAO]
+  openingHours?: BusinessHours;  // horários de funcionamento por dia da semana
 }
 
 export interface SalesRecord {
@@ -98,11 +146,43 @@ export interface CartItem {
   totalCost: number;
 }
 
+export type PurchaseOrderStatus =
+  | 'draft'           // em aberto / rascunho
+  | 'sent'            // pedido feito / enviado
+  | 'confirmed'       // confirmado pelo fornecedor
+  | 'in_transit'      // em rota de entrega
+  | 'awaiting'        // aguardando retirada ou entrega
+  | 'received'        // recebido e conferido ✅
+  | 'received_unchecked' // recebido sem conferência por unidade ⚠️
+  | 'entered_system'  // copiado no sistema / entrada por NF 📋
+  | 'fully_checked'   // conferido entrada ao sistema ✅✅
+  | 'cancelled';      // cancelado
+
+export interface PurchaseOrderTransition {
+  from: PurchaseOrderStatus;
+  to: PurchaseOrderStatus;
+  timestamp: number;  // epoch ms
+  note?: string;      // motivo/observação da transição
+}
+
 export interface PurchaseOrder {
+  id: string;
   supplierId: string;
   supplierName: string;
   items: CartItem[];
   totalValue: number;
+  status: PurchaseOrderStatus;
+  createdAt: number;
+  updatedAt: number;
+  orderDate?: number;       // data/hora do pedido (editável)
+  expectedDate?: number;    // data prevista de entrega/retirada (editável no pedido)
+  expectedTime?: string;    // horário previsto ex: "10:30"
+  pickupReadyAt?: number;   // horário calculado para ir buscar
+  deliveryOrPickup?: 'delivery' | 'pickup';
+  transitions: PurchaseOrderTransition[];
+  originalSnapshot?: CartItem[]; // snapshot só quando há diferença de valor na conferência
+  cancelReason?: string;
+  cancelNote?: string;
 }
 
 export interface MasterProduct {

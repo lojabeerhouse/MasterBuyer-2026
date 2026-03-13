@@ -8,6 +8,7 @@ import NotificationCenter from './components/NotificationCenter';
 import SalesAnalyzer from './components/SalesAnalyzer';
 import QuoteComparator from './components/QuoteComparator';
 import OrderManager from './components/OrderManager';
+import Schedule from './components/Schedule';
 import ProductCatalog from './components/ProductCatalog';
 import ProductDatabase from './components/ProductDatabase';
 import OfferFlyer from './components/OfferFlyer';
@@ -21,7 +22,6 @@ import {
   ProductMapping,
   SalesRecord,
   MasterProduct,
-  NamingRule,
   PackRule,
   QuoteBatch,
   AppNotification,
@@ -29,8 +29,9 @@ import {
   PriceValidityConfig,
   HiddenProduct,
   AppSettings,
+  PurchaseOrder,
 } from './types';
-import { ShoppingCart, BarChart3, Users, FileText, Database, Tag, Scale, LogIn, LogOut, Settings } from 'lucide-react';
+import { BarChart3, Users, FileText, Database, Tag, Scale, LogOut, Settings, CalendarDays, ClipboardList } from 'lucide-react';
 import BuyingAssistant from './components/BuyingAssistant';
 
 const defaultGlobalPackRules: PackRule[] = [
@@ -50,32 +51,6 @@ const defaultGlobalPackRules: PackRule[] = [
   { id: 'def-14', term: '500ml', quantity: 12 },
   { id: 'def-15', term: 'Askov', quantity: 6 },
   { id: 'def-16', term: 'Ice', quantity: 24 },
-];
-
-const defaultNamingRules: NamingRule[] = [
-  { id: 'nr-1', terms: ['CERVEJA', '473ML'], category: 'CERVEJA', suffix: 'LATA' },
-  { id: 'nr-2', terms: ['CERVEJA', '350ML'], category: 'CERVEJA', suffix: 'LATA' },
-  { id: 'nr-3', terms: ['CERVEJA', '269ML'], category: 'CERVEJA', suffix: 'LATA' },
-  { id: 'nr-4', terms: ['CERVEJA', '250ML'], category: 'CERVEJA', suffix: 'LONG NECK' },
-  { id: 'nr-5', terms: ['CERVEJA', '355ML'], category: 'CERVEJA', suffix: 'LONG NECK' },
-  { id: 'nr-6', terms: ['CERVEJA', '330ML'], category: 'CERVEJA', suffix: 'LONG NECK' },
-  { id: 'nr-7', terms: ['CERVEJA', '275ML'], category: 'CERVEJA', suffix: 'LONG NECK' },
-  { id: 'nr-8', terms: ['CERVEJA', '300ML'], category: 'CERVEJA', suffix: 'LITRINHO' },
-  { id: 'nr-chopp-1', terms: ['CHOPP', '473ML'], category: 'CHOPP', suffix: 'LATA' },
-  { id: 'nr-9', terms: ['REDBULL'], category: 'ENERGÉTICO', suffix: 'LATA' },
-  { id: 'nr-10', terms: ['MONSTER'], category: 'ENERGÉTICO', suffix: 'LATA' },
-  { id: 'nr-19', terms: ['SKOL', 'BEATS', '269ML'], category: 'BEB DRINK', suffix: 'LATA' },
-  { id: 'nr-11', terms: ['REFRIGERANTE', '2L'], category: 'REFRIGERANTE', suffix: 'PET' },
-  { id: 'nr-12', terms: ['REFRIGERANTE', '1.5L'], category: 'REFRIGERANTE', suffix: 'PET' },
-  { id: 'nr-12b', terms: ['REFRIGERANTE', '1,5L'], category: 'REFRIGERANTE', suffix: 'PET' },
-  { id: 'nr-13', terms: ['REFRIGERANTE', '3L'], category: 'REFRIGERANTE', suffix: 'PET' },
-  { id: 'nr-14', terms: ['AGUA', '500ML'], category: 'ÁGUA', suffix: 'PET' },
-  { id: 'nr-15', terms: ['ÁGUA', '500ML'], category: 'ÁGUA', suffix: 'PET' },
-  { id: 'nr-16', terms: ['AGUA', '1.5L'], category: 'ÁGUA', suffix: 'PET' },
-  { id: 'nr-17', terms: ['ÁGUA', '1,5L'], category: 'ÁGUA', suffix: 'PET' },
-  { id: 'nr-20', terms: ['CHICLETE'], category: 'GOMA' },
-  { id: 'nr-21', terms: ['CHICLE'], category: 'GOMA' },
-  { id: 'nr-22', terms: ['HALLS'], category: 'BALA' },
 ];
 
 // Tela de Login
@@ -132,7 +107,7 @@ const App: React.FC = () => {
   const [isLoaded, setIsLoaded] = useState(false); // flag: só salva após carregar
 
   // --- APP STATE ---
-  const [activeTab, setActiveTab] = useState<'sales' | 'comparator' | 'orders' | 'catalog' | 'suppliers' | 'database' | 'flyer' | 'settings'>('suppliers');
+  const [activeTab, setActiveTab] = useState<'sales' | 'comparator' | 'purchase_orders' | 'schedule' | 'catalog' | 'suppliers' | 'database' | 'settings'>('suppliers');
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [salesData, setSalesData] = useState<SalesRecord[]>([]);
   const [salesConfig, setSalesConfig] = useState({ historyDays: 60, inflation: 10, forecastDays: 7 });
@@ -146,7 +121,7 @@ const App: React.FC = () => {
   const [masterProducts, setMasterProducts] = useState<MasterProduct[]>([]);
   const [dbSheetUrl, setDbSheetUrl] = useState<string>("");
   const [globalPackRules, setGlobalPackRules] = useState<PackRule[]>(defaultGlobalPackRules);
-  const [globalNamingRules, setGlobalNamingRules] = useState<NamingRule[]>(defaultNamingRules);
+  const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([]);
 
   // --- NOTIFICATIONS ---
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
@@ -189,7 +164,6 @@ const App: React.FC = () => {
       savedSalesUrl,
       savedConsiderStock,
       savedPackRules,
-      savedNamingRules,
     ] = await Promise.all([
       loadUserData<Supplier[]>(uid, 'suppliers', []),
       loadUserData<SalesRecord[]>(uid, 'salesData', []),
@@ -203,7 +177,6 @@ const App: React.FC = () => {
       loadUserData<string>(uid, 'salesUrl', ""),
       loadUserData<boolean>(uid, 'considerStock', true),
       loadUserData<PackRule[]>(uid, 'globalPackRules', defaultGlobalPackRules),
-      loadUserData<NamingRule[]>(uid, 'globalNamingRules', defaultNamingRules),
     ]);
 
     setSuppliers(savedSuppliers);
@@ -218,7 +191,6 @@ const App: React.FC = () => {
     setSalesUrl(savedSalesUrl);
     setConsiderStock(savedConsiderStock);
     setGlobalPackRules(savedPackRules);
-    setGlobalNamingRules(savedNamingRules);
 
     // Load notifications
     const savedNotifications = await loadNotifications(uid);
@@ -234,12 +206,14 @@ const App: React.FC = () => {
     setSupplierCatalogs(catalogsMap);
     setPriceValidityConfig(savedValidityConfig);
 
-    const [savedHidden, savedAppSettings] = await Promise.all([
+    const [savedHidden, savedAppSettings, savedPurchaseOrders] = await Promise.all([
       loadUserData<HiddenProduct[]>(uid, 'hiddenProducts', []),
       loadUserData<AppSettings>(uid, 'appSettings', { showInactiveProducts: false, priceValidityDays: 7 }),
+      loadUserData<PurchaseOrder[]>(uid, 'purchaseOrders', []),
     ]);
     setHiddenProducts(savedHidden);
     setAppSettings(savedAppSettings);
+    setPurchaseOrders(savedPurchaseOrders);
 
     setDataLoading(false);
     setIsLoaded(true); // libera os useEffects de salvamento
@@ -260,7 +234,7 @@ const App: React.FC = () => {
   useEffect(() => { if (uid && isLoaded) saveUserData(uid, 'salesUrl', salesUrl); }, [salesUrl, uid, isLoaded]);
   useEffect(() => { if (uid && isLoaded) saveUserData(uid, 'considerStock', considerStock); }, [considerStock, uid, isLoaded]);
   useEffect(() => { if (uid && isLoaded) saveUserData(uid, 'globalPackRules', globalPackRules); }, [globalPackRules, uid, isLoaded]);
-  useEffect(() => { if (uid && isLoaded) saveUserData(uid, 'globalNamingRules', globalNamingRules); }, [globalNamingRules, uid, isLoaded]);
+  useEffect(() => { if (uid && isLoaded) saveUserData(uid, 'purchaseOrders', purchaseOrders); }, [purchaseOrders, uid, isLoaded]);
   useEffect(() => { if (uid && isLoaded) saveUserData(uid, 'priceValidityConfig', priceValidityConfig); }, [priceValidityConfig, uid, isLoaded]);
   useEffect(() => { if (uid && isLoaded) saveUserData(uid, 'hiddenProducts', hiddenProducts); }, [hiddenProducts, uid, isLoaded]);
   useEffect(() => { if (uid && isLoaded) saveUserData(uid, 'appSettings', appSettings); }, [appSettings, uid, isLoaded]);
@@ -417,12 +391,17 @@ const App: React.FC = () => {
               <button onClick={() => setActiveTab('sales')} className={`px-3 py-1.5 rounded-md text-xs font-medium flex items-center gap-2 transition-all whitespace-nowrap ${activeTab === 'sales' ? 'bg-slate-700 text-white shadow' : 'text-slate-400 hover:text-white'}`}><BarChart3 className="w-3.5 h-3.5" /> Vendas</button>
               <button onClick={() => setActiveTab('catalog')} className={`px-3 py-1.5 rounded-md text-xs font-medium flex items-center gap-2 transition-all whitespace-nowrap ${activeTab === 'catalog' ? 'bg-slate-700 text-white shadow' : 'text-slate-400 hover:text-white'}`}><FileText className="w-3.5 h-3.5" /> Catálogo</button>
               <button onClick={() => setActiveTab('comparator')} className={`px-3 py-1.5 rounded-md text-xs font-medium flex items-center gap-2 transition-all whitespace-nowrap ${activeTab === 'comparator' ? 'bg-slate-700 text-white shadow' : 'text-slate-400 hover:text-white'}`}><Scale className="w-3.5 h-3.5" /> Comparador</button>
-              <button onClick={() => setActiveTab('orders')} className={`px-3 py-1.5 rounded-md text-xs font-medium flex items-center gap-2 transition-all whitespace-nowrap ${activeTab === 'orders' ? 'bg-slate-700 text-white shadow' : 'text-slate-400 hover:text-white'}`}><ShoppingCart className="w-3.5 h-3.5" /> Pedidos {cart.length > 0 && <span className="ml-1 bg-amber-600 px-1.5 rounded-full text-[10px] text-white">{cart.length}</span>}</button>
+              <button onClick={() => setActiveTab('purchase_orders')} className={`px-3 py-1.5 rounded-md text-xs font-medium flex items-center gap-2 transition-all whitespace-nowrap ${activeTab === 'purchase_orders' ? 'bg-slate-700 text-white shadow' : 'text-slate-400 hover:text-white'}`}>
+                <ClipboardList className="w-3.5 h-3.5" /> Pedidos de Compra
+                {purchaseOrders.filter(o => ['draft','sent','confirmed','in_transit','awaiting'].includes(o.status)).length > 0 && (
+                  <span className="ml-1 bg-amber-600 px-1.5 rounded-full text-[10px] text-white">{purchaseOrders.filter(o => ['draft','sent','confirmed','in_transit','awaiting'].includes(o.status)).length}</span>
+                )}
+              </button>
+              <button onClick={() => setActiveTab('schedule')} className={`px-3 py-1.5 rounded-md text-xs font-medium flex items-center gap-2 transition-all whitespace-nowrap ${activeTab === 'schedule' ? 'bg-slate-700 text-white shadow' : 'text-slate-400 hover:text-white'}`}><CalendarDays className="w-3.5 h-3.5" /> Cronograma</button>
             </div>
           </div>
 
           <div className="flex items-center gap-2">
-            <button onClick={() => setActiveTab('flyer')} className={`px-4 py-1.5 rounded-md text-xs font-bold flex items-center gap-2 transition-all whitespace-nowrap border ${activeTab === 'flyer' ? 'bg-red-600 text-white border-red-500 shadow' : 'bg-slate-900 text-red-500 border-red-900/50 hover:bg-red-900/20'}`}><Tag className="w-3.5 h-3.5" /> Ofertas</button>
             <button onClick={() => setActiveTab('settings')} className={`p-1.5 rounded-md transition-all ${activeTab === 'settings' ? 'bg-slate-700 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`} title="Configurações"><Settings className="w-4 h-4" /></button>
             
             {/* Notificações + usuário */}
@@ -450,7 +429,8 @@ const App: React.FC = () => {
       <main className="flex-1 overflow-hidden p-4 md:p-6 max-w-7xl mx-auto w-full">
         {activeTab === 'sales' && <SalesAnalyzer setForecast={setForecast} salesData={salesData} setSalesData={setSalesData} csvContent={salesCsvContent} setCsvContent={setSalesCsvContent} salesConfig={salesConfig} setSalesConfig={setSalesConfig} salesUrl={salesUrl} setSalesUrl={setSalesUrl} />}
         {activeTab === 'comparator' && <QuoteComparator suppliers={suppliers} forecast={forecast} cart={cart} setCart={setCart} updateForecast={updateForecast} productMappings={productMappings} ignoredMappings={ignoredMappings} addMapping={addMapping} removeMapping={removeMapping} ignoreMapping={ignoreMapping} salesConfig={salesConfig} considerStock={considerStock} setConsiderStock={setConsiderStock} masterProducts={masterProducts} hiddenProductIds={new Set(hiddenProducts.map(h => h.id))} showInactive={appSettings.showInactiveProducts} />}
-        {activeTab === 'orders' && <OrderManager cart={cart} setCart={setCart} />}
+        {activeTab === 'purchase_orders' && <OrderManager suppliers={suppliers} purchaseOrders={purchaseOrders} setPurchaseOrders={setPurchaseOrders} cart={cart} setCart={setCart} />}
+        {activeTab === 'schedule' && <Schedule suppliers={suppliers} purchaseOrders={purchaseOrders} setPurchaseOrders={setPurchaseOrders} />}
         {activeTab === 'catalog' && (
           <div className="flex flex-col h-full overflow-hidden gap-3">
             {/* Sub-tabs: Geral | Fornecedores (sidebar) */}
@@ -495,23 +475,32 @@ const App: React.FC = () => {
           </div>
         )}
         {activeTab === 'database' && <ProductDatabase masterProducts={masterProducts} setMasterProducts={setMasterProducts} sheetUrl={dbSheetUrl} setSheetUrl={setDbSheetUrl} />}
-        {activeTab === 'flyer' && <OfferFlyer products={masterProducts} />}
-        {activeTab === 'suppliers' && <SupplierManager suppliers={suppliers} setSuppliers={setSuppliers} globalPackRules={globalPackRules} setGlobalPackRules={setGlobalPackRules} globalNamingRules={globalNamingRules} setGlobalNamingRules={setGlobalNamingRules} onBatchCompleted={handleBatchCompleted} />}
+        {activeTab === 'suppliers' && <SupplierManager suppliers={suppliers} setSuppliers={setSuppliers} globalPackRules={globalPackRules} setGlobalPackRules={setGlobalPackRules} onBatchCompleted={handleBatchCompleted} />}
         {activeTab === 'settings' && (
-          <div className="h-full overflow-y-auto">
-            <div className="flex items-center gap-3 mb-5">
-              <Settings className="w-5 h-5 text-amber-400" />
-              <h2 className="text-white font-bold text-lg">Configurações</h2>
+          <div className="h-full overflow-y-auto space-y-8">
+            {/* Seção Ofertas dentro de Configurações */}
+            <div>
+              <div className="flex items-center gap-3 mb-4">
+                <Tag className="w-4 h-4 text-red-500" />
+                <h3 className="text-white font-bold">Flyer de Ofertas</h3>
+              </div>
+              <OfferFlyer products={masterProducts} />
             </div>
-            <AppSettingsPanel
-              settings={appSettings}
-              onSettingsChange={s => { setAppSettings(s); setPriceValidityConfig({ globalDays: s.priceValidityDays }); }}
-              globalPackRules={globalPackRules}
-              onPackRulesChange={setGlobalPackRules}
-              hiddenProducts={hiddenProducts}
-              onUnhide={handleUnhideProduct}
-              onClearAllHidden={handleClearAllHidden}
-            />
+            <div className="border-t border-slate-800 pt-8">
+              <div className="flex items-center gap-3 mb-5">
+                <Settings className="w-5 h-5 text-amber-400" />
+                <h2 className="text-white font-bold text-lg">Configurações Gerais</h2>
+              </div>
+              <AppSettingsPanel
+                settings={appSettings}
+                onSettingsChange={s => { setAppSettings(s); setPriceValidityConfig({ globalDays: s.priceValidityDays }); }}
+                globalPackRules={globalPackRules}
+                onPackRulesChange={setGlobalPackRules}
+                hiddenProducts={hiddenProducts}
+                onUnhide={handleUnhideProduct}
+                onClearAllHidden={handleClearAllHidden}
+              />
+            </div>
           </div>
         )}
       </main>

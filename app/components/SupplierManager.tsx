@@ -1,54 +1,81 @@
-
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { Supplier, QuoteBatch, ProductQuote, PackRule, NamingRule } from '../types';
-import { Upload, Trash2, FileText, CheckCircle, AlertCircle, Loader2, Plus, Ban, Eye, Package, Pencil, Save, X, Maximize2, XCircle, RefreshCw, HardDrive, Download, Link as LinkIcon, Cloud, Coins, BoxSelect, Sparkles, ChevronLeft, ChevronRight, Wand2, ChevronDown, ChevronUp, AlertTriangle, Check, CheckSquare, Square, Undo2, Timer, Search, Files, FilePlus, Settings, Globe, Bot, Type, FileStack, Scissors } from 'lucide-react';
+import { Supplier, QuoteBatch, ProductQuote, PackRule, BusinessHours, BusinessDayHours } from '../types';
+import { Upload, Trash2, FileText, CheckCircle, AlertCircle, Loader2, Plus, Ban, Eye, Package, Pencil, Save, X, Maximize2, XCircle, RefreshCw, HardDrive, Download, Coins, BoxSelect, Sparkles, ChevronLeft, ChevronRight, Wand2, ChevronDown, ChevronUp, AlertTriangle, Check, CheckSquare, Square, Undo2, Timer, Search, Files, FilePlus, Settings, Bot, FileStack, Scissors, MessageCircle, MapPin, Truck, Calendar, Clock, Phone, ArrowUpDown, SortAsc, SortDesc } from 'lucide-react';
 import { parseQuoteContent, generateProductVariations, batchSmartIdentify, extractCatalogRawData, RawCatalogItem } from '../services/geminiService';
 import { parseQuoteLocal } from '../services/parseQuoteLocal';
+import { isNFeXml, parseNFeFile } from '../services/parseNFe';
+
+// ─── Constantes de padrão ─────────────────────────────────────────────────────
+
+const DEFAULT_ORDER_TEMPLATE = `Olá, tudo bem? Segue pedido [DATA] às [HORA]:
+
+[ITENS]
+
+Total: [TOTAL]
+Tipo: [TIPO]
+Previsão: [PREVISAO]`;
+
+const DEFAULT_BUSINESS_HOURS: BusinessHours = {
+  sun: { open: false, hours: '' },
+  mon: { open: true,  hours: '08:00-18:00' },
+  tue: { open: true,  hours: '08:00-18:00' },
+  wed: { open: true,  hours: '08:00-18:00' },
+  thu: { open: true,  hours: '08:00-18:00' },
+  fri: { open: true,  hours: '08:00-18:00' },
+  sat: { open: false, hours: '' },
+};
+
+const DAY_LABELS: { key: keyof BusinessHours; short: string }[] = [
+  { key: 'sun', short: 'Dom' },
+  { key: 'mon', short: 'Seg' },
+  { key: 'tue', short: 'Ter' },
+  { key: 'wed', short: 'Qua' },
+  { key: 'thu', short: 'Qui' },
+  { key: 'fri', short: 'Sex' },
+  { key: 'sat', short: 'Sáb' },
+];
 
 interface SupplierManagerProps {
   suppliers: Supplier[];
   setSuppliers: React.Dispatch<React.SetStateAction<Supplier[]>>;
   globalPackRules: PackRule[];
   setGlobalPackRules: React.Dispatch<React.SetStateAction<PackRule[]>>;
-  globalNamingRules: NamingRule[];
-  setGlobalNamingRules: React.Dispatch<React.SetStateAction<NamingRule[]>>;
   onBatchCompleted?: (batch: QuoteBatch, supplierId: string) => void;
 }
 
-const SupplierManager: React.FC<SupplierManagerProps> = ({ suppliers, setSuppliers, globalPackRules, setGlobalPackRules, globalNamingRules, setGlobalNamingRules, onBatchCompleted }) => {
+const SupplierManager: React.FC<SupplierManagerProps> = ({ suppliers, setSuppliers, globalPackRules, setGlobalPackRules, onBatchCompleted }) => {
   const [newSupplierName, setNewSupplierName] = useState('');
   const [activeTab, setActiveTab] = useState<string | null>(null);
   const [textInput, setTextInput] = useState('');
   
-  // States for renaming Supplier
-  const [isEditingName, setIsEditingName] = useState(false);
-  const [editingNameValue, setEditingNameValue] = useState('');
-
-  // State for cloud import
-  const [importUrl, setImportUrl] = useState('');
-  const [isImportingUrl, setIsImportingUrl] = useState(false);
+  // Modal de edição do fornecedor
+  const [showSupplierEdit, setShowSupplierEdit] = useState(false);
+  const [editingSupplier, setEditingSupplier] = useState<Supplier | null>(null);
+  const [editingHoursDay, setEditingHoursDay] = useState<keyof BusinessHours | null>(null);
 
   // State for viewing details
   const [viewingBatch, setViewingBatch] = useState<QuoteBatch | null>(null);
-  const [detailsSearchTerm, setDetailsSearchTerm] = useState(''); // SEARCH INSIDE BATCH
+  const [detailsSearchTerm, setDetailsSearchTerm] = useState('');
+  const [detailsSortBy, setDetailsSortBy] = useState<'default' | 'name' | 'price_asc' | 'price_desc' | 'pack'>('default');
+
+  // Edição de data da cotação
+  const [editingBatchDate, setEditingBatchDate] = useState(false);
+  const [tempBatchDate, setTempBatchDate] = useState('');
+
+  // Snapshot para fechar sem salvar
+  const [batchSnapshot, setBatchSnapshot] = useState<QuoteBatch | null>(null);
 
   // State for viewing blacklist
   const [showBlacklist, setShowBlacklist] = useState(false);
-  const [blacklistSearchTerm, setBlacklistSearchTerm] = useState(''); // SEARCH BLACKLIST
+  const [blacklistSearchTerm, setBlacklistSearchTerm] = useState('');
 
   // State for Rules
   const [showPackRules, setShowPackRules] = useState(false);
   const [showGlobalRules, setShowGlobalRules] = useState(false);
-  const [showNamingRules, setShowNamingRules] = useState(false); // New Naming Rules
 
   // Inputs for Pack Rules
   const [newRuleTerm, setNewRuleTerm] = useState('');
   const [newRuleQty, setNewRuleQty] = useState(1);
-
-  // Inputs for Naming Rules
-  const [namingRuleTerms, setNamingRuleTerms] = useState(''); // "350ml, Cerveja"
-  const [namingRuleCategory, setNamingRuleCategory] = useState(''); // "CERVEJA"
-  const [namingRuleSuffix, setNamingRuleSuffix] = useState(''); // "LATA"
 
   // State for History Search
   const [historySearchTerm, setHistorySearchTerm] = useState('');
@@ -213,83 +240,18 @@ const SupplierManager: React.FC<SupplierManagerProps> = ({ suppliers, setSupplie
   };
 
   // --- NAMING RULES LOGIC (SEO STANDARDIZATION) ---
-  const standardizeName = (originalName: string, rules: NamingRule[]) => {
-      // Pre-clean: Uppercase + Remove spaces between number and unit (473 ml -> 473ML)
-      // This ensures "473 ML" matches a rule looking for "473ML"
-      let finalName = originalName.toUpperCase().replace(/(\d+)\s+(ML|L|KG|G)/g, '$1$2');
-      
-      let bestRule: NamingRule | null = null;
-      let maxScore = 0;
-
-      // Find the most specific rule (most matching terms)
-      for (const rule of rules) {
-          // Check if ALL terms in the rule exist in the product name
-          if (rule.terms.every(t => finalName.includes(t.toUpperCase()))) {
-              if (rule.terms.length > maxScore) {
-                  maxScore = rule.terms.length;
-                  bestRule = rule;
-              }
-          }
-      }
-
-      // If no rule matches, return original
-      if (!bestRule) return originalName;
-
-      // --- RECONSTRUCTION LOGIC ---
-      let details = finalName;
-      
-      // 1. Remove the trigger terms from the name to isolate "Brand/Details"
-      bestRule.terms.forEach(t => {
-          details = details.replace(t.toUpperCase(), '');
-      });
-      
-      // 2. Remove the forced category/suffix if they appear in the name (to avoid "Cerveja Cerveja")
-      if (bestRule.category) details = details.replace(bestRule.category.toUpperCase(), '');
-      if (bestRule.suffix) details = details.replace(bestRule.suffix.toUpperCase(), '');
-
-      // 3. Clean up spaces
-      details = details.replace(/\s+/g, ' ').trim();
-
-      // 4. Extract Volume if it was part of the terms (e.g., 350ML) to place it correctly
-      // We assume terms like "350ML" are the volume.
-      const volumeTerm = bestRule.terms.find(t => /\d+(ML|L)/i.test(t)) || '';
-      
-      // 5. Construct Final Name: CATEGORY + VOLUME + DETAILS + SUFFIX
-      const parts = [
-          bestRule.category,
-          volumeTerm,
-          details,
-          bestRule.suffix
-      ].filter(Boolean); // Remove empty/undefined
-
-      return parts.join(' ').toUpperCase().replace(/\s+/g, ' ').trim();
-  };
-
   // --- PACK RULES LOGIC ---
-  const applyRulesToQuotes = (quotes: ProductQuote[], supplierExceptions: PackRule[], globalRules: PackRule[], namingRules: NamingRule[]): ProductQuote[] => {
+  const applyRulesToQuotes = (quotes: ProductQuote[], supplierExceptions: PackRule[], globalRules: PackRule[]): ProductQuote[] => {
       return quotes.map(quote => {
-          // 1. Apply Naming Rules FIRST (Standardize text)
-          const standardizedName = standardizeName(quote.name, namingRules);
+          const lowerName = quote.name.toLowerCase();
           
-          let modifiedQuote = { ...quote, name: standardizedName };
-          const lowerName = standardizedName.toLowerCase();
-          
-          // 2. Check Supplier Exceptions (Pack Rules)
+          // 1. Check Supplier Exceptions (Pack Rules) — prioridade sobre global
           const exception = supplierExceptions?.find(r => lowerName.includes(r.term.toLowerCase()));
-          if (exception) {
-              return applyRule(modifiedQuote, exception);
-          }
+          if (exception) return applyRule(quote, exception);
 
-          // 3. Check Global Rules (Pack Rules)
+          // 2. Check Global Rules (Pack Rules)
           const globalRule = globalRules?.find(r => lowerName.includes(r.term.toLowerCase()));
-          if (globalRule) {
-              return applyRule(modifiedQuote, globalRule);
-          }
-
-          // If renamed but no pack rule matched, just return the renamed item
-          if (standardizedName !== quote.name) {
-              return { ...modifiedQuote, isReprocessed: true }; // Flag it because name changed
-          }
+          if (globalRule) return applyRule(quote, globalRule);
 
           return quote;
       });
@@ -344,14 +306,39 @@ const SupplierManager: React.FC<SupplierManagerProps> = ({ suppliers, setSupplie
                   updateSupplierQuotes(supplierId, newBatch);
 
                   try {
-                      let quotes = await parseQuoteContent(base64, mimeType, true);
-                      quotes = filterBlacklisted(quotes, supplierId);
-                      
-                      // Apply Naming AND Pack Rules
-                      quotes = applyRulesToQuotes(quotes, supplierExceptions, globalPackRules, globalNamingRules);
+                      let quotes: ProductQuote[] = [];
+                      let detectedDate: number | undefined = undefined;
 
-                      const initializedQuotes = quotes.map(q => recalculateItem({...q, priceStrategy: 'pack'}, 'pack'));
-                      const completedBatch = { ...newBatch, status: 'completed' as const, items: initializedQuotes };
+                      // ── XML NF-e: parser local, sem IA ──────────────────
+                      if (isNFeXml(file)) {
+                          const nfeResult = await parseNFeFile(file);
+                          if (nfeResult.errorMessage && nfeResult.items.length === 0) {
+                              updateSupplierQuotes(supplierId, {
+                                  ...newBatch,
+                                  status: 'error',
+                                  errorMessage: nfeResult.errorMessage
+                              });
+                              setUploadQueue(prev => prev.slice(1));
+                              setIsQueueProcessing(false);
+                              return;
+                          }
+                          quotes = nfeResult.items;
+                          detectedDate = nfeResult.detectedDate;
+                          // NF-e já vem com isVerified=true — não precisa de pack rules
+                      } else {
+                          // ── Outros formatos: IA Gemini ───────────────────
+                          quotes = await parseQuoteContent(base64, mimeType, true);
+                          quotes = filterBlacklisted(quotes, supplierId);
+                          quotes = applyRulesToQuotes(quotes, supplierExceptions, globalPackRules);
+                      }
+
+                      const initializedQuotes = quotes.map(q => recalculateItem({...q, priceStrategy: q.priceStrategy ?? 'pack'}, q.priceStrategy ?? 'pack'));
+                      const completedBatch: QuoteBatch = {
+                          ...newBatch,
+                          status: 'completed',
+                          items: initializedQuotes,
+                          ...(detectedDate ? { detectedDate, timestamp: detectedDate } : {}),
+                      };
                       updateSupplierQuotes(supplierId, completedBatch);
                       onBatchCompleted?.(completedBatch, supplierId);
                   } catch (error) {
@@ -372,7 +359,7 @@ const SupplierManager: React.FC<SupplierManagerProps> = ({ suppliers, setSupplie
       };
 
       processNext();
-  }, [uploadQueue, isQueueProcessing, suppliers, globalPackRules, globalNamingRules]);
+  }, [uploadQueue, isQueueProcessing, suppliers, globalPackRules]);
 
 
   const addSupplier = () => {
@@ -424,23 +411,6 @@ const SupplierManager: React.FC<SupplierManagerProps> = ({ suppliers, setSupplie
       document.body.removeChild(link);
   };
 
-  const startRenaming = (supplier: Supplier) => {
-      setEditingNameValue(supplier.name);
-      setIsEditingName(true);
-  };
-
-  const saveRename = (id: string) => {
-      if (editingNameValue.trim()) {
-          setSuppliers(prev => prev.map(s => s.id === id ? { ...s, name: editingNameValue } : s));
-      }
-      setIsEditingName(false);
-  };
-
-  const cancelRename = () => {
-      setIsEditingName(false);
-      setEditingNameValue('');
-  };
-
   // --- PACK RULES LOGIC ---
   const addPackRule = (supplierId: string | null) => {
       if (!newRuleTerm.trim() || newRuleQty < 1) return;
@@ -477,26 +447,144 @@ const SupplierManager: React.FC<SupplierManagerProps> = ({ suppliers, setSupplie
       }
   };
 
-  // --- NAMING RULES LOGIC ---
-  const addNamingRule = () => {
-      if (!namingRuleTerms.trim()) return;
-      
-      const newRule: NamingRule = {
-          id: crypto.randomUUID(),
-          terms: namingRuleTerms.split(',').map(t => t.trim()).filter(t => t.length > 0),
-          category: namingRuleCategory.trim() || undefined,
-          suffix: namingRuleSuffix.trim() || undefined
-      };
+  // --- NAMING RULES REMOVIDAS (aposentadas) ---
 
-      setGlobalNamingRules(prev => [...prev, newRule]);
-      
-      setNamingRuleTerms('');
-      setNamingRuleCategory('');
-      setNamingRuleSuffix('');
+  // --- SUPPLIER EDIT MODAL ---
+  const openSupplierEdit = (supplier: Supplier) => {
+    setEditingSupplier({ ...supplier });
+    setShowSupplierEdit(true);
   };
 
-  const removeNamingRule = (ruleId: string) => {
-      setGlobalNamingRules(prev => prev.filter(r => r.id !== ruleId));
+  const saveSupplierEdit = () => {
+    if (!editingSupplier) return;
+    setSuppliers(prev => prev.map(s => s.id === editingSupplier.id ? { ...s, ...editingSupplier } : s));
+    setShowSupplierEdit(false);
+    setEditingSupplier(null);
+  };
+
+  // --- BATCH DATE EDITING ---
+  const startEditingBatchDate = (batch: QuoteBatch) => {
+    const d = new Date(batch.timestamp);
+    // format for datetime-local input: "YYYY-MM-DDTHH:MM"
+    const pad = (n: number) => n.toString().padStart(2, '0');
+    const val = `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    setTempBatchDate(val);
+    setEditingBatchDate(true);
+  };
+
+  const saveBatchDate = (supplierId: string, batchId: string) => {
+    if (!tempBatchDate) return;
+    const ts = new Date(tempBatchDate).getTime();
+    setSuppliers(prev => prev.map(s => {
+      if (s.id !== supplierId) return s;
+      return { ...s, quotes: s.quotes.map(q => q.id === batchId ? { ...q, timestamp: ts } : q) };
+    }));
+    if (viewingBatch?.id === batchId) setViewingBatch(prev => prev ? { ...prev, timestamp: ts } : prev);
+    setEditingBatchDate(false);
+  };
+
+  // --- SAVE BATCH (manual confirmation) ---
+  const saveBatch = (supplierId: string, batchId: string) => {
+    const now = Date.now();
+    setSuppliers(prev => prev.map(s => {
+      if (s.id !== supplierId) return s;
+      return { ...s, quotes: s.quotes.map(q => q.id === batchId ? { ...q, isSaved: true, savedAt: now } : q) };
+    }));
+    if (viewingBatch?.id === batchId) setViewingBatch(prev => prev ? { ...prev, isSaved: true, savedAt: now } : prev);
+    // Dispara onBatchCompleted para processar catálogo/histórico
+    const supplier = suppliers.find(s => s.id === supplierId);
+    const batch = supplier?.quotes.find(q => q.id === batchId);
+    if (supplier && batch) onBatchCompleted?.({ ...batch, isSaved: true, savedAt: now }, supplierId);
+  };
+
+  // --- PACK RULES LEARNING (ao salvar cotação) ---
+  const learnPackRulesFromBatch = (batch: QuoteBatch, supplierId: string, supplierName: string) => {
+    const newGlobal: PackRule[] = [];
+    const newExceptions: { rule: PackRule; supplierId: string }[] = [];
+
+    batch.items.forEach(item => {
+      if (item.packQuantity <= 1) return;
+      const nameLower = item.name.toLowerCase();
+
+      // Tenta encontrar um term já existente que cubra este produto
+      const globalMatch = globalPackRules.find(r => nameLower.includes(r.term.toLowerCase()));
+      const supplierMatch = suppliers.find(s => s.id === supplierId)?.packRules?.find(r => nameLower.includes(r.term.toLowerCase()));
+
+      if (supplierMatch) return; // Já tem exceção para este fornecedor, não muda
+
+      if (globalMatch) {
+        // Existe regra global — se quantidade difere, cria exceção para este fornecedor
+        if (globalMatch.quantity !== item.packQuantity) {
+          // Verifica se exceção já existe
+          const alreadyHasException = suppliers.find(s => s.id === supplierId)?.packRules?.some(r => nameLower.includes(r.term.toLowerCase()));
+          if (!alreadyHasException) {
+            newExceptions.push({
+              supplierId,
+              rule: {
+                id: crypto.randomUUID(),
+                term: globalMatch.term,
+                quantity: item.packQuantity,
+                supplierId,
+                supplierName,
+                isLearned: true,
+                learnedAt: Date.now(),
+              }
+            });
+          }
+        }
+        return; // Regra global cobre, sem divergência
+      }
+
+      // Não existe regra global — cria uma nova com o nome mais curto possível
+      // Usa as últimas 2-3 palavras do nome como term (ex: "350ML LATA")
+      const words = item.name.trim().split(/\s+/);
+      const term = words.slice(-2).join(' ');
+      const alreadyInNew = newGlobal.some(r => r.term.toLowerCase() === term.toLowerCase());
+      if (!alreadyInNew && term.length > 3) {
+        newGlobal.push({
+          id: crypto.randomUUID(),
+          term,
+          quantity: item.packQuantity,
+          isLearned: true,
+          learnedAt: Date.now(),
+        });
+      }
+    });
+
+    if (newGlobal.length > 0) setGlobalPackRules(prev => [...prev, ...newGlobal]);
+    if (newExceptions.length > 0) {
+      setSuppliers(prev => prev.map(s => {
+        const exceptions = newExceptions.filter(e => e.supplierId === s.id).map(e => e.rule);
+        if (exceptions.length === 0) return s;
+        return { ...s, packRules: [...(s.packRules || []), ...exceptions] };
+      }));
+    }
+  };
+
+  // --- CLOSE BATCH MODAL WITH UNSAVED CHECK ---
+  const handleCloseBatchModal = (supplierId: string) => {
+    if (!viewingBatch || !batchSnapshot) {
+      setViewingBatch(null);
+      setBatchSnapshot(null);
+      return;
+    }
+    const hasChanges = JSON.stringify(viewingBatch.items) !== JSON.stringify(batchSnapshot.items)
+      || viewingBatch.timestamp !== batchSnapshot.timestamp;
+    if (hasChanges) {
+      if (window.confirm('Você fez alterações não salvas. Descartar as mudanças?')) {
+        // Restaurar snapshot
+        setSuppliers(prev => prev.map(s => {
+          if (s.id !== supplierId) return s;
+          return { ...s, quotes: s.quotes.map(q => q.id === batchSnapshot.id ? batchSnapshot : q) };
+        }));
+        setViewingBatch(null);
+        setBatchSnapshot(null);
+      }
+      // Se cancelar, permanece com o modal aberto
+    } else {
+      setViewingBatch(null);
+      setBatchSnapshot(null);
+    }
   };
 
   // Re-run rules on existing quotes
@@ -510,7 +598,7 @@ const SupplierManager: React.FC<SupplierManagerProps> = ({ suppliers, setSupplie
           setSuppliers(prev => prev.map(s => {
               if (s.id !== supplierId) return s;
               const updatedQuotes = s.quotes.map(q => {
-                  const updatedItems = applyRulesToQuotes(q.items, s.packRules || [], globalPackRules, globalNamingRules);
+                  const updatedItems = applyRulesToQuotes(q.items, s.packRules || [], globalPackRules);
                   return { ...q, items: updatedItems };
               });
               return { ...s, quotes: updatedQuotes };
@@ -521,7 +609,7 @@ const SupplierManager: React.FC<SupplierManagerProps> = ({ suppliers, setSupplie
           
           setSuppliers(prev => prev.map(s => {
               const updatedQuotes = s.quotes.map(q => {
-                  const updatedItems = applyRulesToQuotes(q.items, s.packRules || [], globalPackRules, globalNamingRules);
+                  const updatedItems = applyRulesToQuotes(q.items, s.packRules || [], globalPackRules);
                   return { ...q, items: updatedItems };
               });
               return { ...s, quotes: updatedQuotes };
@@ -872,6 +960,20 @@ const SupplierManager: React.FC<SupplierManagerProps> = ({ suppliers, setSupplie
       updateGlobalItems(batchId, updatedItems);
   };
 
+  const updateItemPrice = (batchId: string, itemIndex: number, newPrice: number) => {
+      if (!activeTab || !viewingBatch) return;
+      const safePrice = Math.max(0, newPrice);
+      const updatedItems = viewingBatch.items.map((item, idx) => {
+          if (idx === itemIndex) {
+              const unitPrice = item.priceStrategy === 'unit' ? safePrice : safePrice / Math.max(1, item.packQuantity);
+              return { ...item, price: safePrice, unitPrice };
+          }
+          return item;
+      });
+      setViewingBatch(prev => prev ? { ...prev, items: updatedItems } : null);
+      updateGlobalItems(batchId, updatedItems);
+  };
+
   const toggleItemVerification = (batchId: string, itemIndex: number) => {
       if (!activeTab || !viewingBatch) return;
       
@@ -951,74 +1053,6 @@ const SupplierManager: React.FC<SupplierManagerProps> = ({ suppliers, setSupplie
       }
   };
 
-  const handleUrlImport = async (supplierId: string) => {
-    if (!importUrl.trim()) return;
-    setIsImportingUrl(true);
-
-    let targetUrl = importUrl;
-    if (targetUrl.includes('drive.google.com')) {
-        const idMatch = targetUrl.match(/[-\w]{25,}/);
-        if (idMatch) targetUrl = `https://drive.google.com/uc?export=download&id=${idMatch[0]}`;
-    }
-    if (targetUrl.includes('dropbox.com') && targetUrl.includes('dl=0')) {
-        targetUrl = targetUrl.replace('dl=0', 'dl=1');
-    }
-
-    const tempId = crypto.randomUUID();
-    const newBatch: QuoteBatch = {
-        id: tempId,
-        timestamp: Date.now(),
-        sourceType: 'file',
-        fileName: 'Link da Nuvem',
-        status: 'analyzing',
-        items: []
-    };
-    updateSupplierQuotes(supplierId, newBatch);
-    setImportUrl('');
-
-    // Find rules
-    const currentSupplier = suppliers.find(s => s.id === supplierId);
-    const supplierExceptions = currentSupplier?.packRules || [];
-
-    try {
-        const res = await fetch(targetUrl);
-        if (!res.ok) throw new Error(`Erro HTTP: ${res.status}`);
-        
-        const blob = await res.blob();
-        const mimeType = blob.type || 'text/plain';
-
-        const reader = new FileReader();
-        reader.onload = async () => {
-            const base64 = (reader.result as string).split(',')[1];
-            try {
-                let quotes = await parseQuoteContent(base64, mimeType, true);
-                quotes = filterBlacklisted(quotes, supplierId);
-                
-                // Rules: Naming -> Exception -> Global
-                quotes = applyRulesToQuotes(quotes, supplierExceptions, globalPackRules, globalNamingRules);
-
-                const initializedQuotes = quotes.map(q => recalculateItem({...q, priceStrategy: 'pack'}, 'pack'));
-                const completedBatch = { ...newBatch, status: 'completed' as const, items: initializedQuotes, fileName: `Nuvem (${quotes.length} itens)` };
-                updateSupplierQuotes(supplierId, completedBatch);
-                onBatchCompleted?.(completedBatch, supplierId);
-            } catch (aiError) {
-                updateSupplierQuotes(supplierId, { ...newBatch, status: 'error', errorMessage: 'Erro na análise IA.' });
-            }
-        };
-        reader.readAsDataURL(blob);
-
-    } catch (e) {
-        console.error(e);
-        updateSupplierQuotes(supplierId, { 
-            ...newBatch, 
-            status: 'error', 
-            errorMessage: 'Bloqueio de segurança (CORS). Baixe o arquivo manualmente e use o botão de Upload.' 
-        });
-    } finally {
-        setIsImportingUrl(false);
-    }
-  };
-
   const handleTextSubmit = (supplierId: string) => {
     if (!textInput.trim()) return;
     
@@ -1044,7 +1078,7 @@ const SupplierManager: React.FC<SupplierManagerProps> = ({ suppliers, setSupplie
       quotes = filterBlacklisted(quotes, supplierId);
 
       // Aplica regras de nomenclatura (naming rules continuam funcionando)
-      quotes = applyRulesToQuotes(quotes, supplierExceptions, globalPackRules, globalNamingRules);
+      quotes = applyRulesToQuotes(quotes, supplierExceptions, globalPackRules);
 
       const initializedQuotes = quotes.map(q => recalculateItem({...q, priceStrategy: 'pack'}, 'pack'));
       const completedBatch = { ...newBatch, status: 'completed' as const, items: initializedQuotes };
@@ -1117,145 +1151,110 @@ const SupplierManager: React.FC<SupplierManagerProps> = ({ suppliers, setSupplie
     }
 
     return (
-        <tr key={idx} className={`group border-b border-slate-800/50 last:border-0 transition-colors ${isSelected ? 'bg-amber-900/20' : 'hover:bg-slate-800/50'}`}>
-            <td className="p-3 text-center">
-                {!isVerified && (
-                    <input 
-                        type="checkbox"
-                        checked={isSelected}
-                        onChange={() => toggleSelection(idx)}
-                        className="w-4 h-4 rounded border-slate-600 bg-slate-800 text-amber-600 focus:ring-amber-500 cursor-pointer"
-                    />
-                )}
+        <tr key={idx} className={`group border-b border-slate-800/30 last:border-0 transition-colors ${isSelected ? 'bg-amber-900/20' : 'hover:bg-slate-800/40'}`}>
+            {/* Checkbox + Auto */}
+            <td className="px-2 py-1.5 text-center w-10">
+                <div className="flex flex-col items-center gap-1">
+                    {!isVerified && (
+                        <input type="checkbox" checked={isSelected} onChange={() => toggleSelection(idx)}
+                            className="w-3.5 h-3.5 rounded border-slate-600 bg-slate-800 text-amber-600 cursor-pointer"/>
+                    )}
+                    {isReprocessed && (
+                        <span className="text-blue-400 cursor-help" title="Lote ajustado automaticamente por regra de embalagem">
+                            <Bot className="w-3.5 h-3.5"/>
+                        </span>
+                    )}
+                </div>
             </td>
-            <td className="p-3">
-                {/* NAME EDITING / SUGGESTION UI */}
+
+            {/* Nome */}
+            <td className="px-2 py-1.5">
                 {editingItemId === idx ? (
-                    <div className="flex items-center gap-2">
-                        <input 
-                            autoFocus
-                            value={tempItemName}
-                            onChange={(e) => setTempItemName(e.target.value)}
-                            className="bg-slate-800 border border-slate-600 rounded px-2 py-1 text-white w-full focus:outline-none focus:border-amber-500"
-                            onKeyDown={(e) => {
-                                if (e.key === 'Enter') saveItemName(batchId, idx, tempItemName);
-                                if (e.key === 'Escape') setEditingItemId(null);
-                            }}
-                        />
-                        <button onClick={() => saveItemName(batchId, idx, tempItemName)} className="text-green-500 hover:text-green-400"><CheckCircle className="w-5 h-5"/></button>
-                        <button onClick={() => setEditingItemId(null)} className="text-red-500 hover:text-red-400"><X className="w-5 h-5"/></button>
+                    <div className="flex items-center gap-1.5">
+                        <input autoFocus value={tempItemName} onChange={(e) => setTempItemName(e.target.value)}
+                            className="bg-slate-800 border border-slate-600 rounded px-2 py-1 text-white text-sm w-full focus:outline-none focus:border-amber-500"
+                            onKeyDown={(e) => { if (e.key === 'Enter') saveItemName(batchId, idx, tempItemName); if (e.key === 'Escape') setEditingItemId(null); }}/>
+                        <button onClick={() => saveItemName(batchId, idx, tempItemName)} className="text-green-500"><CheckCircle className="w-4 h-4"/></button>
+                        <button onClick={() => setEditingItemId(null)} className="text-red-500"><X className="w-4 h-4"/></button>
                     </div>
                 ) : (
-                    <div className="flex flex-col gap-1">
-                        {/* Suggestions Carousel */}
+                    <div>
                         {suggestions.length > 0 ? (
-                                <div className="flex items-center gap-2 bg-amber-900/20 border border-amber-900/50 p-1 rounded animate-in fade-in slide-in-from-left-2">
-                                <button onClick={() => cancelSuggestion(batchId, idx)} className="text-red-400 hover:bg-red-900/30 rounded p-0.5"><X className="w-3 h-3"/></button>
-                                <button onClick={() => cycleSuggestion(batchId, idx, 'prev')} className="text-amber-500 hover:bg-amber-900/50 rounded"><ChevronLeft className="w-4 h-4"/></button>
-                                <button 
-                                    onClick={() => applySuggestion(batchId, idx)}
-                                    className="flex-1 text-center font-bold text-amber-400 hover:text-white transition-colors text-xs py-1 px-2 rounded hover:bg-amber-600"
-                                    title="Clique para aplicar este nome"
-                                >
+                            <div className="flex items-center gap-1.5 bg-amber-900/20 border border-amber-900/50 p-1 rounded">
+                                <button onClick={() => cancelSuggestion(batchId, idx)} className="text-red-400 p-0.5"><X className="w-3 h-3"/></button>
+                                <button onClick={() => cycleSuggestion(batchId, idx, 'prev')} className="text-amber-500"><ChevronLeft className="w-3.5 h-3.5"/></button>
+                                <button onClick={() => applySuggestion(batchId, idx)} className="flex-1 text-center font-bold text-amber-400 hover:text-white text-xs px-1 rounded hover:bg-amber-600">
                                     {suggestions[currentSuggestIdx]}
                                 </button>
-                                <button onClick={() => cycleSuggestion(batchId, idx, 'next')} className="text-amber-500 hover:bg-amber-900/50 rounded"><ChevronRight className="w-4 h-4"/></button>
-                                <button onClick={() => fetchSuggestions(batchId, idx, item.name, true)} className="text-blue-400 hover:bg-blue-900/30 rounded p-0.5"><RefreshCw className="w-3 h-3"/></button>
-                                </div>
+                                <button onClick={() => cycleSuggestion(batchId, idx, 'next')} className="text-amber-500"><ChevronRight className="w-3.5 h-3.5"/></button>
+                                <button onClick={() => fetchSuggestions(batchId, idx, item.name, true)} className="text-blue-400 p-0.5"><RefreshCw className="w-3 h-3"/></button>
+                            </div>
                         ) : (
-                            <div className="font-medium text-white flex items-center gap-2 group/edit">
-                                <span className={!item.isVerified ? 'text-amber-200' : ''}>{item.name}</span>
-                                {isReprocessed && <span className="text-[10px] bg-blue-900 text-blue-300 px-1.5 rounded flex items-center gap-1"><Bot className="w-3 h-3"/> Auto</span>}
-                                <div className="opacity-0 group-hover/edit:opacity-100 flex items-center gap-1 transition-opacity">
-                                    <button 
-                                        onClick={() => startEditingItem(idx, item.name)}
-                                        className="text-slate-500 hover:text-blue-400 p-1 rounded hover:bg-slate-700"
-                                        title="Editar Nome Manualmente"
-                                    >
-                                        <Pencil className="w-3 h-3"/>
-                                    </button>
-                                    <button 
-                                        onClick={() => fetchSuggestions(batchId, idx, item.name)}
-                                        className="text-slate-500 hover:text-amber-400 p-1 rounded hover:bg-slate-700"
-                                        title="Sugerir Variações com IA"
-                                        disabled={isLoadingSuggestions}
-                                    >
+                            <div className="flex items-center gap-1.5 group/edit">
+                                <span className={`text-sm font-medium leading-tight ${!item.isVerified ? 'text-amber-100' : 'text-white'}`}>{item.name}</span>
+                                <div className="opacity-0 group-hover/edit:opacity-100 flex items-center gap-0.5 transition-opacity shrink-0">
+                                    <button onClick={() => startEditingItem(idx, item.name)} className="text-slate-600 hover:text-blue-400 p-0.5 rounded" title="Editar nome"><Pencil className="w-3 h-3"/></button>
+                                    <button onClick={() => fetchSuggestions(batchId, idx, item.name)} className="text-slate-600 hover:text-amber-400 p-0.5 rounded" disabled={isLoadingSuggestions} title="Sugerir com IA">
                                         {isLoadingSuggestions ? <Loader2 className="w-3 h-3 animate-spin"/> : <Wand2 className="w-3 h-3"/>}
                                     </button>
                                 </div>
                             </div>
                         )}
-                        <span className="text-xs text-slate-600 block">{item.sku}</span>
+                        {item.sku && <span className="text-[10px] text-slate-700 block">{item.sku}</span>}
                     </div>
                 )}
             </td>
-            <td className="p-3 text-center">
-                <div className="flex items-center justify-center">
-                    <input 
-                        type="number"
-                        min="1"
-                        value={item.packQuantity}
-                        onChange={(e) => updateItemPackQuantity(batchId, idx, parseInt(e.target.value))}
-                        className="w-16 bg-slate-800 border border-slate-600 rounded px-2 py-1 text-center font-bold text-white focus:border-amber-500 focus:outline-none"
-                    />
+
+            {/* Lote */}
+            <td className="px-2 py-1.5 text-center w-16">
+                <input type="number" min="1" value={item.packQuantity}
+                    onChange={(e) => updateItemPackQuantity(batchId, idx, parseInt(e.target.value))}
+                    className="w-14 bg-slate-800 border border-slate-700 rounded px-1 py-1 text-center text-sm font-bold text-white focus:border-amber-500 focus:outline-none"/>
+            </td>
+
+            {/* Estratégia */}
+            <td className="px-2 py-1.5 text-center w-14">
+                <div className="flex items-center justify-center gap-0.5 bg-slate-950/50 p-0.5 rounded border border-slate-800">
+                    <button onClick={() => updateItemStrategy(batchId, idx, 'pack')}
+                        className={`p-1 rounded transition-all ${(!item.priceStrategy || item.priceStrategy === 'pack') ? 'bg-blue-600 text-white' : 'text-slate-500 hover:text-white'}`}
+                        title="Preço é do lote/caixa"><BoxSelect className="w-3 h-3"/></button>
+                    <button onClick={() => updateItemStrategy(batchId, idx, 'unit')}
+                        className={`p-1 rounded transition-all ${item.priceStrategy === 'unit' ? 'bg-amber-500 text-white' : 'text-slate-500 hover:text-white'}`}
+                        title="Preço é por unidade"><Coins className="w-3 h-3"/></button>
                 </div>
             </td>
-            <td className="p-3 text-center">
-                <div className="flex flex-col items-center gap-1">
-                    <span className="text-xs text-slate-500 mb-0.5">Ref. R$ {item.price.toFixed(2)}</span>
-                    <div className="flex items-center justify-center gap-1 bg-slate-950/50 p-0.5 rounded inline-flex border border-slate-800">
-                        <button 
-                            onClick={() => updateItemStrategy(batchId, idx, 'pack')}
-                            className={`p-1 rounded transition-all flex items-center gap-1 ${(!item.priceStrategy || item.priceStrategy === 'pack') ? 'bg-blue-600 text-white shadow' : 'text-slate-500 hover:text-white hover:bg-slate-800'}`}
-                            title={`Lote: O valor R$ {item.price.toFixed(2)} é o preço da caixa com ${item.packQuantity} unidades.`}
-                        >
-                            <BoxSelect className="w-3 h-3"/>
-                        </button>
-                        <button 
-                            onClick={() => updateItemStrategy(batchId, idx, 'unit')}
-                            className={`p-1 rounded transition-all flex items-center gap-1 ${item.priceStrategy === 'unit' ? 'bg-amber-500 text-white shadow' : 'text-slate-500 hover:text-white hover:bg-slate-800'}`}
-                            title={`Unitário: O valor R$ {item.price.toFixed(2)} é o preço de UMA unidade.`}
-                        >
-                            <Coins className="w-3 h-3"/>
-                        </button>
-                    </div>
-                </div>
+
+            {/* Preço lote (editável) */}
+            <td className="px-2 py-1.5 text-right w-24">
+                <input type="number" min="0" step="0.01" value={item.price.toFixed(2)}
+                    onChange={(e) => updateItemPrice(batchId, idx, parseFloat(e.target.value) || 0)}
+                    className="w-20 bg-slate-800 border border-slate-700 rounded px-1 py-1 text-right text-sm text-slate-300 font-medium focus:border-amber-500 focus:outline-none"/>
             </td>
-            <td className="p-3 text-right font-medium text-slate-300">
-                R$ {totalLotPrice.toFixed(2)}
+
+            {/* Preço unitário calculado */}
+            <td className="px-2 py-1.5 text-right w-20">
+                <span className="font-bold text-amber-400 text-sm">R$ {item.unitPrice.toFixed(2)}</span>
             </td>
-            <td className="p-3 text-right font-bold text-amber-400 bg-slate-800/20 text-lg">
-                R$ {item.unitPrice.toFixed(2)}
-            </td>
-            <td className="p-3 text-center">
-                <div className="flex items-center justify-center gap-2">
-                    <button
-                        onClick={() => toggleItemVerification(batchId, idx)}
-                        className={`p-2 rounded transition-colors ${item.isVerified ? 'text-green-500 hover:bg-green-900/20' : 'text-slate-600 hover:bg-slate-700 hover:text-green-400'}`}
-                        title={item.isVerified ? "Desmarcar Identificação" : "Confirmar e Mover para Prontos"}
-                    >
-                        {item.isVerified ? <CheckCircle className="w-4 h-4" /> : <Check className="w-4 h-4"/>}
+
+            {/* Ações */}
+            <td className="px-2 py-1.5 text-center w-20">
+                <div className="flex items-center justify-center gap-0.5">
+                    <button onClick={() => toggleItemVerification(batchId, idx)}
+                        className={`p-1.5 rounded transition-colors ${item.isVerified ? 'text-green-500 hover:bg-green-900/20' : 'text-slate-600 hover:bg-slate-700 hover:text-green-400'}`}
+                        title={item.isVerified ? "Desmarcar" : "Confirmar"}>
+                        {item.isVerified ? <CheckCircle className="w-3.5 h-3.5"/> : <Check className="w-3.5 h-3.5"/>}
                     </button>
-                    <button 
-                        onClick={() => handleRequestAction('ban', batchId, idx, item.name)}
-                        className="text-slate-600 hover:text-red-500 p-2 rounded hover:bg-red-950/20 opacity-0 group-hover:opacity-100 transition-all"
-                        title="Bloquear/Banir Item (Lixeira)"
-                    >
-                        <Ban className="w-4 h-4"/>
-                    </button>
-                     <button 
-                        onClick={() => handleRequestAction('delete', batchId, idx, item.name)}
-                        className="text-slate-600 hover:text-red-500 p-2 rounded hover:bg-red-950/20 opacity-0 group-hover:opacity-100 transition-all"
-                        title="Remover Item da Lista"
-                    >
-                        <Trash2 className="w-4 h-4"/>
-                    </button>
+                    <button onClick={() => handleRequestAction('ban', batchId, idx, item.name)}
+                        className="text-slate-700 hover:text-red-500 p-1.5 rounded hover:bg-red-950/20 opacity-0 group-hover:opacity-100 transition-all"
+                        title="Bloquear item"><Ban className="w-3.5 h-3.5"/></button>
+                    <button onClick={() => handleRequestAction('delete', batchId, idx, item.name)}
+                        className="text-slate-700 hover:text-red-500 p-1.5 rounded hover:bg-red-950/20 opacity-0 group-hover:opacity-100 transition-all"
+                        title="Remover item"><Trash2 className="w-3.5 h-3.5"/></button>
                 </div>
             </td>
         </tr>
     );
   };
-
   const selectedSupplier = suppliers.find(s => s.id === activeTab);
 
   const renderRulesModal = (isGlobal: boolean) => {
@@ -1341,100 +1340,6 @@ const SupplierManager: React.FC<SupplierManagerProps> = ({ suppliers, setSupplie
       );
   };
 
-  const renderNamingRulesModal = () => {
-      const onAdd = addNamingRule;
-      const onRemove = removeNamingRule;
-      const onClose = () => setShowNamingRules(false);
-      const onApply = () => applyRulesRetroactively(null); // Apply globally
-
-      return (
-           <div className="fixed inset-0 z-[110] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-              <div className="bg-slate-900 w-full max-w-2xl rounded-xl border border-slate-700 flex flex-col shadow-2xl max-h-[80vh]">
-                  <div className="p-4 border-b border-slate-800 flex justify-between items-center bg-slate-950 rounded-t-xl">
-                      <h3 className="font-bold text-white flex items-center gap-2">
-                          <Type className="w-5 h-5 text-indigo-500"/> Regras de Concordância (SEO)
-                      </h3>
-                      <button onClick={onClose}><X className="w-6 h-6 text-slate-500 hover:text-white"/></button>
-                  </div>
-                  
-                  <div className="p-4 bg-slate-900 space-y-4">
-                      <p className="text-sm text-slate-400">
-                          Padronize nomes antes da análise de lote. Formato: <strong>CATEGORIA + VOLUME + NOME + TIPO</strong>.
-                          <br/>Ex: "Skol 350ml" --- "CERVEJA 350ML SKOL LATA"
-                      </p>
-
-                      <div className="flex gap-2 items-end">
-                          <div className="flex-1">
-                              <label className="text-[10px] text-slate-500 uppercase">Contém (ex: Cerveja, 350ml)</label>
-                              <input 
-                                  type="text" 
-                                  placeholder="Separe por vírgula" 
-                                  value={namingRuleTerms}
-                                  onChange={(e) => setNamingRuleTerms(e.target.value)}
-                                  className="w-full bg-slate-800 border border-slate-600 rounded px-3 py-2 text-white focus:border-indigo-500 focus:outline-none text-xs"
-                              />
-                          </div>
-                          <div className="w-24">
-                              <label className="text-[10px] text-slate-500 uppercase">Renomear Cat.</label>
-                              <input 
-                                  type="text" 
-                                  placeholder="Ex: CERVEJA"
-                                  value={namingRuleCategory}
-                                  onChange={(e) => setNamingRuleCategory(e.target.value)}
-                                  className="w-full bg-slate-800 border border-slate-600 rounded px-3 py-2 text-white focus:border-indigo-500 focus:outline-none text-xs"
-                              />
-                          </div>
-                          <div className="w-24">
-                              <label className="text-[10px] text-slate-500 uppercase">Tipo Emb.</label>
-                              <input 
-                                  type="text" 
-                                  placeholder="Ex: LATA"
-                                  value={namingRuleSuffix}
-                                  onChange={(e) => setNamingRuleSuffix(e.target.value)}
-                                  className="w-full bg-slate-800 border border-slate-600 rounded px-3 py-2 text-white focus:border-indigo-500 focus:outline-none text-xs"
-                              />
-                          </div>
-                          <button 
-                              onClick={onAdd}
-                              className="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-2 rounded font-bold h-9"
-                          >
-                              <Plus className="w-4 h-4"/>
-                          </button>
-                      </div>
-
-                      <div className="border-t border-slate-800 pt-4 max-h-60 overflow-y-auto space-y-2">
-                          {globalNamingRules.length === 0 && (
-                              <p className="text-center text-slate-600 italic">Nenhuma regra definida.</p>
-                          )}
-                          {globalNamingRules.map(rule => (
-                              <div key={rule.id} className="flex justify-between items-center bg-slate-800 p-2 rounded border border-slate-700">
-                                  <div className="flex flex-col">
-                                      <span className="text-xs text-slate-400">Contém: <strong className="text-white">[{rule.terms.join(', ')}]</strong></span>
-                                      <span className="text-xs text-indigo-300">
-                                          → {rule.category ? rule.category : '(Manter)'} ... {rule.suffix ? rule.suffix : '(Manter)'}
-                                      </span>
-                                  </div>
-                                  <button onClick={() => onRemove(rule.id)} className="text-slate-500 hover:text-red-500">
-                                      <Trash2 className="w-4 h-4"/>
-                                  </button>
-                              </div>
-                          ))}
-                      </div>
-
-                      <div className="pt-4 border-t border-slate-800">
-                           <button 
-                                onClick={onApply}
-                                className="w-full py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded border border-slate-600 flex items-center justify-center gap-2 text-sm"
-                           >
-                               <RefreshCw className="w-4 h-4"/> Aplicar Regras em Tudo
-                           </button>
-                      </div>
-                  </div>
-              </div>
-           </div>
-      );
-  };
-
   return (
     <div className="grid grid-cols-1 md:grid-cols-4 gap-6 h-full relative">
       <style>{`
@@ -1472,11 +1377,229 @@ const SupplierManager: React.FC<SupplierManagerProps> = ({ suppliers, setSupplie
       )}
 
       {/* Modals */}
-      {showNamingRules && renderNamingRulesModal()}
       {showGlobalRules && renderRulesModal(true)}
       {showPackRules && selectedSupplier && renderRulesModal(false)}
 
       {/* Blacklist Modal */}
+      {/* ── SUPPLIER EDIT MODAL ── */}
+      {showSupplierEdit && editingSupplier && (
+        <div className="fixed inset-0 z-[110] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 w-full max-w-xl rounded-2xl border border-slate-700 shadow-2xl flex flex-col max-h-[90vh]">
+            <div className="p-4 border-b border-slate-800 flex items-center justify-between bg-slate-950 rounded-t-2xl">
+              <h3 className="font-bold text-white flex items-center gap-2"><Settings className="w-4 h-4 text-amber-400"/> Editar Fornecedor</h3>
+              <button onClick={() => setShowSupplierEdit(false)}><X className="w-5 h-5 text-slate-500 hover:text-white"/></button>
+            </div>
+            <div className="p-4 overflow-y-auto space-y-5">
+
+              {/* Básico */}
+              <div className="space-y-3">
+                <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Informações Básicas</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-xs text-slate-400 block mb-1">Nome</label>
+                    <input value={editingSupplier.name} onChange={e => setEditingSupplier(p => p ? {...p, name: e.target.value} : p)}
+                      className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-amber-500"/>
+                  </div>
+                  <div>
+                    <label className="text-xs text-slate-400 block mb-1 flex items-center gap-1"><Phone className="w-3 h-3"/> WhatsApp</label>
+                    <input placeholder="44999998888" value={editingSupplier.whatsapp || ''} onChange={e => setEditingSupplier(p => p ? {...p, whatsapp: e.target.value} : p)}
+                      className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-amber-500"/>
+                  </div>
+                </div>
+                <div>
+                  <label className="text-xs text-slate-400 block mb-1 flex items-center gap-1"><MapPin className="w-3 h-3"/> Endereço (para Maps)</label>
+                  <input placeholder="Rua das Flores, 123, Centro, Maringá-PR" value={editingSupplier.address || ''} onChange={e => setEditingSupplier(p => p ? {...p, address: e.target.value} : p)}
+                    className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-amber-500"/>
+                </div>
+              </div>
+
+              {/* Logística */}
+              <div className="space-y-3 border-t border-slate-800 pt-4">
+                <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Logística</p>
+                <div>
+                  <label className="text-xs text-slate-400 block mb-1 flex items-center gap-1"><Truck className="w-3 h-3"/> Tipo de atendimento</label>
+                  <div className="flex gap-2">
+                    {(['pickup','delivery','both'] as const).map(t => (
+                      <button key={t} onClick={() => setEditingSupplier(p => p ? {...p, deliveryType: t} : p)}
+                        className={`flex-1 py-1.5 rounded-lg text-xs font-medium transition-all border ${editingSupplier.deliveryType === t ? 'bg-amber-600 border-amber-500 text-white' : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-white'}`}>
+                        {t === 'pickup' ? '🏪 Retirada' : t === 'delivery' ? '🚚 Entrega' : '↕️ Ambos'}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-xs text-slate-400 block mb-1 flex items-center gap-1"><Calendar className="w-3 h-3"/> Frequência de pedido</label>
+                    <select value={editingSupplier.orderFrequency || ''} onChange={e => setEditingSupplier(p => p ? {...p, orderFrequency: e.target.value as any} : p)}
+                      className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-amber-500">
+                      <option value="">Livre</option>
+                      <option value="daily">Diário</option>
+                      <option value="weekly">Semanal</option>
+                      <option value="biweekly">Quinzenal</option>
+                      <option value="monthly">Mensal</option>
+                      <option value="custom">A cada X dias</option>
+                    </select>
+                  </div>
+                  {editingSupplier.orderFrequency === 'custom' && (
+                    <div>
+                      <label className="text-xs text-slate-400 block mb-1">A cada quantos dias?</label>
+                      <input type="number" min={1} value={editingSupplier.orderFrequencyDays || ''} onChange={e => setEditingSupplier(p => p ? {...p, orderFrequencyDays: Number(e.target.value)} : p)}
+                        className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-amber-500"/>
+                    </div>
+                  )}
+                  {(['weekly','biweekly'] as const).includes(editingSupplier.orderFrequency as any) && (
+                    <div>
+                      <label className="text-xs text-slate-400 block mb-1">Dia da semana</label>
+                      <select value={editingSupplier.orderWeekDay ?? ''} onChange={e => setEditingSupplier(p => p ? {...p, orderWeekDay: Number(e.target.value)} : p)}
+                        className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-amber-500">
+                        {['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'].map((d,i) => <option key={i} value={i}>{d}</option>)}
+                      </select>
+                    </div>
+                  )}
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-xs text-slate-400 block mb-1">Dias de pedido (descrição)</label>
+                    <input placeholder="toda quarta-feira" value={editingSupplier.orderDays || ''} onChange={e => setEditingSupplier(p => p ? {...p, orderDays: e.target.value} : p)}
+                      className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-amber-500"/>
+                  </div>
+                  <div>
+                    <label className="text-xs text-slate-400 block mb-1">Dias de entrega (descrição)</label>
+                    <input placeholder="toda quinta-feira / dia seguinte" value={editingSupplier.deliveryDays || ''} onChange={e => setEditingSupplier(p => p ? {...p, deliveryDays: e.target.value} : p)}
+                      className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-amber-500"/>
+                  </div>
+                </div>
+
+                {/* Entrega incerta */}
+                <div className="flex items-center gap-3">
+                  <button onClick={() => setEditingSupplier(p => p ? {...p, deliveryUncertain: !p.deliveryUncertain} : p)}
+                    className={`relative w-10 h-5 rounded-full transition-all ${editingSupplier.deliveryUncertain ? 'bg-amber-600' : 'bg-slate-700'}`}>
+                    <span className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-all ${editingSupplier.deliveryUncertain ? 'left-5' : 'left-0.5'}`}/>
+                  </button>
+                  <span className="text-xs text-slate-300">Entrega sem data garantida</span>
+                </div>
+                {editingSupplier.deliveryUncertain && (
+                  <div className="grid grid-cols-2 gap-3 pl-4 border-l-2 border-amber-800/40">
+                    <div>
+                      <label className="text-xs text-slate-400 block mb-1">Mínimo (dias)</label>
+                      <input type="number" min={1} value={editingSupplier.deliveryMinDays || ''} onChange={e => setEditingSupplier(p => p ? {...p, deliveryMinDays: Number(e.target.value)} : p)}
+                        className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-amber-500"/>
+                    </div>
+                    <div>
+                      <label className="text-xs text-slate-400 block mb-1">Máximo (dias)</label>
+                      <input type="number" min={1} value={editingSupplier.deliveryMaxDays || ''} onChange={e => setEditingSupplier(p => p ? {...p, deliveryMaxDays: Number(e.target.value)} : p)}
+                        className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-amber-500"/>
+                    </div>
+                  </div>
+                )}
+
+                {/* Tempos */}
+                {(editingSupplier.deliveryType === 'pickup' || editingSupplier.deliveryType === 'both') && (
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-xs text-slate-400 block mb-1 flex items-center gap-1"><Clock className="w-3 h-3"/> Tempo de preparo (min)</label>
+                      <input type="number" min={0} placeholder="ex: 240" value={editingSupplier.pickupReadyMinutes || ''} onChange={e => setEditingSupplier(p => p ? {...p, pickupReadyMinutes: Number(e.target.value)} : p)}
+                        className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-amber-500"/>
+                    </div>
+                    <div>
+                      <label className="text-xs text-slate-400 block mb-1">Permanência média (min)</label>
+                      <input type="number" min={0} placeholder="ex: 30" value={editingSupplier.pickupStayMinutes || ''} onChange={e => setEditingSupplier(p => p ? {...p, pickupStayMinutes: Number(e.target.value)} : p)}
+                        className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-amber-500"/>
+                    </div>
+                  </div>
+                )}
+                {(editingSupplier.deliveryType === 'delivery' || editingSupplier.deliveryType === 'both') && (
+                  <div>
+                    <label className="text-xs text-slate-400 block mb-1 flex items-center gap-1"><Clock className="w-3 h-3"/> Horário esperado de entrega</label>
+                    <input type="time" value={editingSupplier.expectedDeliveryTime || ''} onChange={e => setEditingSupplier(p => p ? {...p, expectedDeliveryTime: e.target.value} : p)}
+                      className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-amber-500"/>
+                  </div>
+                )}
+              </div>
+
+              {/* Horários de Funcionamento */}
+              <div className="space-y-2 border-t border-slate-800 pt-4">
+                <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Horário de Funcionamento</p>
+                <div className="flex gap-1">
+                  {DAY_LABELS.map(({ key, short }) => {
+                    const day = (editingSupplier.openingHours ?? DEFAULT_BUSINESS_HOURS)[key];
+                    const isEditing = editingHoursDay === key;
+                    return (
+                      <div key={key} className="flex-1 flex flex-col items-center gap-0.5">
+                        {/* Toggle aberto/fechado */}
+                        <button
+                          onClick={() => {
+                            const cur = editingSupplier.openingHours ?? { ...DEFAULT_BUSINESS_HOURS };
+                            setEditingSupplier(p => p ? { ...p, openingHours: { ...cur, [key]: { ...cur[key], open: !cur[key].open } } } : p);
+                          }}
+                          className={`w-full text-[10px] font-bold rounded py-1 transition-all border ${day.open ? 'bg-amber-600/20 border-amber-600/50 text-amber-400' : 'bg-slate-800 border-slate-700 text-slate-600'}`}
+                        >
+                          {short}
+                        </button>
+                        {/* Horários — clique para editar */}
+                        {day.open ? (
+                          isEditing ? (
+                            <input
+                              autoFocus
+                              type="text"
+                              value={day.hours}
+                              placeholder="08:00-18:00"
+                              onChange={e => {
+                                const cur = editingSupplier.openingHours ?? { ...DEFAULT_BUSINESS_HOURS };
+                                setEditingSupplier(p => p ? { ...p, openingHours: { ...cur, [key]: { ...cur[key], hours: e.target.value } } } : p);
+                              }}
+                              onBlur={() => setEditingHoursDay(null)}
+                              onKeyDown={e => e.key === 'Enter' && setEditingHoursDay(null)}
+                              className="w-full text-[9px] bg-slate-800 border border-amber-600/50 rounded px-0.5 py-0.5 text-center text-amber-300 focus:outline-none"
+                            />
+                          ) : (
+                            <button
+                              onClick={() => setEditingHoursDay(key)}
+                              className="w-full text-[9px] text-slate-400 hover:text-amber-300 text-center leading-tight px-0.5 py-0.5 rounded hover:bg-slate-800 transition-colors"
+                              title="Clique para editar horários"
+                            >
+                              {day.hours || <span className="text-slate-600 italic">add</span>}
+                            </button>
+                          )
+                        ) : (
+                          <span className="text-[9px] text-slate-700 text-center">fechado</span>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+                <p className="text-[10px] text-slate-600">Clique no dia para abrir/fechar · Clique no horário para editar · Ex: <span className="text-slate-500">08:00-12:00, 14:00-18:00</span></p>
+              </div>
+
+              {/* Template */}
+              <div className="space-y-2 border-t border-slate-800 pt-4">
+                <div className="flex items-center justify-between">
+                  <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Template de Pedido</p>
+                  <button
+                    onClick={() => setEditingSupplier(p => p ? { ...p, orderTemplate: DEFAULT_ORDER_TEMPLATE } : p)}
+                    className="flex items-center gap-1 text-[10px] text-slate-500 hover:text-amber-400 transition-colors px-1.5 py-0.5 rounded hover:bg-slate-800"
+                    title="Resetar para o template padrão"
+                  >
+                    <RefreshCw className="w-2.5 h-2.5"/> Padrão
+                  </button>
+                </div>
+                <p className="text-[11px] text-slate-600">Variáveis: <span className="text-slate-400">[DATA] [HORA] [ITENS] [TOTAL] [TIPO] [PREVISAO]</span></p>
+                <textarea
+                  rows={5}
+                  value={editingSupplier.orderTemplate ?? DEFAULT_ORDER_TEMPLATE}
+                  onChange={e => setEditingSupplier(p => p ? {...p, orderTemplate: e.target.value} : p)}
+                  className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-amber-500 resize-none font-mono text-xs leading-relaxed"
+                />
+              </div>
+            </div>
+            <div className="p-4 border-t border-slate-800 flex justify-end gap-2">
+              <button onClick={() => setShowSupplierEdit(false)} className="px-4 py-2 rounded-xl bg-slate-800 text-slate-300 text-sm hover:bg-slate-700 transition-colors">Cancelar</button>
+              <button onClick={saveSupplierEdit} className="px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-sm font-semibold transition-colors flex items-center gap-2"><Save className="w-4 h-4"/> Salvar</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showBlacklist && selectedSupplier && (
            <div className="fixed inset-0 z-[110] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
               <div className="bg-slate-900 w-full max-w-3xl rounded-xl border border-slate-700 flex flex-col shadow-2xl max-h-[80vh]">
@@ -1513,25 +1636,72 @@ const SupplierManager: React.FC<SupplierManagerProps> = ({ suppliers, setSupplie
       {viewingBatch && (
         <div className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
             <div className="bg-slate-900 w-full max-w-6xl max-h-[90vh] rounded-xl border border-slate-700 flex flex-col shadow-2xl">
-                <div className="p-4 border-b border-slate-700 flex flex-col md:flex-row justify-between items-center bg-slate-800 rounded-t-xl shrink-0 gap-4">
-                    <div>
-                        <h3 className="text-xl font-bold text-white">Detalhes da Cotação</h3>
-                        <p className="text-sm text-slate-400">
-                             {viewingBatch.sourceType === 'file' ? viewingBatch.fileName : 'Texto Importado'} • {new Date(viewingBatch.timestamp).toLocaleString()}
-                        </p>
+                <div className="p-3 border-b border-slate-700 flex flex-col md:flex-row justify-between items-start bg-slate-800 rounded-t-xl shrink-0 gap-3">
+                    <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                            <h3 className="text-base font-bold text-white">Detalhes da Cotação</h3>
+                            {/* Contador verificados/total */}
+                            <span className="text-xs bg-slate-700 text-slate-300 px-2 py-0.5 rounded-full">
+                                ✓ {viewingBatch.items.filter(i => i.isVerified).length}/{viewingBatch.items.length}
+                            </span>
+                            {viewingBatch.isSaved && <span className="text-xs bg-emerald-900/40 text-emerald-400 border border-emerald-900/40 px-2 py-0.5 rounded-full">✓ Salva</span>}
+                        </div>
+                        {/* Data editável */}
+                        <div className="flex items-center gap-1.5 mt-1">
+                            <p className="text-xs text-slate-500 truncate">
+                                {viewingBatch.sourceType === 'file' ? viewingBatch.fileName : 'Texto Importado'}
+                            </p>
+                            <span className="text-slate-700">·</span>
+                            {editingBatchDate ? (
+                                <div className="flex items-center gap-1">
+                                    <input type="datetime-local" value={tempBatchDate} onChange={e => setTempBatchDate(e.target.value)}
+                                        className="bg-slate-700 border border-amber-500 rounded px-1.5 py-0.5 text-white text-xs focus:outline-none"/>
+                                    <button onClick={() => saveBatchDate(activeTab!, viewingBatch.id)} className="text-green-400 p-0.5"><Check className="w-3 h-3"/></button>
+                                    <button onClick={() => setEditingBatchDate(false)} className="text-red-400 p-0.5"><X className="w-3 h-3"/></button>
+                                </div>
+                            ) : (
+                                <button onClick={() => startEditingBatchDate(viewingBatch)} className="flex items-center gap-1 text-slate-400 hover:text-amber-400 transition-colors group/date">
+                                    <span className="text-xs">{new Date(viewingBatch.timestamp).toLocaleString('pt-BR')}</span>
+                                    <Pencil className="w-2.5 h-2.5 opacity-0 group-hover/date:opacity-100 transition-opacity"/>
+                                </button>
+                            )}
+                        </div>
                     </div>
                     
-                    <div className="flex items-center gap-4 flex-1 justify-end">
-                        <div className="relative w-full max-w-xs">
-                            <Search className="absolute left-2.5 top-2 w-4 h-4 text-slate-500" />
-                            <input type="text" placeholder="Filtrar produtos na lista..." value={detailsSearchTerm} onChange={(e) => setDetailsSearchTerm(e.target.value)} className="w-full bg-slate-900 border border-slate-600 rounded-md py-1.5 pl-9 pr-4 text-sm text-white focus:border-amber-500 focus:outline-none"/>
+                    <div className="flex items-center gap-2 flex-wrap justify-end">
+                        {/* Ordenação */}
+                        <select value={detailsSortBy} onChange={e => setDetailsSortBy(e.target.value as any)}
+                            className="bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-xs text-slate-300 focus:outline-none focus:border-amber-500">
+                            <option value="default">Ordem original</option>
+                            <option value="name">Nome A→Z</option>
+                            <option value="price_asc">Preço ↑</option>
+                            <option value="price_desc">Preço ↓</option>
+                            <option value="pack">Lote ↓</option>
+                        </select>
+                        {/* Estratégia em lote */}
+                        <div className="flex items-center gap-1 bg-slate-900 p-0.5 rounded border border-slate-700">
+                            <button onClick={() => updateBatchStrategy(viewingBatch.id, 'pack')} className="flex items-center gap-1 px-2 py-1 rounded text-xs hover:bg-slate-700 text-blue-400 font-medium"><BoxSelect className="w-3 h-3"/> Lote</button>
+                            <div className="w-px h-3 bg-slate-700"/>
+                            <button onClick={() => updateBatchStrategy(viewingBatch.id, 'unit')} className="flex items-center gap-1 px-2 py-1 rounded text-xs hover:bg-slate-700 text-amber-400 font-medium"><Coins className="w-3 h-3"/> Unit.</button>
                         </div>
-                        <div className="flex items-center gap-2 bg-slate-900 p-1 rounded border border-slate-700">
-                            <button onClick={() => updateBatchStrategy(viewingBatch.id, 'pack')} className="flex items-center gap-1 px-3 py-1.5 rounded text-xs hover:bg-slate-700 transition-colors text-blue-400 font-medium"><BoxSelect className="w-3 h-3"/> Preço Lote</button>
-                            <div className="w-px h-4 bg-slate-700"></div>
-                            <button onClick={() => updateBatchStrategy(viewingBatch.id, 'unit')} className="flex items-center gap-1 px-3 py-1.5 rounded text-xs hover:bg-slate-700 transition-colors text-amber-400 font-medium"><Coins className="w-3 h-3"/> Preço Unitário</button>
+                        {/* Busca */}
+                        <div className="relative">
+                            <Search className="absolute left-2 top-1.5 w-3.5 h-3.5 text-slate-500"/>
+                            <input type="text" placeholder="Filtrar..." value={detailsSearchTerm} onChange={e => setDetailsSearchTerm(e.target.value)}
+                                className="bg-slate-900 border border-slate-600 rounded py-1.5 pl-7 pr-3 text-xs text-white w-36 focus:border-amber-500 focus:outline-none focus:w-48 transition-all"/>
                         </div>
-                        <button onClick={() => setViewingBatch(null)} className="text-slate-400 hover:text-white p-2"><XCircle className="w-8 h-8" /></button>
+                        {/* Botão Salvar cotação */}
+                        <div className="flex flex-col items-center">
+                            <button onClick={() => { saveBatch(activeTab!, viewingBatch.id); learnPackRulesFromBatch(viewingBatch, activeTab!, selectedSupplier?.name || ''); }}
+                                disabled={viewingBatch.isSaved}
+                                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${viewingBatch.isSaved ? 'bg-emerald-900/30 text-emerald-400 border border-emerald-900/40 cursor-default' : 'bg-amber-600 hover:bg-amber-500 text-white shadow-lg shadow-amber-900/30'}`}>
+                                <Save className="w-3.5 h-3.5"/>
+                                {viewingBatch.isSaved ? 'Salva' : 'Salvar cotação'}
+                            </button>
+                            {viewingBatch.savedAt && <span className="text-[10px] text-slate-600 mt-0.5">{new Date(viewingBatch.savedAt).toLocaleTimeString('pt-BR', {hour:'2-digit',minute:'2-digit'})}</span>}
+                        </div>
+                        {/* Fechar com check de mudanças */}
+                        <button onClick={() => handleCloseBatchModal(activeTab!)} className="text-slate-400 hover:text-white p-1.5"><XCircle className="w-6 h-6"/></button>
                     </div>
                 </div>
                 
@@ -1542,6 +1712,15 @@ const SupplierManager: React.FC<SupplierManagerProps> = ({ suppliers, setSupplie
                                 if (!detailsSearchTerm) return true;
                                 const term = detailsSearchTerm.toLowerCase();
                                 return x.item.name.toLowerCase().includes(term) || x.item.sku.toLowerCase().includes(term);
+                            })
+                            .sort((a, b) => {
+                                switch (detailsSortBy) {
+                                    case 'name': return a.item.name.localeCompare(b.item.name);
+                                    case 'price_asc': return a.item.unitPrice - b.item.unitPrice;
+                                    case 'price_desc': return b.item.unitPrice - a.item.unitPrice;
+                                    case 'pack': return b.item.packQuantity - a.item.packQuantity;
+                                    default: return 0;
+                                }
                             });
                         
                         // Categorization Logic
@@ -1645,8 +1824,8 @@ const SupplierManager: React.FC<SupplierManagerProps> = ({ suppliers, setSupplie
                     })()}
                 </div>
                 <div className="p-4 border-t border-slate-700 bg-slate-800 rounded-b-xl flex justify-between items-center text-sm text-slate-400 shrink-0">
-                    <span>{viewingBatch.items.length} itens no total</span>
-                    <button onClick={() => setViewingBatch(null)} className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded">Fechar</button>
+                    <span>{viewingBatch.items.length} itens · ✓ {viewingBatch.items.filter(i => i.isVerified).length} verificados</span>
+                    <button onClick={() => handleCloseBatchModal(activeTab!)} className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded text-sm">Fechar</button>
                 </div>
             </div>
         </div>
@@ -1696,13 +1875,6 @@ const SupplierManager: React.FC<SupplierManagerProps> = ({ suppliers, setSupplie
 
         {/* Global Pack Rules Button */}
         <div className="mt-auto pt-2 border-t border-slate-700 space-y-2">
-            <button 
-                onClick={() => setShowNamingRules(true)}
-                className="w-full flex items-center justify-center gap-2 p-1.5 bg-transparent border border-slate-600 hover:border-slate-400 text-slate-400 hover:text-white rounded text-[10px] font-bold transition-all uppercase"
-                title="Regras para padronizar nomes (SEO) antes da análise de lote"
-            >
-                <Type className="w-3 h-3" /> Regras de Concordância (SEO)
-            </button>
             <button 
                 onClick={() => setShowGlobalRules(true)}
                 className="w-full flex items-center justify-center gap-2 p-2 bg-slate-900 border border-amber-900/50 rounded hover:bg-amber-950/30 text-amber-500 text-xs font-bold transition-all"
@@ -1771,60 +1943,36 @@ const SupplierManager: React.FC<SupplierManagerProps> = ({ suppliers, setSupplie
             <div className="flex justify-between items-center border-b border-slate-700 pb-4 sticky top-0 bg-slate-800 z-10">
               <div className="flex-1">
                 <div className="flex items-center gap-3">
-                   {isEditingName ? (
-                       <div className="flex items-center gap-2 bg-slate-900 p-1 rounded border border-amber-500/50">
-                           <input value={editingNameValue} onChange={(e) => setEditingNameValue(e.target.value)} className="bg-transparent text-white font-bold text-xl focus:outline-none px-2" autoFocus />
-                           <button onClick={() => saveRename(selectedSupplier.id)} className="p-1 hover:bg-green-900/50 rounded text-green-400"><Save className="w-5 h-5"/></button>
-                           <button onClick={cancelRename} className="p-1 hover:bg-red-900/50 rounded text-red-400"><X className="w-5 h-5"/></button>
-                       </div>
-                   ) : (
-                       <div className="flex items-center gap-2 group">
-                           <h2 className="text-2xl font-bold text-white flex items-center gap-2 cursor-default">
-                                {selectedSupplier.name}
-                           </h2>
-                           <button onClick={() => startRenaming(selectedSupplier)} className="text-slate-500 hover:text-amber-500 opacity-0 group-hover:opacity-100 transition-opacity">
-                                <Pencil className="w-4 h-4" />
-                           </button>
-                       </div>
-                   )}
-                   
-                   {!selectedSupplier.isEnabled && <span className="text-xs bg-red-900/50 text-red-400 px-2 py-1 rounded-full border border-red-900">Fornecedor Desabilitado</span>}
+                  <h2 className="text-2xl font-bold text-white">{selectedSupplier.name}</h2>
+                  <button onClick={() => openSupplierEdit(selectedSupplier)} className="text-slate-500 hover:text-amber-400 p-1.5 rounded-lg hover:bg-amber-900/20 transition-all" title="Editar fornecedor">
+                    <Pencil className="w-4 h-4"/>
+                  </button>
+                  {!selectedSupplier.isEnabled && <span className="text-xs bg-red-900/50 text-red-400 px-2 py-1 rounded-full border border-red-900">Desabilitado</span>}
+                  {/* Tags rápidas de info */}
+                  {selectedSupplier.whatsapp && <span className="text-[10px] bg-green-900/30 text-green-400 border border-green-900/40 px-2 py-0.5 rounded-full flex items-center gap-1"><MessageCircle className="w-2.5 h-2.5"/> WA</span>}
+                  {selectedSupplier.address && <span className="text-[10px] bg-blue-900/30 text-blue-400 border border-blue-900/40 px-2 py-0.5 rounded-full flex items-center gap-1"><MapPin className="w-2.5 h-2.5"/> Maps</span>}
+                  {selectedSupplier.deliveryType && <span className="text-[10px] bg-slate-800 text-slate-400 border border-slate-700 px-2 py-0.5 rounded-full">{selectedSupplier.deliveryType === 'pickup' ? '🏪 Retirada' : selectedSupplier.deliveryType === 'delivery' ? '🚚 Entrega' : '↕️ Ambos'}</span>}
                 </div>
-                <p className="text-slate-400 text-sm mt-1">Gerencie as cotações deste fornecedor aqui.</p>
+                {selectedSupplier.orderDays && <p className="text-slate-600 text-xs mt-1">Pedidos: {selectedSupplier.orderDays}{selectedSupplier.deliveryDays ? ` · Entrega: ${selectedSupplier.deliveryDays}` : ''}</p>}
               </div>
               
               <div className="flex items-center gap-2">
-                 <button 
-                    onClick={() => setShowPackRules(true)}
-                    className="text-slate-400 hover:text-white p-2 rounded hover:bg-slate-700/50 transition-colors flex items-center gap-2 text-xs border border-slate-700"
-                    title="Exceções específicas para este fornecedor (Sobrescrevem regras globais)"
-                 >
+                 <button onClick={() => setShowPackRules(true)} className="text-slate-400 hover:text-white p-2 rounded hover:bg-slate-700/50 transition-colors flex items-center gap-2 text-xs border border-slate-700" title="Exceções de lote para este fornecedor">
                     <Settings className="w-4 h-4 text-blue-500"/> Exceções de Lote
                  </button>
-
-                 <div className="w-px h-6 bg-slate-700 mx-2"></div>
-
-                 <button 
-                    onClick={() => setShowBlacklist(true)}
-                    className="text-slate-400 hover:text-white p-2 rounded hover:bg-slate-700/50 transition-colors flex items-center gap-2 text-xs border border-slate-700"
-                    title="Ver itens bloqueados"
-                 >
+                 <div className="w-px h-6 bg-slate-700 mx-1"></div>
+                 <button onClick={() => setShowBlacklist(true)} className="text-slate-400 hover:text-white p-2 rounded hover:bg-slate-700/50 transition-colors flex items-center gap-2 text-xs border border-slate-700">
                     <Ban className="w-4 h-4 text-red-500"/> Lista Negra ({selectedSupplier.blacklist?.length || 0})
                  </button>
-
-                 <div className="w-px h-6 bg-slate-700 mx-2"></div>
-
-                 <button 
-                    onClick={() => deleteSupplier(selectedSupplier.id)} 
-                    className="text-red-400 hover:text-red-300 hover:bg-red-900/20 p-2 rounded transition-colors flex items-center gap-2 text-xs"
-                 >
-                    <Trash2 className="w-4 h-4" /> Excluir
+                 <div className="w-px h-6 bg-slate-700 mx-1"></div>
+                 <button onClick={() => deleteSupplier(selectedSupplier.id)} className="text-red-400 hover:text-red-300 hover:bg-red-900/20 p-2 rounded transition-colors flex items-center gap-2 text-xs">
+                    <Trash2 className="w-4 h-4"/> Excluir
                  </button>
               </div>
             </div>
 
-            {/* Input Grid - 3 Columns */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {/* Input Grid - 2 Columns (URL removida) */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                {/* 1. File Upload (Multiple + Queue + DnD) */}
                <div 
                   className={`border-2 border-dashed rounded-lg p-6 flex flex-col items-center justify-center text-center transition-all duration-300 ease-in-out relative group cursor-pointer overflow-hidden ${dragState !== 'idle' ? 'scale-[1.02] ring-2 ring-amber-500/50 bg-slate-800' : 'border-slate-600 hover:bg-slate-700/30'}`}
@@ -1859,33 +2007,11 @@ const SupplierManager: React.FC<SupplierManagerProps> = ({ suppliers, setSupplie
                   )}
                </div>
 
-               {/* 2. Link Import */}
-               <div className="bg-slate-900 rounded-lg p-4 border border-slate-700 flex flex-col justify-center">
-                  <div className="flex items-center gap-2 mb-2 text-slate-300">
-                      <Cloud className="w-5 h-5 text-blue-500" />
-                      <span className="text-sm font-medium">Importar Link (Nuvem)</span>
-                  </div>
-                  <input 
-                    type="text" 
-                    placeholder="Cole link público (Drive/Dropbox)" 
-                    className="w-full bg-slate-800 border border-slate-600 rounded px-2 py-1.5 text-xs text-white mb-2 focus:border-blue-500 focus:outline-none"
-                    value={importUrl}
-                    onChange={(e) => setImportUrl(e.target.value)}
-                  />
-                  <button 
-                    onClick={() => handleUrlImport(selectedSupplier.id)}
-                    disabled={!importUrl.trim() || isImportingUrl}
-                    className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs py-1.5 px-3 rounded flex items-center justify-center gap-2"
-                  >
-                     {isImportingUrl ? <Loader2 className="w-3 h-3 animate-spin"/> : <LinkIcon className="w-3 h-3"/>}
-                     {isImportingUrl ? 'Baixando...' : 'Processar Link'}
-                  </button>
-               </div>
-
-               {/* 3. Text Paste */}
-               <div className="bg-slate-900 rounded-lg p-3 border border-slate-700 flex flex-col">
+               {/* 2. Text Paste — expandido (URL import removida) */}
+               <div className="bg-slate-900 rounded-lg p-3 border border-slate-700 flex flex-col min-h-[140px]">
+                  <p className="text-xs text-slate-500 mb-1.5 flex items-center gap-1"><FileText className="w-3 h-3"/> Lista WhatsApp / Texto</p>
                   <textarea 
-                    className="flex-1 bg-transparent resize-none focus:outline-none text-sm mb-2"
+                    className="flex-1 bg-transparent resize-none focus:outline-none text-sm mb-2 placeholder-slate-600"
                     placeholder="Cole a lista do WhatsApp aqui..."
                     value={textInput}
                     onChange={(e) => setTextInput(e.target.value)}
@@ -1971,7 +2097,7 @@ const SupplierManager: React.FC<SupplierManagerProps> = ({ suppliers, setSupplie
                                     <div className="flex items-center justify-between mb-2">
                                         <p className="text-sm text-slate-400">{quote.items.length} itens identificados.</p>
                                         <button 
-                                            onClick={() => setViewingBatch(quote)}
+                                            onClick={() => { setViewingBatch(quote); setBatchSnapshot(JSON.parse(JSON.stringify(quote))); }}
                                             className="text-xs flex items-center gap-1 text-amber-500 hover:text-amber-400 font-medium"
                                         >
                                             <Maximize2 className="w-3 h-3" /> Ver Lista Completa

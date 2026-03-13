@@ -1,7 +1,6 @@
-
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Supplier, ForecastItem, CartItem, ProductMapping, MasterProduct } from '../types';
-import { ShoppingCart, Package, ChevronDown, ChevronRight, X, Link as LinkIcon, RefreshCw, ChevronLeft, GripVertical, Merge, Tags, LayoutGrid, Sparkles, Box, Unlink, Search } from 'lucide-react';
+import { ShoppingCart, Package, ChevronDown, ChevronRight, X, Link as LinkIcon, RefreshCw, ChevronLeft, GripVertical, Merge, Tags, LayoutGrid, Sparkles, Box, Unlink, Search, TrendingUp, TrendingDown, BarChart2 } from 'lucide-react';
 
 interface QuoteComparatorProps {
   suppliers: Supplier[];
@@ -23,6 +22,8 @@ interface QuoteComparatorProps {
   considerStock?: boolean;
   setConsiderStock?: React.Dispatch<React.SetStateAction<boolean>>;
   masterProducts?: MasterProduct[];
+  hiddenProductIds?: Set<string>;
+  showInactive?: boolean;
 }
 
 interface VariationOption {
@@ -55,6 +56,76 @@ interface UnifiedRow {
 
 const ITEMS_PER_PAGE = 15;
 
+// ─── Stock Market ────────────────────────────────────────────────────────────
+
+interface StockMarketEntry {
+  productName: string;
+  supplierName: string;
+  supplierId: string;
+  currentPrice: number;   // unitPrice mais recente
+  previousPrice: number;  // unitPrice anterior
+  change: number;         // currentPrice - previousPrice
+  changePct: number;      // variação em %
+  date: number;           // timestamp da cotação mais recente
+}
+
+/**
+ * Calcula maiores altas e baixas da semana a partir das quotes dos suppliers.
+ * Chamado manualmente para não pesar o app.
+ */
+function calcPriceMovers(suppliers: Supplier[]): {
+  topGainers: StockMarketEntry[];
+  topLosers: StockMarketEntry[];
+  lastUpdated: number | null;
+} {
+  const ONE_WEEK = 7 * 24 * 60 * 60 * 1000;
+  const now = Date.now();
+
+  const priceMap = new Map<string, { price: number; date: number; supplierName: string; productName: string; supplierId: string }[]>();
+
+  for (const supplier of suppliers) {
+    const savedQuotes = (supplier.quotes || [])
+      .filter(q => q.status === 'completed' && q.items.length > 0)
+      .sort((a, b) => a.timestamp - b.timestamp);
+
+    for (const batch of savedQuotes) {
+      for (const item of batch.items) {
+        if (!item.isVerified || item.unitPrice <= 0) continue;
+        const key = `${supplier.id}|${item.name.toLowerCase().trim()}`;
+        if (!priceMap.has(key)) priceMap.set(key, []);
+        priceMap.get(key)!.push({
+          price: item.unitPrice,
+          date: batch.timestamp,
+          supplierName: supplier.name,
+          productName: item.name,
+          supplierId: supplier.id,
+        });
+      }
+    }
+  }
+
+  const entries: StockMarketEntry[] = [];
+  let lastUpdated: number | null = null;
+
+  for (const [, records] of priceMap) {
+    if (records.length < 2) continue;
+    records.sort((a, b) => a.date - b.date);
+    const latest = records[records.length - 1];
+    const previous = records[records.length - 2];
+    if (now - latest.date > ONE_WEEK) continue;
+    const change = latest.price - previous.price;
+    const changePct = previous.price > 0 ? (change / previous.price) * 100 : 0;
+    if (Math.abs(changePct) < 0.1) continue;
+    if (latest.date > (lastUpdated ?? 0)) lastUpdated = latest.date;
+    entries.push({ productName: latest.productName, supplierName: latest.supplierName, supplierId: latest.supplierId, currentPrice: latest.price, previousPrice: previous.price, change, changePct, date: latest.date });
+  }
+
+  const sorted = entries.sort((a, b) => b.changePct - a.changePct);
+  const topGainers = sorted.filter(e => e.changePct > 0).slice(0, 5);
+  const topLosers  = [...sorted].reverse().filter(e => e.changePct < 0).slice(0, 5);
+  return { topGainers, topLosers, lastUpdated };
+}
+
 const QuoteComparator: React.FC<QuoteComparatorProps> = ({ 
     suppliers, 
     forecast, 
@@ -69,9 +140,22 @@ const QuoteComparator: React.FC<QuoteComparatorProps> = ({
     salesConfig,
     considerStock,
     setConsiderStock,
-    masterProducts = []
+    masterProducts = [],
+    hiddenProductIds = new Set(),
+    showInactive = false,
 }) => {
-  const [categoryMode, setCategoryMode] = useState<'database' | 'auto'>('database');
+  const [stockMarketData, setStockMarketData] = useState<{ topGainers: StockMarketEntry[]; topLosers: StockMarketEntry[]; lastUpdated: number | null } | null>(null);
+  const [stockMarketOpen, setStockMarketOpen] = useState(true);
+  const [stockMarketLoading, setStockMarketLoading] = useState(false);
+
+  const handleCalcMovers = useCallback(() => {
+    setStockMarketLoading(true);
+    // setTimeout para não bloquear o render
+    setTimeout(() => {
+      setStockMarketData(calcPriceMovers(suppliers));
+      setStockMarketLoading(false);
+    }, 0);
+  }, [suppliers]);
   const [collapsedCategories, setCollapsedCategories] = useState<Set<string>>(new Set());
   const [categorySearchTerms, setCategorySearchTerms] = useState<Record<string, string>>({});
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
@@ -241,6 +325,10 @@ const QuoteComparator: React.FC<QuoteComparatorProps> = ({
   const groupedData = useMemo(() => {
       const groups: Record<string, UnifiedRow[]> = {};
       allProcessedRows.forEach(row => {
+          // Filtra produtos ocultos (a menos que showInactive esteja ativo)
+          const rowNormalizedId = row.id.toLowerCase().replace(/\s+/g, '_');
+          if (!showInactive && hiddenProductIds.has(rowNormalizedId)) return;
+
           const cat = row.category || "Sem Categoria";
           if (!groups[cat]) groups[cat] = [];
           const matchGlobal = !searchTerm || row.name.toLowerCase().includes(searchTerm.toLowerCase()) || row.sku.toLowerCase().includes(searchTerm.toLowerCase());
@@ -249,7 +337,7 @@ const QuoteComparator: React.FC<QuoteComparatorProps> = ({
           if (matchGlobal && matchLocal) groups[cat].push(row);
       });
       return groups;
-  }, [allProcessedRows, searchTerm, categorySearchTerms]);
+  }, [allProcessedRows, searchTerm, categorySearchTerms, hiddenProductIds, showInactive]);
 
   const handlePacksChange = (val: number, packQty: number) => {
       const p = Math.max(0, val);
@@ -354,6 +442,128 @@ const QuoteComparator: React.FC<QuoteComparatorProps> = ({
 
   return (
     <div className="space-y-6 h-full overflow-y-auto pr-2 pb-20 custom-scrollbar">
+
+        {/* ── STOCK MARKET PANEL ─────────────────────────────────────────── */}
+        <div className="bg-slate-900 border border-slate-700 rounded-xl overflow-hidden shadow-lg">
+          {/* Header */}
+          <div className="flex items-center justify-between px-4 py-3">
+            <button
+              onClick={() => setStockMarketOpen(o => !o)}
+              className="flex items-center gap-2 flex-1 text-left"
+            >
+              <BarChart2 className="w-4 h-4 text-amber-400"/>
+              <span className="font-bold text-sm text-white">Variação de Preços</span>
+              {stockMarketData?.lastUpdated && (
+                <span className="text-[10px] text-slate-500">
+                  calculado em {new Date(stockMarketData.lastUpdated).toLocaleDateString('pt-BR')}
+                </span>
+              )}
+              {stockMarketOpen ? <ChevronDown className="w-4 h-4 text-slate-500 ml-1"/> : <ChevronRight className="w-4 h-4 text-slate-500 ml-1"/>}
+            </button>
+            <div className="flex items-center gap-2 shrink-0">
+              {stockMarketData && (
+                <>
+                  {stockMarketData.topGainers.length > 0 && (
+                    <span className="flex items-center gap-1 text-xs text-green-400 font-semibold">
+                      <TrendingUp className="w-3.5 h-3.5"/> {stockMarketData.topGainers.length}
+                    </span>
+                  )}
+                  {stockMarketData.topLosers.length > 0 && (
+                    <span className="flex items-center gap-1 text-xs text-red-400 font-semibold">
+                      <TrendingDown className="w-3.5 h-3.5"/> {stockMarketData.topLosers.length}
+                    </span>
+                  )}
+                </>
+              )}
+              <button
+                onClick={handleCalcMovers}
+                disabled={stockMarketLoading}
+                className="flex items-center gap-1 text-[11px] px-2.5 py-1 rounded-lg bg-slate-800 border border-slate-700 text-slate-300 hover:bg-slate-700 hover:text-white transition-all disabled:opacity-50"
+              >
+                <RefreshCw className={`w-3 h-3 ${stockMarketLoading ? 'animate-spin' : ''}`}/>
+                {stockMarketData ? 'Atualizar' : 'Calcular'}
+              </button>
+            </div>
+          </div>
+
+          {stockMarketOpen && stockMarketData && (
+            <div className="grid grid-cols-1 lg:grid-cols-2 divide-y lg:divide-y-0 lg:divide-x divide-slate-800 border-t border-slate-800">
+
+              {/* Maiores Altas */}
+              <div className="p-3">
+                <div className="flex items-center gap-1.5 mb-2 px-1">
+                  <TrendingUp className="w-3.5 h-3.5 text-green-400"/>
+                  <span className="text-[11px] font-bold text-green-400 uppercase tracking-wider">Maiores Altas</span>
+                </div>
+                {stockMarketData.topGainers.length === 0 ? (
+                  <p className="text-xs text-slate-600 px-1 py-2">Nenhuma alta esta semana</p>
+                ) : (
+                  <div className="space-y-1">
+                    {stockMarketData.topGainers.map((entry, i) => (
+                      <div key={i} className="flex items-center justify-between px-2 py-1.5 rounded-lg hover:bg-slate-800/60 transition-colors">
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-medium text-slate-200 truncate">{entry.productName}</p>
+                          <p className="text-[10px] text-slate-500 truncate">{entry.supplierName}</p>
+                        </div>
+                        <div className="flex items-center gap-3 ml-3 shrink-0">
+                          <div className="text-right">
+                            <p className="text-xs text-slate-500 line-through">R$ {entry.previousPrice.toFixed(2)}</p>
+                            <p className="text-xs font-bold text-white">R$ {entry.currentPrice.toFixed(2)}</p>
+                          </div>
+                          <div className="flex items-center gap-0.5 bg-green-900/30 border border-green-800/50 rounded px-1.5 py-0.5 min-w-[52px] justify-center">
+                            <TrendingUp className="w-3 h-3 text-green-400"/>
+                            <span className="text-[11px] font-bold text-green-400">+{entry.changePct.toFixed(1)}%</span>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Maiores Baixas */}
+              <div className="p-3">
+                <div className="flex items-center gap-1.5 mb-2 px-1">
+                  <TrendingDown className="w-3.5 h-3.5 text-red-400"/>
+                  <span className="text-[11px] font-bold text-red-400 uppercase tracking-wider">Maiores Baixas</span>
+                </div>
+                {stockMarketData.topLosers.length === 0 ? (
+                  <p className="text-xs text-slate-600 px-1 py-2">Nenhuma baixa esta semana</p>
+                ) : (
+                  <div className="space-y-1">
+                    {stockMarketData.topLosers.map((entry, i) => (
+                      <div key={i} className="flex items-center justify-between px-2 py-1.5 rounded-lg hover:bg-slate-800/60 transition-colors">
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-medium text-slate-200 truncate">{entry.productName}</p>
+                          <p className="text-[10px] text-slate-500 truncate">{entry.supplierName}</p>
+                        </div>
+                        <div className="flex items-center gap-3 ml-3 shrink-0">
+                          <div className="text-right">
+                            <p className="text-xs text-slate-500 line-through">R$ {entry.previousPrice.toFixed(2)}</p>
+                            <p className="text-xs font-bold text-white">R$ {entry.currentPrice.toFixed(2)}</p>
+                          </div>
+                          <div className="flex items-center gap-0.5 bg-red-900/30 border border-red-800/50 rounded px-1.5 py-0.5 min-w-[52px] justify-center">
+                            <TrendingDown className="w-3 h-3 text-red-400"/>
+                            <span className="text-[11px] font-bold text-red-400">{entry.changePct.toFixed(1)}%</span>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+            </div>
+          )}
+
+          {stockMarketOpen && !stockMarketData && (
+            <div className="px-4 pb-4 text-center">
+              <p className="text-xs text-slate-600">Clique em <span className="text-slate-400 font-medium">Calcular</span> para ver as maiores altas e baixas da semana</p>
+            </div>
+          )}
+        </div>
+        {/* ── FIM STOCK MARKET ───────────────────────────────────────────── */}
+
         {unlinkConfirm && (
             <div className="fixed inset-0 z-[150] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
                 <div className="bg-slate-900 border border-slate-700 rounded-xl shadow-2xl p-6 max-w-sm w-full animate-in zoom-in-95">
