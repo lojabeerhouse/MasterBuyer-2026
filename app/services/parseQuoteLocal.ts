@@ -126,14 +126,33 @@ const resolvePrices = (
   return { packPrice: bigger, unitPrice: smaller };
 };
 
+const extractDateFromText = (text: string): number | undefined => {
+  // Patterns: "Data: dd/mm/yyyy", "Emissão dd/mm/yyyy", "Pedido: dd/mm/yyyy", or standalone dd/mm/yyyy
+  const patterns = [
+    /(?:data|emiss[aã]o|pedido|emitido)[:\s]+(\d{1,2})\/(\d{1,2})\/(\d{2,4})/i,
+    /(?:^|\s)(\d{2})\/(\d{2})\/(\d{4})(?:\s|$)/m,
+  ];
+  for (const pattern of patterns) {
+    const m = text.match(pattern);
+    if (m) {
+      const day = parseInt(m[1]);
+      const month = parseInt(m[2]) - 1;
+      const year = parseInt(m[3].length === 2 ? `20${m[3]}` : m[3]);
+      const ts = new Date(year, month, day, 0, 1).getTime();
+      if (!isNaN(ts) && ts > 0) return ts;
+    }
+  }
+  return undefined;
+};
+
 export const parseQuoteLocal = (
   text: string,
   globalPackRules: { term: string; quantity: number }[] = [],
   supplierPackRules: { term: string; quantity: number }[] = []
-): ProductQuote[] => {
+): { items: ProductQuote[]; detectedDate?: number } => {
   const allRules = [...supplierPackRules, ...globalPackRules];
   const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 2);
-  const results: ProductQuote[] = [];
+  const items: ProductQuote[] = [];
 
   for (const line of lines) {
     const prices = extractPrices(line);
@@ -150,7 +169,7 @@ export const parseQuoteLocal = (
     const { packPrice, unitPrice } = resolvePrices(prices, packQty);
     if (packPrice === 0 && unitPrice === 0) continue;
 
-    results.push({
+    items.push({
       sku,
       name: name.toUpperCase(),
       price: packPrice,
@@ -163,5 +182,5 @@ export const parseQuoteLocal = (
     });
   }
 
-  return results;
+  return { items, detectedDate: extractDateFromText(text) };
 };

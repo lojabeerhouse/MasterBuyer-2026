@@ -131,12 +131,6 @@ const ProductDatabase: React.FC<ProductDatabaseProps> = ({ masterProducts = [], 
       return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  // Load from URL on mount if present and DB is empty
-  useEffect(() => {
-      if (sheetUrl && Array.isArray(masterProducts) && masterProducts.length === 0) {
-          fetchFromUrl(sheetUrl, true);
-      }
-  }, []);
 
   const addToast = (message: string, type: 'success' | 'info' | 'error' = 'success') => {
       const id = crypto.randomUUID();

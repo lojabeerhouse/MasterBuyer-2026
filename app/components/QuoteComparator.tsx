@@ -179,6 +179,7 @@ const QuoteComparator: React.FC<QuoteComparatorProps> = ({
   const [mappingSourceProduct, setMappingSourceProduct] = useState<string | null>(null);
   const [mappingSearchTerm, setMappingSearchTerm] = useState('');
   const [unlinkConfirm, setUnlinkConfirm] = useState<{ productName: string } | null>(null);
+  const [categoryMode, setCategoryMode] = useState<'database' | 'auto'>('database');
 
   const toggleCategory = (cat: string) => {
       const newSet = new Set(collapsedCategories);

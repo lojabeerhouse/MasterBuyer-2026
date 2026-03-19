@@ -9,12 +9,12 @@ export const parseQuoteContent = async (
   content: string,
   mimeType: string = 'text/plain',
   isBase64: boolean = false
-): Promise<ProductQuote[]> => {
+): Promise<{ items: ProductQuote[], detectedDate?: number }> => {
   const ai = getAI();
-  
+
   const prompt = `
     TASK: Extract product data from the provided input (Price List / Invoice).
-    
+
     CRITICAL INSTRUCTIONS FOR PACK QUANTITY (LOTE):
     1. 'packQuantity' is the number of units inside the box/case.
     2. DO NOT CONFUSE LIQUID/WEIGHT MEASUREMENTS WITH QUANTITY.
@@ -24,14 +24,17 @@ export const parseQuoteContent = async (
     3. ONLY extract 'packQuantity' > 1 if explicit keywords exist: "Cx", "Caixa", "Fdo", "Fardo", "Pack", "C/12", "C/24", "X12".
     4. If unsure or if it looks like a single unit, default 'packQuantity' to 1.
     5. READ THE ENTIRE DOCUMENT. Do not stop after the first few pages.
+    6. Extract 'documentDate': the emission/issue date of the document (NOT a delivery/forecast date). Format: YYYY-MM-DD. Leave empty string if not found.
 
-    OUTPUT SCHEMA (Array of Objects):
-    - sku: string (Code/ID)
-    - name: string (Product Description)
-    - price: number (Listed Price - usually the price of the PACK if it's a wholesale list)
-    - unit: string (Unit type: un, cx, kg)
-    - packQuantity: number (Items per pack. Default 1)
-    - unitPrice: number (Calculated price per single unit. If price is for pack, unitPrice = price / packQuantity)
+    OUTPUT SCHEMA (Object):
+    - documentDate: string (ISO date YYYY-MM-DD of document emission, or "" if not found)
+    - items: array of product objects:
+      - sku: string (Code/ID)
+      - name: string (Product Description)
+      - price: number (Listed Price - usually the price of the PACK if it's a wholesale list)
+      - unit: string (Unit type: un, cx, kg)
+      - packQuantity: number (Items per pack. Default 1)
+      - unitPrice: number (Calculated price per single unit. If price is for pack, unitPrice = price / packQuantity)
 
     Return RAW JSON only.
   `;
@@ -65,19 +68,26 @@ export const parseQuoteContent = async (
       config: {
         responseMimeType: "application/json",
         responseSchema: {
-          type: Type.ARRAY,
-          items: {
-            type: Type.OBJECT,
-            properties: {
-              sku: { type: Type.STRING, description: "Code" },
-              name: { type: Type.STRING, description: "Name" },
-              price: { type: Type.NUMBER, description: "Price" },
-              unit: { type: Type.STRING, description: "Unit" },
-              packQuantity: { type: Type.NUMBER, description: "Qty" },
-              unitPrice: { type: Type.NUMBER, description: "Unit Price" }
-            },
-            required: ["name", "price", "packQuantity", "unitPrice"]
-          }
+          type: Type.OBJECT,
+          properties: {
+            documentDate: { type: Type.STRING, description: "ISO date YYYY-MM-DD of document emission, or empty string" },
+            items: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  sku: { type: Type.STRING, description: "Code" },
+                  name: { type: Type.STRING, description: "Name" },
+                  price: { type: Type.NUMBER, description: "Price" },
+                  unit: { type: Type.STRING, description: "Unit" },
+                  packQuantity: { type: Type.NUMBER, description: "Qty" },
+                  unitPrice: { type: Type.NUMBER, description: "Unit Price" }
+                },
+                required: ["name", "price", "packQuantity", "unitPrice"]
+              }
+            }
+          },
+          required: ["items"]
         }
       }
     });
@@ -88,31 +98,41 @@ export const parseQuoteContent = async (
     // Clean Markdown if present
     text = text.replace(/^```json\s*/, "").replace(/^```\s*/, "").replace(/```$/, "");
 
+    const parseItems = (rawItems: ProductQuote[]): ProductQuote[] =>
+      rawItems.map(item => ({
+        ...item,
+        sku: item.sku || 'S/N',
+        isVerified: item.packQuantity > 1
+      }));
+
+    const parseDateStr = (dateStr?: string): number | undefined => {
+      if (!dateStr) return undefined;
+      const ts = new Date(dateStr + 'T00:01:00').getTime();
+      return isNaN(ts) ? undefined : ts;
+    };
+
     try {
-        const items = JSON.parse(text) as ProductQuote[];
-        // Mark items with packQuantity > 1 as verified, assuming the regex/logic worked
-        return items.map(item => ({
-            ...item,
-            sku: item.sku || 'S/N', // Ensure SKU is never undefined
-            isVerified: item.packQuantity > 1
-        }));
+        const parsed = JSON.parse(text);
+        const rawItems = (parsed.items ?? parsed) as ProductQuote[];
+        return {
+          items: parseItems(rawItems),
+          detectedDate: parseDateStr(parsed.documentDate),
+        };
     } catch (parseError) {
         console.warn("JSON Parse failed, attempting auto-repair for truncated JSON...");
-        
-        // Attempt to find the last valid closing object brace '}' and close the array ']'
         const lastClose = text.lastIndexOf('}');
         if (lastClose !== -1) {
-            const repaired = text.substring(0, lastClose + 1) + "]";
+            const repaired = text.substring(0, lastClose + 1) + "}";
             try {
-                const items = JSON.parse(repaired) as ProductQuote[];
-                return items.map(item => ({
-                    ...item,
-                    sku: item.sku || 'S/N', // Ensure SKU is never undefined
-                    isVerified: item.packQuantity > 1
-                }));
+                const parsed = JSON.parse(repaired);
+                const rawItems = (parsed.items ?? []) as ProductQuote[];
+                return {
+                  items: parseItems(rawItems),
+                  detectedDate: parseDateStr(parsed.documentDate),
+                };
             } catch (e2) {
                 console.error("Repair failed:", e2);
-                throw parseError; 
+                throw parseError;
             }
         }
         throw parseError;

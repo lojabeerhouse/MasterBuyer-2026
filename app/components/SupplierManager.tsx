@@ -41,9 +41,11 @@ interface SupplierManagerProps {
   globalPackRules: PackRule[];
   setGlobalPackRules: React.Dispatch<React.SetStateAction<PackRule[]>>;
   onBatchCompleted?: (batch: QuoteBatch, supplierId: string) => void;
+  uid?: string;
+  onBatchDateChange?: (supplierId: string, batchId: string, newTimestamp: number, items: ProductQuote[]) => void;
 }
 
-const SupplierManager: React.FC<SupplierManagerProps> = ({ suppliers, setSuppliers, globalPackRules, setGlobalPackRules, onBatchCompleted }) => {
+const SupplierManager: React.FC<SupplierManagerProps> = ({ suppliers, setSuppliers, globalPackRules, setGlobalPackRules, onBatchCompleted, uid, onBatchDateChange }) => {
   const [newSupplierName, setNewSupplierName] = useState('');
   const [activeTab, setActiveTab] = useState<string | null>(null);
   const [textInput, setTextInput] = useState('');
@@ -114,6 +116,18 @@ const SupplierManager: React.FC<SupplierManagerProps> = ({ suppliers, setSupplie
   
   const [dontAskAgain, setDontAskAgain] = useState(false);
   const dontAskAgainRef = useRef(false); // Ref for immediate access
+
+  const [showUnsavedDialog, setShowUnsavedDialog] = useState<{ supplierId: string } | null>(null);
+
+  // Quote sort mode
+  const [quoteSortMode, setQuoteSortMode] = useState<'quoteDate' | 'uploadDate'>('quoteDate');
+
+  // Raw content viewer
+  const [viewingRawContent, setViewingRawContent] = useState<{
+    content: string;
+    fileName: string;
+    supplierId: string;
+  } | null>(null);
 
   // Animation State: keys are `${batchId}-${itemIndex}`
   const [animatingRows, setAnimatingRows] = useState<Record<string, 'ban' | 'delete'>>({});
@@ -294,9 +308,11 @@ const SupplierManager: React.FC<SupplierManagerProps> = ({ suppliers, setSupplie
                   const base64 = (reader.result as string).split(',')[1];
                   const mimeType = file.type;
                   
+                  const _uploadedAt = Date.now();
                   const newBatch: QuoteBatch = {
                       id: crypto.randomUUID(),
-                      timestamp: Date.now(), // Ensure unique timestamp ordering
+                      timestamp: _uploadedAt,
+                      uploadedAt: _uploadedAt,
                       sourceType: 'file',
                       fileName: file.name,
                       status: 'analyzing',
@@ -327,7 +343,9 @@ const SupplierManager: React.FC<SupplierManagerProps> = ({ suppliers, setSupplie
                           // NF-e já vem com isVerified=true — não precisa de pack rules
                       } else {
                           // ── Outros formatos: IA Gemini ───────────────────
-                          quotes = await parseQuoteContent(base64, mimeType, true);
+                          const geminiResult = await parseQuoteContent(base64, mimeType, true);
+                          quotes = geminiResult.items;
+                          if (geminiResult.detectedDate) detectedDate = geminiResult.detectedDate;
                           quotes = filterBlacklisted(quotes, supplierId);
                           quotes = applyRulesToQuotes(quotes, supplierExceptions, globalPackRules);
                       }
@@ -481,6 +499,9 @@ const SupplierManager: React.FC<SupplierManagerProps> = ({ suppliers, setSupplie
     }));
     if (viewingBatch?.id === batchId) setViewingBatch(prev => prev ? { ...prev, timestamp: ts } : prev);
     setEditingBatchDate(false);
+    // Propagate date change to catalog and history
+    const batch = suppliers.find(s => s.id === supplierId)?.quotes.find(q => q.id === batchId);
+    if (batch) onBatchDateChange?.(supplierId, batchId, ts, batch.items);
   };
 
   // --- SAVE BATCH (manual confirmation) ---
@@ -571,20 +592,31 @@ const SupplierManager: React.FC<SupplierManagerProps> = ({ suppliers, setSupplie
     const hasChanges = JSON.stringify(viewingBatch.items) !== JSON.stringify(batchSnapshot.items)
       || viewingBatch.timestamp !== batchSnapshot.timestamp;
     if (hasChanges) {
-      if (window.confirm('Você fez alterações não salvas. Descartar as mudanças?')) {
-        // Restaurar snapshot
-        setSuppliers(prev => prev.map(s => {
-          if (s.id !== supplierId) return s;
-          return { ...s, quotes: s.quotes.map(q => q.id === batchSnapshot.id ? batchSnapshot : q) };
-        }));
-        setViewingBatch(null);
-        setBatchSnapshot(null);
-      }
-      // Se cancelar, permanece com o modal aberto
+      setShowUnsavedDialog({ supplierId });
     } else {
       setViewingBatch(null);
       setBatchSnapshot(null);
     }
+  };
+
+  const handleSaveAndClose = () => {
+    if (!showUnsavedDialog || !viewingBatch) return;
+    saveBatch(showUnsavedDialog.supplierId, viewingBatch.id);
+    learnPackRulesFromBatch(viewingBatch, showUnsavedDialog.supplierId, selectedSupplier?.name || '');
+    setViewingBatch(null);
+    setBatchSnapshot(null);
+    setShowUnsavedDialog(null);
+  };
+
+  const handleDiscardAndClose = () => {
+    if (!showUnsavedDialog || !batchSnapshot) return;
+    setSuppliers(prev => prev.map(s => {
+      if (s.id !== showUnsavedDialog.supplierId) return s;
+      return { ...s, quotes: s.quotes.map(q => q.id === batchSnapshot.id ? batchSnapshot : q) };
+    }));
+    setViewingBatch(null);
+    setBatchSnapshot(null);
+    setShowUnsavedDialog(null);
   };
 
   // Re-run rules on existing quotes
@@ -1056,9 +1088,11 @@ const SupplierManager: React.FC<SupplierManagerProps> = ({ suppliers, setSupplie
   const handleTextSubmit = (supplierId: string) => {
     if (!textInput.trim()) return;
     
+    const _textUploadedAt = Date.now();
     const newBatch: QuoteBatch = {
       id: crypto.randomUUID(),
-      timestamp: Date.now(),
+      timestamp: _textUploadedAt,
+      uploadedAt: _textUploadedAt,
       sourceType: 'text',
       rawContent: textInput,
       status: 'analyzing',
@@ -1074,14 +1108,20 @@ const SupplierManager: React.FC<SupplierManagerProps> = ({ suppliers, setSupplie
 
     try {
       // Usa parser local — sem Gemini, offline, gratuito
-      let quotes = parseQuoteLocal(textInput, globalPackRules, supplierExceptions);
-      quotes = filterBlacklisted(quotes, supplierId);
+      const localResult = parseQuoteLocal(textInput, globalPackRules, supplierExceptions);
+      let quotes = filterBlacklisted(localResult.items, supplierId);
 
       // Aplica regras de nomenclatura (naming rules continuam funcionando)
       quotes = applyRulesToQuotes(quotes, supplierExceptions, globalPackRules);
 
       const initializedQuotes = quotes.map(q => recalculateItem({...q, priceStrategy: 'pack'}, 'pack'));
-      const completedBatch = { ...newBatch, status: 'completed' as const, items: initializedQuotes };
+      const detectedDate = localResult.detectedDate;
+      const completedBatch: QuoteBatch = {
+        ...newBatch,
+        status: 'completed',
+        items: initializedQuotes,
+        ...(detectedDate ? { detectedDate, timestamp: detectedDate } : {}),
+      };
       updateSupplierQuotes(supplierId, completedBatch);
       onBatchCompleted?.(completedBatch, supplierId);
     } catch (error) {
@@ -1115,6 +1155,63 @@ const SupplierManager: React.FC<SupplierManagerProps> = ({ suppliers, setSupplie
         }));
     }
   }
+
+  // --- RAW CONTENT HANDLERS ---
+  const handleCopyRawContent = () => {
+    if (!viewingRawContent) return;
+    navigator.clipboard.writeText(viewingRawContent.content);
+  };
+
+  const handleDownloadRawContent = () => {
+    if (!viewingRawContent) return;
+    const blob = new Blob([viewingRawContent.content], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${viewingRawContent.fileName}.txt`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  const handleImportRawContent = () => {
+    if (!viewingRawContent) return;
+    const { content, supplierId } = viewingRawContent;
+    setViewingRawContent(null);
+    // Re-use text batch flow
+    const currentSupplier = suppliers.find(s => s.id === supplierId);
+    const supplierExceptions = currentSupplier?.packRules || [];
+    const _importUploadedAt = Date.now();
+    const newBatch: QuoteBatch = {
+      id: crypto.randomUUID(),
+      timestamp: _importUploadedAt,
+      uploadedAt: _importUploadedAt,
+      sourceType: 'text',
+      rawContent: content,
+      status: 'analyzing',
+      items: []
+    };
+    updateSupplierQuotes(supplierId, newBatch);
+    setActiveTab(supplierId);
+    try {
+      const localResult = parseQuoteLocal(content, globalPackRules, supplierExceptions);
+      let quotes = filterBlacklisted(localResult.items, supplierId);
+      quotes = applyRulesToQuotes(quotes, supplierExceptions, globalPackRules);
+      const initializedQuotes = quotes.map(q => recalculateItem({...q, priceStrategy: 'pack'}, 'pack'));
+      const detectedDate = localResult.detectedDate;
+      const completedBatch: QuoteBatch = {
+        ...newBatch,
+        status: 'completed',
+        items: initializedQuotes,
+        ...(detectedDate ? { detectedDate, timestamp: detectedDate } : {}),
+      };
+      updateSupplierQuotes(supplierId, completedBatch);
+      onBatchCompleted?.(completedBatch, supplierId);
+    } catch {
+      updateSupplierQuotes(supplierId, { ...newBatch, status: 'error', errorMessage: 'Falha ao processar texto.' });
+    }
+  };
 
   // --- RENDER HELPERS ---
   const renderItemRow = (item: ProductQuote, idx: number, batchId: string) => {
@@ -1341,6 +1438,7 @@ const SupplierManager: React.FC<SupplierManagerProps> = ({ suppliers, setSupplie
   };
 
   return (
+    <>
     <div className="grid grid-cols-1 md:grid-cols-4 gap-6 h-full relative">
       <style>{`
           @keyframes progressFill {
@@ -1373,6 +1471,33 @@ const SupplierManager: React.FC<SupplierManagerProps> = ({ suppliers, setSupplie
                      <button onClick={confirmPendingAction} className={`px-3 py-1.5 text-xs text-white rounded font-medium shadow-md ${confirmAction.type === 'ban' ? 'bg-red-600 hover:bg-red-700' : 'bg-slate-600 hover:bg-slate-500'}`}>Confirmar</button>
                  </div>
              </div>
+          </div>
+      )}
+
+      {/* UNSAVED CHANGES DIALOG */}
+      {showUnsavedDialog && (
+          <div className="fixed inset-0 z-[130] flex items-center justify-center pointer-events-auto">
+              <div className="absolute inset-0 bg-black/50" onClick={() => setShowUnsavedDialog(null)}/>
+              <div className="bg-slate-800 border border-slate-600 rounded-xl shadow-2xl p-5 w-80 relative z-10">
+                  <div className="flex items-center gap-2 mb-2">
+                      <AlertTriangle className="w-4 h-4 text-amber-400"/>
+                      <h4 className="font-bold text-white text-sm">Alterações não salvas</h4>
+                  </div>
+                  <p className="text-xs text-slate-400 mb-4">
+                      Você fez alterações nesta cotação. O que deseja fazer?
+                  </p>
+                  <div className="flex flex-col gap-2">
+                      <button onClick={handleSaveAndClose} className="px-3 py-2 text-xs text-white bg-amber-600 hover:bg-amber-500 rounded-lg font-semibold flex items-center gap-2 transition-colors">
+                          <Save className="w-3.5 h-3.5"/> Salvar e fechar
+                      </button>
+                      <button onClick={handleDiscardAndClose} className="px-3 py-2 text-xs text-slate-200 bg-slate-700 hover:bg-slate-600 rounded-lg font-medium flex items-center gap-2 transition-colors">
+                          <X className="w-3.5 h-3.5"/> Fechar sem salvar
+                      </button>
+                      <button onClick={() => setShowUnsavedDialog(null)} className="px-3 py-1.5 text-xs text-slate-400 hover:text-white text-center transition-colors">
+                          Cancelar
+                      </button>
+                  </div>
+              </div>
           </div>
       )}
 
@@ -1660,10 +1785,17 @@ const SupplierManager: React.FC<SupplierManagerProps> = ({ suppliers, setSupplie
                                     <button onClick={() => setEditingBatchDate(false)} className="text-red-400 p-0.5"><X className="w-3 h-3"/></button>
                                 </div>
                             ) : (
+                                <>
                                 <button onClick={() => startEditingBatchDate(viewingBatch)} className="flex items-center gap-1 text-slate-400 hover:text-amber-400 transition-colors group/date">
                                     <span className="text-xs">{new Date(viewingBatch.timestamp).toLocaleString('pt-BR')}</span>
                                     <Pencil className="w-2.5 h-2.5 opacity-0 group-hover/date:opacity-100 transition-opacity"/>
                                 </button>
+                                {viewingBatch.uploadedAt && viewingBatch.uploadedAt !== viewingBatch.timestamp && (
+                                    <span className="text-[9px] text-slate-700 ml-1">
+                                        · upload: {new Date(viewingBatch.uploadedAt).toLocaleString('pt-BR')}
+                                    </span>
+                                )}
+                                </>
                             )}
                         </div>
                     </div>
@@ -2028,26 +2160,38 @@ const SupplierManager: React.FC<SupplierManagerProps> = ({ suppliers, setSupplie
 
             <div className="space-y-3 pb-10">
                <div className="flex items-center justify-between">
-                   <h3 className="font-semibold text-slate-300">Histórico de Cotações</h3>
-                   
+                   <div className="flex items-center gap-2">
+                     <h3 className="font-semibold text-slate-300">Histórico de Cotações</h3>
+                     <div className="flex gap-1">
+                       <button onClick={() => setQuoteSortMode('quoteDate')}
+                         className={`px-2 py-0.5 text-[10px] rounded transition-colors ${quoteSortMode === 'quoteDate' ? 'bg-amber-600 text-white' : 'text-slate-500 hover:text-white'}`}>
+                         Data cotação
+                       </button>
+                       <button onClick={() => setQuoteSortMode('uploadDate')}
+                         className={`px-2 py-0.5 text-[10px] rounded transition-colors ${quoteSortMode === 'uploadDate' ? 'bg-amber-600 text-white' : 'text-slate-500 hover:text-white'}`}>
+                         Data upload
+                       </button>
+                     </div>
+                   </div>
+
                    <div className="relative w-64">
                         <Search className="absolute left-2.5 top-2 w-4 h-4 text-slate-500" />
-                        <input 
-                            type="text" 
-                            placeholder="Buscar no histórico..." 
+                        <input
+                            type="text"
+                            placeholder="Buscar no histórico..."
                             value={historySearchTerm}
                             onChange={(e) => setHistorySearchTerm(e.target.value)}
                             className="w-full bg-slate-900 border border-slate-700 rounded-md py-1.5 pl-9 pr-4 text-xs text-white focus:border-amber-500 focus:outline-none"
                         />
                    </div>
                </div>
-               
+
                {selectedSupplier.quotes.length === 0 && (
                  <div className="text-center py-8 text-slate-500 bg-slate-800/50 rounded border border-dashed border-slate-700">
                     Nenhuma cotação registrada. Faça upload, cole texto ou use um link.
                  </div>
                )}
-               {selectedSupplier.quotes
+               {[...selectedSupplier.quotes]
                  .filter(q => {
                      if (!historySearchTerm) return true;
                      const term = historySearchTerm.toLowerCase();
@@ -2055,9 +2199,24 @@ const SupplierManager: React.FC<SupplierManagerProps> = ({ suppliers, setSupplie
                      const matchItem = q.items.some(i => i.name.toLowerCase().includes(term));
                      return matchName || matchItem;
                  })
+                 .sort((a, b) => {
+                     if (quoteSortMode === 'uploadDate') {
+                       return (b.uploadedAt ?? b.timestamp) - (a.uploadedAt ?? a.timestamp);
+                     }
+                     return b.timestamp - a.timestamp;
+                 })
                  .map((quote) => (
                  <div key={quote.id} className="bg-slate-900 border border-slate-700 rounded p-4 relative group hover:border-amber-500/30 transition-all">
                     <div className="absolute top-2 right-2 flex items-center gap-1">
+                        {quote.rawContent && (
+                            <button
+                                onClick={(e) => { e.stopPropagation(); setViewingRawContent({ content: quote.rawContent!, fileName: quote.fileName ?? 'texto', supplierId: selectedSupplier.id }); }}
+                                className="text-slate-600 hover:text-amber-400 p-1"
+                                title="Ver texto bruto"
+                            >
+                                <FileText className="w-4 h-4"/>
+                            </button>
+                        )}
                         {quote.status === 'completed' && (
                             <button
                                 onClick={() => downloadQuoteAsCsv(quote)}
@@ -2067,7 +2226,7 @@ const SupplierManager: React.FC<SupplierManagerProps> = ({ suppliers, setSupplie
                                 <Download className="w-4 h-4"/>
                             </button>
                         )}
-                        <button 
+                        <button
                             onClick={(e) => { e.stopPropagation(); removeQuoteBatch(selectedSupplier.id, quote.id); }}
                             className="text-slate-600 hover:text-red-400 p-1"
                             title="Apagar Cotação"
@@ -2083,13 +2242,18 @@ const SupplierManager: React.FC<SupplierManagerProps> = ({ suppliers, setSupplie
                             {quote.status === 'error' && <AlertCircle className="w-5 h-5 text-red-500" />}
                         </div>
                         <div className="flex-1">
-                            <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-2 flex-wrap">
                                 <span className="font-medium text-slate-200">
                                     {quote.sourceType === 'file' ? `Arquivo: ${quote.fileName}` : 'Texto Colado'}
                                 </span>
                                 <span className="text-xs text-slate-500">
-                                    {new Date(quote.timestamp).toLocaleString()}
+                                    {new Date(quote.timestamp).toLocaleString('pt-BR')}
                                 </span>
+                                {quote.uploadedAt && quote.uploadedAt !== quote.timestamp && (
+                                    <span className="text-[9px] text-slate-700">
+                                        upload: {new Date(quote.uploadedAt).toLocaleString('pt-BR')}
+                                    </span>
+                                )}
                             </div>
                             
                             {quote.status === 'completed' && (
@@ -2144,6 +2308,45 @@ const SupplierManager: React.FC<SupplierManagerProps> = ({ suppliers, setSupplie
         )}
       </div>
     </div>
+
+    {/* Raw Content Modal */}
+
+    {viewingRawContent && (
+      <div className="fixed inset-0 z-[120] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+        <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-2xl max-h-[80vh] flex flex-col">
+          <div className="flex items-center justify-between p-4 border-b border-slate-800 gap-2 flex-wrap">
+            <span className="text-white text-sm font-semibold truncate">{viewingRawContent.fileName}</span>
+            <div className="flex gap-2 flex-shrink-0">
+              <button
+                onClick={handleCopyRawContent}
+                className="px-3 py-1 rounded text-xs bg-slate-700 hover:bg-slate-600 text-slate-200 flex items-center gap-1"
+              >
+                <Files className="w-3 h-3"/> Copiar
+              </button>
+              <button
+                onClick={handleDownloadRawContent}
+                className="px-3 py-1 rounded text-xs bg-slate-700 hover:bg-slate-600 text-slate-200 flex items-center gap-1"
+              >
+                <Download className="w-3 h-3"/> Baixar
+              </button>
+              <button
+                onClick={handleImportRawContent}
+                className="px-3 py-1 rounded text-xs bg-amber-600 hover:bg-amber-500 text-white flex items-center gap-1"
+              >
+                <FilePlus className="w-3 h-3"/> Importar como cotação
+              </button>
+              <button onClick={() => setViewingRawContent(null)} className="text-slate-400 hover:text-white p-1">
+                <X className="w-4 h-4"/>
+              </button>
+            </div>
+          </div>
+          <pre className="p-4 overflow-auto text-xs text-slate-300 whitespace-pre-wrap flex-1 font-mono">
+            {viewingRawContent.content}
+          </pre>
+        </div>
+      </div>
+    )}
+    </>
   );
 };
 

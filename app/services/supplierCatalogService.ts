@@ -68,7 +68,9 @@ export const findMasterProductMatches = (
 export const saveCatalog = async (uid: string, catalog: SupplierCatalog): Promise<void> => {
   try {
     const ref = doc(db, 'users', uid, 'catalogs', catalog.supplierId);
-    await setDoc(ref, catalog);
+    // JSON round-trip remove campos undefined (Firestore não aceita undefined)
+    const clean = JSON.parse(JSON.stringify(catalog));
+    await setDoc(ref, clean);
   } catch (e) {
     console.error('[Catalog] Erro ao salvar:', e);
   }

@@ -54,16 +54,19 @@ const ProductCatalog: React.FC<ProductCatalogProps> = ({ suppliers, cart, setCar
     };
 
     suppliers.filter(s => s.isEnabled).forEach(supplier => {
-        // Get only the most recent completed quote
-        const latestQuote = [...supplier.quotes]
+        // All completed quotes sorted by recency (newest first)
+        const completedQuotes = [...supplier.quotes]
             .filter(q => q.status === 'completed')
-            .sort((a, b) => b.timestamp - a.timestamp)[0];
+            .sort((a, b) => b.timestamp - a.timestamp);
 
-        if (latestQuote) {
-            latestQuote.items.forEach(q => {
-                // Try to find matching forecast item to get totalSold
+        // Deduplicate by product name: first occurrence = most recent price
+        const seenNames = new Map<string, boolean>();
+        for (const quote of completedQuotes) {
+            for (const q of quote.items) {
+                if (seenNames.has(q.name)) continue;
+                seenNames.set(q.name, true);
+
                 const sold = getSales(q.name, q.sku || '');
-
                 items.push({
                     id: `${supplier.id}-${q.name}-${q.packQuantity}`,
                     supplierId: supplier.id,
@@ -74,10 +77,10 @@ const ProductCatalog: React.FC<ProductCatalogProps> = ({ suppliers, cart, setCar
                     unit: q.unit,
                     packQuantity: q.packQuantity,
                     unitPrice: q.unitPrice,
-                    date: latestQuote.timestamp,
+                    date: quote.timestamp,
                     totalSold: sold
                 });
-            });
+            }
         }
     });
 

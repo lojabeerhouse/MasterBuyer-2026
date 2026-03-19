@@ -1,9 +1,9 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { signInWithPopup, signOut, onAuthStateChanged, User } from 'firebase/auth';
 import { auth, googleProvider } from './firebaseConfig';
-import { saveUserData, loadUserData } from './services/firebaseService';
-import { loadNotifications, saveNotifications, processBatchIntoHistory, resolveDuplicate } from './services/historyService';
-import { loadAllCatalogs, processBatchIntoCatalog } from './services/supplierCatalogService';
+import { saveUserData, loadUserData, saveChunkedData, loadChunkedData } from './services/firebaseService';
+import { loadNotifications, saveNotifications, processBatchIntoHistory, resolveDuplicate, normalizeProductKey, loadPriceHistory, savePriceHistory } from './services/historyService';
+import { loadAllCatalogs, processBatchIntoCatalog, saveCatalog } from './services/supplierCatalogService';
 import NotificationCenter from './components/NotificationCenter';
 import SalesAnalyzer from './components/SalesAnalyzer';
 import QuoteComparator from './components/QuoteComparator';
@@ -15,6 +15,7 @@ import OfferFlyer from './components/OfferFlyer';
 import SupplierManager from './components/SupplierManager';
 import SupplierCatalogView from './components/SupplierCatalogView';
 import AppSettingsPanel from './components/AppSettings';
+import UserProfilePanel from './components/UserProfile';
 import {
   Supplier,
   ForecastItem,
@@ -30,9 +31,16 @@ import {
   HiddenProduct,
   AppSettings,
   PurchaseOrder,
+  UserProfile,
 } from './types';
-import { BarChart3, Users, FileText, Database, Tag, Scale, LogOut, Settings, CalendarDays, ClipboardList } from 'lucide-react';
+import {
+  BarChart3, Users, FileText, Database, Scale, Settings,
+  CalendarDays, ClipboardList, LogOut, ChevronDown, Tag, MessageSquare,
+} from 'lucide-react';
 import BuyingAssistant from './components/BuyingAssistant';
+import QuoteRequest from './components/QuoteRequest';
+
+// ─── defaults ────────────────────────────────────────────────────────────────
 
 const defaultGlobalPackRules: PackRule[] = [
   { id: 'def-1', term: 'Lata 350ml', quantity: 12 },
@@ -53,7 +61,16 @@ const defaultGlobalPackRules: PackRule[] = [
   { id: 'def-16', term: 'Ice', quantity: 24 },
 ];
 
-// Tela de Login
+const DEFAULT_USER_PROFILE: UserProfile = {
+  displayName: '',
+  companyName: '',
+  document: '',
+  email: '',
+  deliveryAddresses: [],
+};
+
+// ─── Login / Loading ──────────────────────────────────────────────────────────
+
 const LoginScreen: React.FC<{ onLogin: () => void; loading: boolean }> = ({ onLogin, loading }) => (
   <div className="flex flex-col items-center justify-center h-screen bg-slate-950 text-slate-200">
     <div className="bg-slate-900 border border-slate-800 rounded-2xl p-10 flex flex-col items-center gap-6 shadow-2xl w-full max-w-sm">
@@ -88,7 +105,6 @@ const LoginScreen: React.FC<{ onLogin: () => void; loading: boolean }> = ({ onLo
   </div>
 );
 
-// Tela de carregamento
 const LoadingScreen: React.FC = () => (
   <div className="flex flex-col items-center justify-center h-screen bg-slate-950 text-slate-400 gap-4">
     <div className="w-10 h-10 bg-amber-600 rounded-lg flex items-center justify-center animate-pulse">
@@ -98,16 +114,22 @@ const LoadingScreen: React.FC = () => (
   </div>
 );
 
+// ─── App ──────────────────────────────────────────────────────────────────────
+
 const App: React.FC = () => {
   // --- AUTH STATE ---
   const [user, setUser] = useState<User | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [loginLoading, setLoginLoading] = useState(false);
   const [dataLoading, setDataLoading] = useState(false);
-  const [isLoaded, setIsLoaded] = useState(false); // flag: só salva após carregar
+  const [isLoaded, setIsLoaded] = useState(false);
 
   // --- APP STATE ---
-  const [activeTab, setActiveTab] = useState<'sales' | 'comparator' | 'purchase_orders' | 'schedule' | 'catalog' | 'suppliers' | 'database' | 'settings'>('suppliers');
+  const [activeTab, setActiveTab] = useState<
+    'sales' | 'comparator' | 'purchase_orders' | 'schedule' |
+    'catalog' | 'suppliers' | 'database' | 'settings' | 'profile' | 'quote_request'
+  >('suppliers');
+
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [salesData, setSalesData] = useState<SalesRecord[]>([]);
   const [salesConfig, setSalesConfig] = useState({ historyDays: 60, inflation: 10, forecastDays: 7 });
@@ -122,19 +144,35 @@ const App: React.FC = () => {
   const [dbSheetUrl, setDbSheetUrl] = useState<string>("");
   const [globalPackRules, setGlobalPackRules] = useState<PackRule[]>(defaultGlobalPackRules);
   const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([]);
+  const [userProfile, setUserProfile] = useState<UserProfile>(DEFAULT_USER_PROFILE);
 
   // --- NOTIFICATIONS ---
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
 
-  // Catálogos de fornecedores (por supplierId)
+  // --- CATALOGS ---
   const [supplierCatalogs, setSupplierCatalogs] = useState<Record<string, SupplierCatalog>>({});
   const [priceValidityConfig, setPriceValidityConfig] = useState<PriceValidityConfig>({ globalDays: 7 });
-  // aba do catálogo atualmente selecionada (supplierId ou 'master')
   const [catalogTab, setCatalogTab] = useState<string>('master');
 
-  // Produtos ocultos + configurações gerais
+  // --- SETTINGS ---
   const [hiddenProducts, setHiddenProducts] = useState<HiddenProduct[]>([]);
   const [appSettings, setAppSettings] = useState<AppSettings>({ showInactiveProducts: false, priceValidityDays: 7 });
+
+  // --- PROFILE DROPDOWN ---
+  const [profileDropdownOpen, setProfileDropdownOpen] = useState(false);
+  const [offerFlyerOpen, setOfferFlyerOpen] = useState(false);
+  const profileDropdownRef = useRef<HTMLDivElement>(null);
+
+  // Fecha dropdown ao clicar fora
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (profileDropdownRef.current && !profileDropdownRef.current.contains(e.target as Node)) {
+        setProfileDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   // --- AUTH LISTENER ---
   useEffect(() => {
@@ -172,7 +210,7 @@ const App: React.FC = () => {
       loadUserData<CartItem[]>(uid, 'cart', []),
       loadUserData<ProductMapping[]>(uid, 'mappings', []),
       loadUserData<ProductMapping[]>(uid, 'ignoredMappings', []),
-      loadUserData<MasterProduct[]>(uid, 'masterProducts', []),
+      loadChunkedData<MasterProduct>(uid, 'masterProducts', []),
       loadUserData<string>(uid, 'dbSheetUrl', ""),
       loadUserData<string>(uid, 'salesUrl', ""),
       loadUserData<boolean>(uid, 'considerStock', true),
@@ -192,11 +230,9 @@ const App: React.FC = () => {
     setConsiderStock(savedConsiderStock);
     setGlobalPackRules(savedPackRules);
 
-    // Load notifications
     const savedNotifications = await loadNotifications(uid);
     setNotifications(savedNotifications);
 
-    // Load supplier catalogs + price validity config
     const [allCatalogs, savedValidityConfig] = await Promise.all([
       loadAllCatalogs(uid),
       loadUserData<PriceValidityConfig>(uid, 'priceValidityConfig', { globalDays: 7 }),
@@ -206,20 +242,22 @@ const App: React.FC = () => {
     setSupplierCatalogs(catalogsMap);
     setPriceValidityConfig(savedValidityConfig);
 
-    const [savedHidden, savedAppSettings, savedPurchaseOrders] = await Promise.all([
+    const [savedHidden, savedAppSettings, savedPurchaseOrders, savedUserProfile] = await Promise.all([
       loadUserData<HiddenProduct[]>(uid, 'hiddenProducts', []),
       loadUserData<AppSettings>(uid, 'appSettings', { showInactiveProducts: false, priceValidityDays: 7 }),
       loadUserData<PurchaseOrder[]>(uid, 'purchaseOrders', []),
+      loadUserData<UserProfile>(uid, 'userProfile', DEFAULT_USER_PROFILE),
     ]);
     setHiddenProducts(savedHidden);
     setAppSettings(savedAppSettings);
     setPurchaseOrders(savedPurchaseOrders);
+    setUserProfile(savedUserProfile);
 
     setDataLoading(false);
-    setIsLoaded(true); // libera os useEffects de salvamento
+    setIsLoaded(true);
   };
 
-  // --- SALVA NO FIREBASE SEMPRE QUE O ESTADO MUDA ---
+  // --- SALVA NO FIREBASE ---
   const uid = user?.uid;
 
   useEffect(() => { if (uid && isLoaded) saveUserData(uid, 'suppliers', suppliers); }, [suppliers, uid, isLoaded]);
@@ -229,7 +267,7 @@ const App: React.FC = () => {
   useEffect(() => { if (uid && isLoaded) saveUserData(uid, 'cart', cart); }, [cart, uid, isLoaded]);
   useEffect(() => { if (uid && isLoaded) saveUserData(uid, 'mappings', productMappings); }, [productMappings, uid, isLoaded]);
   useEffect(() => { if (uid && isLoaded) saveUserData(uid, 'ignoredMappings', ignoredMappings); }, [ignoredMappings, uid, isLoaded]);
-  useEffect(() => { if (uid && isLoaded) saveUserData(uid, 'masterProducts', masterProducts); }, [masterProducts, uid, isLoaded]);
+  useEffect(() => { if (uid && isLoaded) saveChunkedData(uid, 'masterProducts', masterProducts); }, [masterProducts, uid, isLoaded]);
   useEffect(() => { if (uid && isLoaded) saveUserData(uid, 'dbSheetUrl', dbSheetUrl); }, [dbSheetUrl, uid, isLoaded]);
   useEffect(() => { if (uid && isLoaded) saveUserData(uid, 'salesUrl', salesUrl); }, [salesUrl, uid, isLoaded]);
   useEffect(() => { if (uid && isLoaded) saveUserData(uid, 'considerStock', considerStock); }, [considerStock, uid, isLoaded]);
@@ -238,6 +276,7 @@ const App: React.FC = () => {
   useEffect(() => { if (uid && isLoaded) saveUserData(uid, 'priceValidityConfig', priceValidityConfig); }, [priceValidityConfig, uid, isLoaded]);
   useEffect(() => { if (uid && isLoaded) saveUserData(uid, 'hiddenProducts', hiddenProducts); }, [hiddenProducts, uid, isLoaded]);
   useEffect(() => { if (uid && isLoaded) saveUserData(uid, 'appSettings', appSettings); }, [appSettings, uid, isLoaded]);
+  useEffect(() => { if (uid && isLoaded) saveUserData(uid, 'userProfile', userProfile); }, [userProfile, uid, isLoaded]);
   useEffect(() => { if (uid) saveNotifications(uid, notifications); }, [notifications, uid]);
 
   // --- NOTIFICATION HANDLERS ---
@@ -255,13 +294,12 @@ const App: React.FC = () => {
     setNotifications(prev => prev.filter(n => n.type === 'attention'));
   }, []);
 
-  // --- PROCESS BATCH INTO HISTORY (called after a batch completes) ---
+  // --- BATCH HANDLER ---
   const handleBatchCompleted = useCallback(async (batch: QuoteBatch, supplierId: string) => {
     if (!user?.uid) return;
     const supplier = suppliers.find(s => s.id === supplierId);
     if (!supplier) return;
 
-    // Histórico de preços (sistema antigo — notificações de duplicatas)
     const { newNotifications } = await processBatchIntoHistory(
       user.uid, batch, supplier, productMappings, notifications
     );
@@ -269,13 +307,11 @@ const App: React.FC = () => {
       setNotifications(prev => [...newNotifications, ...prev]);
     }
 
-    // Catálogo do fornecedor (novo sistema)
     const { catalog, newProducts, updatedProducts } = await processBatchIntoCatalog(
       user.uid, batch, supplierId, supplier.name, masterProducts
     );
     setSupplierCatalogs(prev => ({ ...prev, [supplierId]: catalog }));
 
-    // Log no console de notificações
     if (newProducts > 0 || updatedProducts > 0) {
       setNotifications(prev => [{
         id: `catalog-${batch.id}`,
@@ -290,6 +326,49 @@ const App: React.FC = () => {
       }, ...prev]);
     }
   }, [user?.uid, suppliers, productMappings, notifications, masterProducts]);
+
+  // --- BATCH DATE CHANGE PROPAGATION ---
+  const handleBatchDateChange = useCallback(async (
+    supplierId: string,
+    batchId: string,
+    newTimestamp: number,
+    items: import('./types').ProductQuote[]
+  ) => {
+    if (!uid) return;
+
+    // 1. Update supplier catalog price history dates
+    const catalog = supplierCatalogs[supplierId];
+    if (catalog) {
+      const updatedCatalog = {
+        ...catalog,
+        products: catalog.products.map(p => {
+          const updatedHistory = p.priceHistory.map(e =>
+            e.batchId === batchId ? { ...e, date: newTimestamp } : e
+          );
+          const latestEntry = updatedHistory[0];
+          return {
+            ...p,
+            priceHistory: updatedHistory,
+            lastSeenDate: latestEntry?.batchId === batchId ? newTimestamp : p.lastSeenDate,
+          };
+        }),
+      };
+      await saveCatalog(uid, updatedCatalog);
+      setSupplierCatalogs(prev => ({ ...prev, [supplierId]: updatedCatalog }));
+    }
+
+    // 2. Update price history records
+    for (const item of items) {
+      const key = normalizeProductKey(item.name);
+      const history = await loadPriceHistory(uid, key);
+      if (!history) continue;
+      const updated = {
+        ...history,
+        records: history.records.map(r => r.batchId === batchId ? { ...r, date: newTimestamp } : r),
+      };
+      await savePriceHistory(uid, updated);
+    }
+  }, [uid, supplierCatalogs]);
 
   // --- HIDDEN PRODUCTS ---
   const handleHideProduct = useCallback((product: import('./types').SupplierCatalogProduct, supplierId: string, supplierName: string) => {
@@ -313,6 +392,8 @@ const App: React.FC = () => {
   const handleClearAllHidden = useCallback(() => {
     setHiddenProducts([]);
   }, []);
+
+  // --- AUTH ---
   const handleLogin = async () => {
     setLoginLoading(true);
     try {
@@ -328,7 +409,6 @@ const App: React.FC = () => {
     await signOut(auth);
     setUser(null);
     setIsLoaded(false);
-    // Limpa estado local ao sair
     setSuppliers([]);
     setSalesData([]);
     setForecast([]);
@@ -336,6 +416,7 @@ const App: React.FC = () => {
     setProductMappings([]);
     setIgnoredMappings([]);
     setMasterProducts([]);
+    setUserProfile(DEFAULT_USER_PROFILE);
   };
 
   // --- HELPERS ---
@@ -366,15 +447,27 @@ const App: React.FC = () => {
     setForecast(prev => prev.map(item => item.sku === sku ? { ...item, suggestedQty: newQty } : item));
   }, []);
 
+  // seqNumber automático para novos pedidos
+  const getNextSeqNumber = useCallback(() => {
+    if (purchaseOrders.length === 0) return 1;
+    return Math.max(...purchaseOrders.map(o => o.seqNumber || 0)) + 1;
+  }, [purchaseOrders]);
+
   // --- RENDER ---
   if (authLoading) return <LoadingScreen />;
   if (!user) return <LoginScreen onLogin={handleLogin} loading={loginLoading} />;
   if (dataLoading) return <LoadingScreen />;
 
+  const activeOrdersCount = purchaseOrders.filter(o =>
+    ['draft', 'sent', 'confirmed', 'in_transit', 'awaiting'].includes(o.status)
+  ).length;
+
   return (
     <div className="flex flex-col h-screen bg-slate-950 text-slate-200 font-sans">
       <nav className="bg-slate-900 border-b border-slate-800 py-2 px-4 shrink-0">
         <div className="max-w-7xl mx-auto flex items-center justify-between gap-4">
+
+          {/* Logo */}
           <div className="flex items-center gap-2">
             <div className="w-8 h-8 bg-amber-600 rounded flex items-center justify-center shadow-lg">
               <span className="font-black text-lg text-white">B</span>
@@ -384,6 +477,7 @@ const App: React.FC = () => {
             </div>
           </div>
 
+          {/* Tabs */}
           <div className="flex items-center gap-3 overflow-x-auto custom-scrollbar flex-1 justify-center">
             <div className="flex items-center gap-1 bg-slate-800/50 p-1 rounded-lg border border-slate-700/50">
               <button onClick={() => setActiveTab('suppliers')} className={`px-3 py-1.5 rounded-md text-xs font-medium flex items-center gap-2 transition-all whitespace-nowrap ${activeTab === 'suppliers' ? 'bg-slate-700 text-white shadow' : 'text-slate-400 hover:text-white'}`}><Users className="w-3.5 h-3.5" /> Fornecedores</button>
@@ -393,47 +487,139 @@ const App: React.FC = () => {
               <button onClick={() => setActiveTab('comparator')} className={`px-3 py-1.5 rounded-md text-xs font-medium flex items-center gap-2 transition-all whitespace-nowrap ${activeTab === 'comparator' ? 'bg-slate-700 text-white shadow' : 'text-slate-400 hover:text-white'}`}><Scale className="w-3.5 h-3.5" /> Comparador</button>
               <button onClick={() => setActiveTab('purchase_orders')} className={`px-3 py-1.5 rounded-md text-xs font-medium flex items-center gap-2 transition-all whitespace-nowrap ${activeTab === 'purchase_orders' ? 'bg-slate-700 text-white shadow' : 'text-slate-400 hover:text-white'}`}>
                 <ClipboardList className="w-3.5 h-3.5" /> Pedidos de Compra
-                {purchaseOrders.filter(o => ['draft','sent','confirmed','in_transit','awaiting'].includes(o.status)).length > 0 && (
-                  <span className="ml-1 bg-amber-600 px-1.5 rounded-full text-[10px] text-white">{purchaseOrders.filter(o => ['draft','sent','confirmed','in_transit','awaiting'].includes(o.status)).length}</span>
+                {activeOrdersCount > 0 && (
+                  <span className="ml-1 bg-amber-600 px-1.5 rounded-full text-[10px] text-white">{activeOrdersCount}</span>
                 )}
               </button>
               <button onClick={() => setActiveTab('schedule')} className={`px-3 py-1.5 rounded-md text-xs font-medium flex items-center gap-2 transition-all whitespace-nowrap ${activeTab === 'schedule' ? 'bg-slate-700 text-white shadow' : 'text-slate-400 hover:text-white'}`}><CalendarDays className="w-3.5 h-3.5" /> Cronograma</button>
+              <button onClick={() => setActiveTab('quote_request')} className={`px-3 py-1.5 rounded-md text-xs font-medium flex items-center gap-2 transition-all whitespace-nowrap ${activeTab === 'quote_request' ? 'bg-amber-600 text-white shadow' : 'text-amber-500/70 hover:text-amber-400'}`}><MessageSquare className="w-3.5 h-3.5" /> Abrir Cotação</button>
             </div>
           </div>
 
+          {/* Direita: settings + notificações + perfil */}
           <div className="flex items-center gap-2">
-            <button onClick={() => setActiveTab('settings')} className={`p-1.5 rounded-md transition-all ${activeTab === 'settings' ? 'bg-slate-700 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`} title="Configurações"><Settings className="w-4 h-4" /></button>
-            
-            {/* Notificações + usuário */}
+            <button
+              onClick={() => setActiveTab('settings')}
+              className={`p-1.5 rounded-md transition-all ${activeTab === 'settings' ? 'bg-slate-700 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}
+              title="Configurações"
+            >
+              <Settings className="w-4 h-4" />
+            </button>
+
             <div className="flex items-center gap-2 ml-2 pl-2 border-l border-slate-700">
               <NotificationCenter
                 notifications={notifications}
                 onResolve={handleNotificationResolve}
                 onClearConsole={handleClearConsole}
               />
-              {user.photoURL && (
-                <img src={user.photoURL} alt="avatar" className="w-7 h-7 rounded-full border border-slate-600" />
-              )}
-              <button
-                onClick={handleLogout}
-                title="Sair"
-                className="p-1.5 rounded-md text-slate-400 hover:text-red-400 hover:bg-slate-800 transition-all"
-              >
-                <LogOut className="w-4 h-4" />
-              </button>
+
+              {/* Dropdown de perfil */}
+              <div className="relative" ref={profileDropdownRef}>
+                <button
+                  onClick={() => setProfileDropdownOpen(v => !v)}
+                  className="flex items-center gap-1 p-1 rounded-lg hover:bg-slate-800 transition-all"
+                  title="Perfil"
+                >
+                  {user.photoURL ? (
+                    <img src={user.photoURL} alt="avatar" className="w-7 h-7 rounded-full border border-slate-600" />
+                  ) : (
+                    <div className="w-7 h-7 rounded-full bg-amber-600 flex items-center justify-center text-white text-xs font-bold">
+                      {(userProfile.displayName || user.email || 'U')[0].toUpperCase()}
+                    </div>
+                  )}
+                  <ChevronDown className={`w-3 h-3 text-slate-500 transition-transform ${profileDropdownOpen ? 'rotate-180' : ''}`} />
+                </button>
+
+                {profileDropdownOpen && (
+                  <div className="absolute right-0 top-full mt-2 w-44 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl z-50 overflow-hidden">
+                    <button
+                      onClick={() => { setActiveTab('profile'); setProfileDropdownOpen(false); }}
+                      className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm text-slate-300 hover:text-white hover:bg-slate-800 transition-colors text-left"
+                    >
+                      <span className="text-base">👤</span> Meu Perfil
+                    </button>
+                    <button
+                      onClick={() => { setOfferFlyerOpen(true); setProfileDropdownOpen(false); }}
+                      className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm text-slate-300 hover:text-white hover:bg-slate-800 transition-colors text-left"
+                    >
+                      <Tag className="w-4 h-4 text-red-400" /> Ofertas
+                    </button>
+                    <div className="border-t border-slate-800" />
+                    <button
+                      onClick={() => { setProfileDropdownOpen(false); handleLogout(); }}
+                      className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm text-red-400 hover:text-red-300 hover:bg-slate-800 transition-colors text-left"
+                    >
+                      <LogOut className="w-4 h-4" /> Sair
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </div>
       </nav>
 
+      {/* Modal OfferFlyer (acessado via dropdown) */}
+      {offerFlyerOpen && (
+        <div
+          className="fixed inset-0 bg-black/60 z-40 flex items-center justify-center p-4"
+          onClick={e => { if (e.target === e.currentTarget) setOfferFlyerOpen(false); }}
+        >
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-4xl max-h-[90vh] overflow-y-auto p-6">
+            <div className="flex items-center justify-between mb-5">
+              <div className="flex items-center gap-3">
+                <Tag className="w-5 h-5 text-red-500" />
+                <h2 className="text-white font-bold text-lg">Flyer de Ofertas</h2>
+              </div>
+              <button
+                onClick={() => setOfferFlyerOpen(false)}
+                className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-all"
+              >
+                ✕
+              </button>
+            </div>
+            <OfferFlyer products={masterProducts} />
+          </div>
+        </div>
+      )}
+
       <main className="flex-1 overflow-hidden p-4 md:p-6 max-w-7xl mx-auto w-full">
-        {activeTab === 'sales' && <SalesAnalyzer setForecast={setForecast} salesData={salesData} setSalesData={setSalesData} csvContent={salesCsvContent} setCsvContent={setSalesCsvContent} salesConfig={salesConfig} setSalesConfig={setSalesConfig} salesUrl={salesUrl} setSalesUrl={setSalesUrl} />}
-        {activeTab === 'comparator' && <QuoteComparator suppliers={suppliers} forecast={forecast} cart={cart} setCart={setCart} updateForecast={updateForecast} productMappings={productMappings} ignoredMappings={ignoredMappings} addMapping={addMapping} removeMapping={removeMapping} ignoreMapping={ignoreMapping} salesConfig={salesConfig} considerStock={considerStock} setConsiderStock={setConsiderStock} masterProducts={masterProducts} hiddenProductIds={new Set(hiddenProducts.map(h => h.id))} showInactive={appSettings.showInactiveProducts} />}
-        {activeTab === 'purchase_orders' && <OrderManager suppliers={suppliers} purchaseOrders={purchaseOrders} setPurchaseOrders={setPurchaseOrders} cart={cart} setCart={setCart} />}
-        {activeTab === 'schedule' && <Schedule suppliers={suppliers} purchaseOrders={purchaseOrders} setPurchaseOrders={setPurchaseOrders} />}
+        {activeTab === 'sales' && (
+          <SalesAnalyzer
+            setForecast={setForecast} salesData={salesData} setSalesData={setSalesData}
+            csvContent={salesCsvContent} setCsvContent={setSalesCsvContent}
+            salesConfig={salesConfig} setSalesConfig={setSalesConfig}
+            salesUrl={salesUrl} setSalesUrl={setSalesUrl}
+          />
+        )}
+        {activeTab === 'comparator' && (
+          <QuoteComparator
+            suppliers={suppliers} forecast={forecast} cart={cart} setCart={setCart}
+            updateForecast={updateForecast} productMappings={productMappings}
+            ignoredMappings={ignoredMappings} addMapping={addMapping}
+            removeMapping={removeMapping} ignoreMapping={ignoreMapping}
+            salesConfig={salesConfig} considerStock={considerStock}
+            setConsiderStock={setConsiderStock} masterProducts={masterProducts}
+            hiddenProductIds={new Set(hiddenProducts.map(h => h.id))}
+            showInactive={appSettings.showInactiveProducts}
+          />
+        )}
+        {activeTab === 'purchase_orders' && (
+          <OrderManager
+            suppliers={suppliers}
+            purchaseOrders={purchaseOrders}
+            setPurchaseOrders={setPurchaseOrders}
+            cart={cart}
+            setCart={setCart}
+            userProfile={userProfile}
+            getNextSeqNumber={getNextSeqNumber}
+          />
+        )}
+        {activeTab === 'schedule' && (
+          <Schedule suppliers={suppliers} purchaseOrders={purchaseOrders} setPurchaseOrders={setPurchaseOrders} />
+        )}
         {activeTab === 'catalog' && (
           <div className="flex flex-col h-full overflow-hidden gap-3">
-            {/* Sub-tabs: Geral | Fornecedores (sidebar) */}
             <div className="flex gap-2 shrink-0">
               <button
                 onClick={() => setCatalogTab('master')}
@@ -474,33 +660,57 @@ const App: React.FC = () => {
             </div>
           </div>
         )}
-        {activeTab === 'database' && <ProductDatabase masterProducts={masterProducts} setMasterProducts={setMasterProducts} sheetUrl={dbSheetUrl} setSheetUrl={setDbSheetUrl} />}
-        {activeTab === 'suppliers' && <SupplierManager suppliers={suppliers} setSuppliers={setSuppliers} globalPackRules={globalPackRules} setGlobalPackRules={setGlobalPackRules} onBatchCompleted={handleBatchCompleted} />}
+        {activeTab === 'database' && (
+          <ProductDatabase
+            masterProducts={masterProducts} setMasterProducts={setMasterProducts}
+            sheetUrl={dbSheetUrl} setSheetUrl={setDbSheetUrl}
+          />
+        )}
+        {activeTab === 'suppliers' && (
+          <SupplierManager
+            suppliers={suppliers} setSuppliers={setSuppliers}
+            globalPackRules={globalPackRules} setGlobalPackRules={setGlobalPackRules}
+            onBatchCompleted={handleBatchCompleted}
+            uid={uid ?? ''}
+            onBatchDateChange={handleBatchDateChange}
+          />
+        )}
+        {activeTab === 'quote_request' && (
+          <QuoteRequest
+            suppliers={suppliers}
+            catalogs={supplierCatalogs}
+            globalValidityDays={appSettings.priceValidityDays}
+          />
+        )}
         {activeTab === 'settings' && (
-          <div className="h-full overflow-y-auto space-y-8">
-            {/* Seção Ofertas dentro de Configurações */}
-            <div>
-              <div className="flex items-center gap-3 mb-4">
-                <Tag className="w-4 h-4 text-red-500" />
-                <h3 className="text-white font-bold">Flyer de Ofertas</h3>
-              </div>
-              <OfferFlyer products={masterProducts} />
+          <div className="h-full overflow-y-auto">
+            <div className="flex items-center gap-3 mb-5">
+              <Settings className="w-5 h-5 text-amber-400" />
+              <h2 className="text-white font-bold text-lg">Configurações Gerais</h2>
             </div>
-            <div className="border-t border-slate-800 pt-8">
-              <div className="flex items-center gap-3 mb-5">
-                <Settings className="w-5 h-5 text-amber-400" />
-                <h2 className="text-white font-bold text-lg">Configurações Gerais</h2>
-              </div>
-              <AppSettingsPanel
-                settings={appSettings}
-                onSettingsChange={s => { setAppSettings(s); setPriceValidityConfig({ globalDays: s.priceValidityDays }); }}
-                globalPackRules={globalPackRules}
-                onPackRulesChange={setGlobalPackRules}
-                hiddenProducts={hiddenProducts}
-                onUnhide={handleUnhideProduct}
-                onClearAllHidden={handleClearAllHidden}
-              />
+            <AppSettingsPanel
+              settings={appSettings}
+              onSettingsChange={s => { setAppSettings(s); setPriceValidityConfig({ globalDays: s.priceValidityDays }); }}
+              globalPackRules={globalPackRules}
+              onPackRulesChange={setGlobalPackRules}
+              hiddenProducts={hiddenProducts}
+              onUnhide={handleUnhideProduct}
+              onClearAllHidden={handleClearAllHidden}
+            />
+          </div>
+        )}
+        {activeTab === 'profile' && (
+          <div className="h-full overflow-y-auto">
+            <div className="flex items-center gap-3 mb-5">
+              <span className="text-xl">👤</span>
+              <h2 className="text-white font-bold text-lg">Meu Perfil</h2>
             </div>
+            <UserProfilePanel
+              profile={userProfile}
+              onProfileChange={setUserProfile}
+              userPhotoURL={user.photoURL || undefined}
+              userEmail={user.email || undefined}
+            />
           </div>
         )}
       </main>

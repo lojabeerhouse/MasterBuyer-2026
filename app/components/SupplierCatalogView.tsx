@@ -9,9 +9,9 @@ import {
   rejectLinkSuggestion, saveCatalog, processBatchIntoCatalog,
 } from '../services/supplierCatalogService';
 import {
-  Search, Link, Unlink, Check, X, ChevronDown, ChevronUp,
+  Search, Link, Unlink, Check, X, ChevronDown, ChevronUp, ChevronLeft, ChevronRight,
   Clock, Snowflake, Globe, Calendar, TrendingUp, TrendingDown,
-  Minus, BookOpen, AlertCircle, Package, EyeOff, RefreshCw, Loader2,
+  Minus, BookOpen, AlertCircle, Package, EyeOff, RefreshCw, Loader2, History,
 } from 'lucide-react';
 
 // ─── FORMATTERS ──────────────────────────────────────────────────────────────
@@ -167,11 +167,12 @@ const ProductCard: React.FC<{
   onRejectSuggestion: (id: string) => void;
   onHide: (p: SupplierCatalogProduct) => void;
   onUnhide: (id: string) => void;
+  onShowHistory: (p: SupplierCatalogProduct) => void;
 }> = ({ product, masterProducts, validityMode, validityDays, isHidden,
-        onLink, onUnlink, onConfirmSuggestion, onRejectSuggestion, onHide, onUnhide }) => {
-  const [expanded, setExpanded] = useState(false);
+        onLink, onUnlink, onConfirmSuggestion, onRejectSuggestion, onHide, onUnhide, onShowHistory }) => {
   const validPrice = getValidPrice(product, validityMode, validityDays);
-  const isExpired = !validPrice;
+  const displayPrice = validPrice ?? (product.priceHistory.length > 0 ? product.priceHistory[0] : null);
+  const isExpired = !validPrice && displayPrice !== null;
 
   const priceTrend = useMemo(() => {
     if (product.priceHistory.length < 2) return null;
@@ -217,7 +218,10 @@ const ProductCard: React.FC<{
         {/* Nome + ações */}
         <div className="flex items-start gap-2">
           <div className="flex-1 min-w-0">
-            <p className="text-white text-sm font-semibold leading-tight">{product.name}</p>
+            <p
+              className={`text-white text-sm font-semibold leading-tight ${product.priceHistory.length > 1 ? 'cursor-pointer hover:text-amber-300 transition-colors' : ''}`}
+              onClick={() => product.priceHistory.length > 1 && onShowHistory(product)}
+            >{product.name}</p>
             <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
               {product.supplierSku && <span className="text-slate-600 text-[10px]">#{product.supplierSku}</span>}
               {tags.map(tag => (
@@ -269,47 +273,38 @@ const ProductCard: React.FC<{
         {/* Preço */}
         <div className="flex items-end justify-between gap-2">
           <div>
-            {validPrice ? (
+            {displayPrice ? (
               <>
                 <div className="flex items-center gap-1.5">
-                  <span className="text-white font-bold text-base">{fmt(validPrice.unitPrice)}</span>
+                  <span className={`font-bold text-base ${isExpired ? 'text-slate-400' : 'text-white'}`}>{fmt(displayPrice.unitPrice)}</span>
                   <span className="text-slate-500 text-xs">/un</span>
-                  {priceTrend === 'up' && <TrendingUp className="w-3.5 h-3.5 text-red-400" />}
-                  {priceTrend === 'down' && <TrendingDown className="w-3.5 h-3.5 text-emerald-400" />}
-                  {priceTrend === 'stable' && <Minus className="w-3.5 h-3.5 text-slate-500" />}
+                  {!isExpired && priceTrend === 'up' && <TrendingUp className="w-3.5 h-3.5 text-red-400" />}
+                  {!isExpired && priceTrend === 'down' && <TrendingDown className="w-3.5 h-3.5 text-emerald-400" />}
+                  {!isExpired && priceTrend === 'stable' && <Minus className="w-3.5 h-3.5 text-slate-500" />}
                 </div>
-                <p className="text-slate-500 text-[11px]">cx c/{validPrice.packQuantity} · {fmt(validPrice.packPrice)} · {fmtDate(validPrice.date)}</p>
+                <p className="text-slate-500 text-[11px]">cx c/{displayPrice.packQuantity} · {fmt(displayPrice.packPrice)} · {fmtDate(displayPrice.date)}</p>
+                {isExpired && (
+                  <div className="flex items-center gap-1 mt-1">
+                    <Clock className="w-3 h-3 text-amber-500/80" />
+                    <span className="text-amber-500/80 text-[10px] font-medium">Necessita nova cotação</span>
+                  </div>
+                )}
               </>
             ) : (
-              <div className="flex items-center gap-1.5">
-                <Clock className="w-3.5 h-3.5 text-slate-600" />
-                <span className="text-slate-600 text-sm">Preço expirado</span>
-                <span className="text-slate-700 text-[10px]">({fmtDate(product.lastSeenDate)})</span>
-              </div>
+              <span className="text-slate-600 text-sm">Sem histórico</span>
             )}
           </div>
           {product.priceHistory.length > 1 && (
-            <button onClick={() => setExpanded(v => !v)}
-              className="flex items-center gap-1 text-slate-600 hover:text-slate-300 text-[11px] transition-colors shrink-0">
-              <span>{product.priceHistory.length}×</span>
-              {expanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+            <button
+              onClick={() => onShowHistory(product)}
+              className="flex items-center gap-1 text-slate-600 hover:text-amber-400 text-[10px] transition-colors shrink-0 ml-auto"
+              title="Ver histórico de preços"
+            >
+              <History className="w-3 h-3" />
+              <span>Cotado {product.priceHistory.length}×</span>
             </button>
           )}
         </div>
-
-        {/* Histórico */}
-        {expanded && (
-          <div className="pt-2 border-t border-slate-800 space-y-1">
-            {product.priceHistory.slice(0, 12).map((entry, idx) => (
-              <div key={idx} className="grid grid-cols-4 gap-1 text-[11px]">
-                <span className="text-slate-500">{fmtDate(entry.date)}</span>
-                <span className="text-slate-300 text-right">{fmt(entry.unitPrice)}</span>
-                <span className="text-slate-500 text-right">{fmt(entry.packPrice)}</span>
-                <span className="text-slate-600 text-right">c/{entry.packQuantity}</span>
-              </div>
-            ))}
-          </div>
-        )}
       </div>
     </div>
   );
@@ -333,6 +328,8 @@ const CatalogContent: React.FC<{
   const [filterCategory, setFilterCategory] = useState('');
   const [linkingProduct, setLinkingProduct] = useState<SupplierCatalogProduct | null>(null);
   const [hideConfirmProduct, setHideConfirmProduct] = useState<SupplierCatalogProduct | null>(null);
+  const [historyModal, setHistoryModal] = useState<SupplierCatalogProduct | null>(null);
+  const [historyPage, setHistoryPage] = useState(0);
 
   useEffect(() => { setLocalCatalog(catalog); }, [catalog]);
 
@@ -432,6 +429,76 @@ const CatalogContent: React.FC<{
           onClose={() => setHideConfirmProduct(null)} />
       )}
 
+      {/* MODAL DE HISTÓRICO DE PREÇOS */}
+      {historyModal && (() => {
+        const ENTRIES_PER_PAGE = 20;
+        const GROUP_SIZE = 5;
+        const history = historyModal.priceHistory;
+        const totalPages = Math.ceil(history.length / ENTRIES_PER_PAGE);
+        const pageEntries = history.slice(historyPage * ENTRIES_PER_PAGE, (historyPage + 1) * ENTRIES_PER_PAGE);
+        const groups: typeof pageEntries[] = [];
+        for (let i = 0; i < pageEntries.length; i += GROUP_SIZE) groups.push(pageEntries.slice(i, i + GROUP_SIZE));
+        return (
+          <div className="fixed inset-0 z-[120] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+            <div className="bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl w-full max-w-3xl flex flex-col max-h-[85vh]">
+              {/* Header */}
+              <div className="flex items-start justify-between p-5 border-b border-slate-800">
+                <div>
+                  <h3 className="text-white font-bold text-sm leading-tight">{historyModal.name}</h3>
+                  <p className="text-slate-500 text-xs mt-0.5 flex items-center gap-1.5">
+                    <History className="w-3 h-3" />
+                    {history.length} cotação{history.length !== 1 ? 'ões' : ''} registrada{history.length !== 1 ? 's' : ''}
+                  </p>
+                </div>
+                <button onClick={() => { setHistoryModal(null); setHistoryPage(0); }} className="text-slate-500 hover:text-white p-1 transition-colors">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Cabeçalho das colunas */}
+              <div className={`grid gap-3 px-5 pt-4 pb-2`} style={{ gridTemplateColumns: `repeat(${groups.length}, 1fr)` }}>
+                {groups.map((_, gi) => (
+                  <div key={gi} className="grid grid-cols-4 gap-1 text-[10px] font-bold text-slate-600 uppercase tracking-wider">
+                    <span>Data</span><span className="text-right">Unit</span><span className="text-right">Cx</span><span className="text-right">Qtd</span>
+                  </div>
+                ))}
+              </div>
+
+              {/* Grupos de entradas lado a lado */}
+              <div className={`grid gap-3 px-5 pb-4 flex-1 overflow-auto`} style={{ gridTemplateColumns: `repeat(${groups.length}, 1fr)` }}>
+                {groups.map((group, gi) => (
+                  <div key={gi} className="space-y-1.5 border-l border-slate-800 pl-3 first:border-l-0 first:pl-0">
+                    {group.map((entry, idx) => (
+                      <div key={idx} className="grid grid-cols-4 gap-1 text-[11px]">
+                        <span className="text-slate-500">{fmtDate(entry.date)}</span>
+                        <span className="text-slate-200 text-right font-medium">{fmt(entry.unitPrice)}</span>
+                        <span className="text-slate-500 text-right">{fmt(entry.packPrice)}</span>
+                        <span className="text-slate-600 text-right">c/{entry.packQuantity}</span>
+                      </div>
+                    ))}
+                  </div>
+                ))}
+              </div>
+
+              {/* Paginação */}
+              {totalPages > 1 && (
+                <div className="flex items-center justify-center gap-3 p-4 border-t border-slate-800">
+                  <button onClick={() => setHistoryPage(p => Math.max(0, p - 1))} disabled={historyPage === 0}
+                    className="p-1.5 rounded-lg text-slate-400 hover:text-white disabled:opacity-30 disabled:cursor-default transition-colors">
+                    <ChevronLeft className="w-4 h-4" />
+                  </button>
+                  <span className="text-slate-500 text-xs">Pág {historyPage + 1}/{totalPages}</span>
+                  <button onClick={() => setHistoryPage(p => Math.min(totalPages - 1, p + 1))} disabled={historyPage === totalPages - 1}
+                    className="p-1.5 rounded-lg text-slate-400 hover:text-white disabled:opacity-30 disabled:cursor-default transition-colors">
+                    <ChevronRight className="w-4 h-4" />
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })()}
+
       {/* Stats */}
       <div className="grid grid-cols-4 gap-2">
         {[
@@ -522,6 +589,7 @@ const CatalogContent: React.FC<{
               onRejectSuggestion={handleRejectSuggestion}
               onHide={handleHide}
               onUnhide={onUnhideProduct}
+              onShowHistory={p => { setHistoryModal(p); setHistoryPage(0); }}
             />
           ))}
         </div>

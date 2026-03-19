@@ -45,7 +45,8 @@ export const savePriceHistory = async (
 ): Promise<void> => {
   try {
     const ref = doc(db, 'users', uid, 'priceHistory', history.normalizedKey);
-    await setDoc(ref, history);
+    const clean = JSON.parse(JSON.stringify(history));
+    await setDoc(ref, clean);
   } catch (e) {
     console.error('Erro ao salvar histórico:', e);
   }

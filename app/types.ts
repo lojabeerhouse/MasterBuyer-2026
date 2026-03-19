@@ -14,6 +14,7 @@ export interface ProductQuote {
 export interface QuoteBatch {
   id: string;
   timestamp: number;
+  uploadedAt?: number;    // data do upload — imutável, exibição apenas
   sourceType: 'text' | 'file';
   fileName?: string;
   rawContent?: string;
@@ -57,7 +58,7 @@ export interface BusinessHours {
   sat: BusinessDayHours;
 }
 
-
+export interface Supplier {
   id: string;
   name: string;
   isEnabled: boolean;
@@ -167,6 +168,7 @@ export interface PurchaseOrderTransition {
 
 export interface PurchaseOrder {
   id: string;
+  seqNumber?: number;           // ID sequencial imutável ex: 1, 2, 3...
   supplierId: string;
   supplierName: string;
   items: CartItem[];
@@ -174,15 +176,19 @@ export interface PurchaseOrder {
   status: PurchaseOrderStatus;
   createdAt: number;
   updatedAt: number;
-  orderDate?: number;       // data/hora do pedido (editável)
-  expectedDate?: number;    // data prevista de entrega/retirada (editável no pedido)
-  expectedTime?: string;    // horário previsto ex: "10:30"
-  pickupReadyAt?: number;   // horário calculado para ir buscar
+  orderDate?: number;           // data/hora do pedido (editável)
+  expectedDate?: number;        // data prevista de entrega/retirada (editável no pedido)
+  expectedTime?: string;        // horário previsto ex: "10:30"
+  pickupReadyAt?: number;       // horário calculado para ir buscar
   deliveryOrPickup?: 'delivery' | 'pickup';
+  deliveryAddressId?: string;   // id do endereço de entrega do usuário (quando delivery)
   transitions: PurchaseOrderTransition[];
   originalSnapshot?: CartItem[]; // snapshot só quando há diferença de valor na conferência
   cancelReason?: string;
   cancelNote?: string;
+  notes?: string;               // observação livre do pedido
+  invoiceNumber?: string;       // número da NF fiscal
+  supplierOrderNumber?: string; // número do pedido no fornecedor
 }
 
 export interface MasterProduct {
@@ -224,6 +230,7 @@ export interface MasterProduct {
   condition?: string; // "Condição do Produto"
   freeShipping?: string; // "Frete Grátis"
 }
+
 // ─── NOTIFICATION SYSTEM ────────────────────────────────────────────────────
 
 export interface AppNotification {
@@ -287,6 +294,7 @@ export interface ProductPriceHistory {
   masterSku?: string;     // linked SKU if mapped
   records: PriceRecord[];
 }
+
 // ─── SUPPLIER CATALOG ────────────────────────────────────────────────────────
 
 /** Modo de validade de preços por fornecedor */
@@ -340,6 +348,7 @@ export interface SupplierCatalog {
 export interface PriceValidityConfig {
   globalDays: number; // padrão: 7 dias
 }
+
 /** Produto oculto globalmente (catálogo + comparador) */
 export interface HiddenProduct {
   id: string;               // normalizedKey do produto do fornecedor
@@ -354,4 +363,31 @@ export interface HiddenProduct {
 export interface AppSettings {
   showInactiveProducts: boolean;   // exibir produtos ocultos
   priceValidityDays: number;       // validade global de preços (dias)
+}
+
+// ─── USER PROFILE ────────────────────────────────────────────────────────────
+
+/** Endereço de entrega do USUÁRIO (onde recebe mercadoria) */
+export interface DeliveryAddress {
+  id: string;
+  label: string;       // ex: "Loja Centro", "Depósito Norte"
+  address: string;     // endereço completo para abrir no Maps
+  isDefault?: boolean;
+}
+
+/** Perfil do comprador / empresa */
+export interface UserProfile {
+  displayName?: string;           // nome do comprador
+  companyName?: string;           // nome da empresa ex: "BeerHouse"
+  document?: string;              // CPF ou CNPJ (campo único, livre, opcional)
+  email?: string;                 // email para substituição em templates [EMAIL]
+  deliveryAddresses: DeliveryAddress[]; // endereços de entrega cadastrados
+}
+
+// ─── QUICK NOTES (observações pré-prontas para pedidos) ──────────────────────
+
+export interface QuickNote {
+  id: string;
+  text: string;                       // texto da nota, suporta variável [EMAIL]
+  trigger: 'delivery' | 'pickup' | 'all'; // quando sugerir essa nota
 }
