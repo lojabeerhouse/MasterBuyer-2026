@@ -7,16 +7,19 @@ export default defineConfig(({ mode }) => {
     const isProd = mode === 'production';
 
     return {
-      plugins: [react()],
-      base: '/MasterBuyer-2026/',
-      
-      // Aqui criamos a "ponte" para o seu código atual
-      define: {
-        'process.env.API_KEY': JSON.stringify(env.API_KEY || process.env.API_KEY)
+      base: isProd ? '/MasterBuyer-2026/app' : '/',
+      server: {
+        port: 3000,
+        host: '0.0.0.0',
       },
-  
-      build: {
-        outDir: 'dist',
+      plugins: [react()],
+      define: {
+        'process.env.API_KEY': JSON.stringify(env.API_KEY),
+      },
+      resolve: {
+        alias: {
+          '@': path.resolve(__dirname, '.'),
+        }
       }
     };
 });
