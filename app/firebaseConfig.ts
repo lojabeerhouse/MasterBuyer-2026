@@ -3,7 +3,7 @@ import { getAuth, GoogleAuthProvider } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
 
 const firebaseConfig = {
-  apiKey: "AIzaSyDEbSZlPx39JiraIcJrB8EBdA48mKIqrsk",
+  apiKey: process.env.API_KEY as string,
   authDomain: "beerhouse-1.firebaseapp.com",
   projectId: "beerhouse-1",
   storageBucket: "beerhouse-1.firebasestorage.app",

@@ -1,21 +1,22 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, lazy, Suspense } from 'react';
 import { signInWithPopup, signOut, onAuthStateChanged, User } from 'firebase/auth';
 import { auth, googleProvider } from './firebaseConfig';
 import { saveUserData, loadUserData, saveChunkedData, loadChunkedData } from './services/firebaseService';
 import { loadNotifications, saveNotifications, processBatchIntoHistory, resolveDuplicate, normalizeProductKey, loadPriceHistory, savePriceHistory } from './services/historyService';
 import { loadAllCatalogs, processBatchIntoCatalog, saveCatalog } from './services/supplierCatalogService';
 import NotificationCenter from './components/NotificationCenter';
-import SalesAnalyzer from './components/SalesAnalyzer';
-import QuoteComparator from './components/QuoteComparator';
-import OrderManager from './components/OrderManager';
-import Schedule from './components/Schedule';
-import ProductCatalog from './components/ProductCatalog';
-import ProductDatabase from './components/ProductDatabase';
-import OfferFlyer from './components/OfferFlyer';
-import SupplierManager from './components/SupplierManager';
-import SupplierCatalogView from './components/SupplierCatalogView';
-import AppSettingsPanel from './components/AppSettings';
-import UserProfilePanel from './components/UserProfile';
+import Dashboard from './components/Dashboard';
+const SalesModule = lazy(() => import('./components/SalesModule'));
+const QuoteComparator = lazy(() => import('./components/QuoteComparator'));
+const OrderManager = lazy(() => import('./components/OrderManager'));
+const Schedule = lazy(() => import('./components/Schedule'));
+const ProductCatalog = lazy(() => import('./components/ProductCatalog'));
+const ProductDatabase = lazy(() => import('./components/ProductDatabase'));
+const OfferFlyer = lazy(() => import('./components/OfferFlyer'));
+const SupplierManager = lazy(() => import('./components/SupplierManager'));
+const SupplierCatalogView = lazy(() => import('./components/SupplierCatalogView'));
+const AppSettingsPanel = lazy(() => import('./components/AppSettings'));
+const UserProfilePanel = lazy(() => import('./components/UserProfile'));
 import {
   Supplier,
   ForecastItem,
@@ -36,9 +37,10 @@ import {
 import {
   BarChart3, Users, FileText, Database, Scale, Settings,
   CalendarDays, ClipboardList, LogOut, ChevronDown, Tag, MessageSquare,
+  LayoutDashboard, Menu, X,
 } from 'lucide-react';
 import BuyingAssistant from './components/BuyingAssistant';
-import QuoteRequest from './components/QuoteRequest';
+const QuoteRequest = lazy(() => import('./components/QuoteRequest'));
 
 // ─── defaults ────────────────────────────────────────────────────────────────
 
@@ -126,9 +128,9 @@ const App: React.FC = () => {
 
   // --- APP STATE ---
   const [activeTab, setActiveTab] = useState<
-    'sales' | 'comparator' | 'purchase_orders' | 'schedule' |
+    'dashboard' | 'sales' | 'comparator' | 'purchase_orders' | 'schedule' |
     'catalog' | 'suppliers' | 'database' | 'settings' | 'profile' | 'quote_request'
-  >('suppliers');
+  >('dashboard');
 
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [salesData, setSalesData] = useState<SalesRecord[]>([]);
@@ -158,16 +160,22 @@ const App: React.FC = () => {
   const [hiddenProducts, setHiddenProducts] = useState<HiddenProduct[]>([]);
   const [appSettings, setAppSettings] = useState<AppSettings>({ showInactiveProducts: false, priceValidityDays: 7 });
 
-  // --- PROFILE DROPDOWN ---
+  // --- PROFILE DROPDOWN & MOBILE MENU ---
   const [profileDropdownOpen, setProfileDropdownOpen] = useState(false);
   const [offerFlyerOpen, setOfferFlyerOpen] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [sidebarExpanded, setSidebarExpanded] = useState(true);
   const profileDropdownRef = useRef<HTMLDivElement>(null);
+  const mobileMenuRef = useRef<HTMLDivElement>(null);
 
-  // Fecha dropdown ao clicar fora
+  // Fecha dropdowns ao clicar fora
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
       if (profileDropdownRef.current && !profileDropdownRef.current.contains(e.target as Node)) {
         setProfileDropdownOpen(false);
+      }
+      if (mobileMenuRef.current && !mobileMenuRef.current.contains(e.target as Node)) {
+        setMobileMenuOpen(false);
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
@@ -462,102 +470,176 @@ const App: React.FC = () => {
     ['draft', 'sent', 'confirmed', 'in_transit', 'awaiting'].includes(o.status)
   ).length;
 
-  return (
-    <div className="flex flex-col h-screen bg-slate-950 text-slate-200 font-sans">
-      <nav className="bg-slate-900 border-b border-slate-800 py-2 px-4 shrink-0">
-        <div className="max-w-7xl mx-auto flex items-center justify-between gap-4">
+  // helper para navegação no mobile
+  const navigateTo = (tab: typeof activeTab) => {
+    setActiveTab(tab);
+    setMobileMenuOpen(false);
+  };
 
-          {/* Logo */}
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 bg-amber-600 rounded flex items-center justify-center shadow-lg">
+  const navItems: { tab: typeof activeTab; icon: React.ReactNode; label: string; highlight?: boolean }[] = [
+    { tab: 'dashboard', icon: <LayoutDashboard className="w-5 h-5" />, label: 'Início' },
+    { tab: 'suppliers', icon: <Users className="w-5 h-5" />, label: 'Fornecedores' },
+    { tab: 'database', icon: <Database className="w-5 h-5" />, label: 'Produtos' },
+    { tab: 'sales', icon: <BarChart3 className="w-5 h-5" />, label: 'Vendas' },
+    { tab: 'catalog', icon: <FileText className="w-5 h-5" />, label: 'Catálogo' },
+    { tab: 'comparator', icon: <Scale className="w-5 h-5" />, label: 'Comparador' },
+    { tab: 'purchase_orders', icon: <ClipboardList className="w-5 h-5" />, label: 'Pedidos' },
+    { tab: 'schedule', icon: <CalendarDays className="w-5 h-5" />, label: 'Cronograma' },
+    { tab: 'quote_request', icon: <MessageSquare className="w-5 h-5" />, label: 'Cotação', highlight: true },
+  ];
+
+  return (
+    <div className="flex h-screen w-full bg-slate-950 text-slate-200 font-sans overflow-hidden">
+      
+      {/* Mobile overlay */}
+      {mobileMenuOpen && (
+        <div className="fixed inset-0 bg-black/60 z-40 xl:hidden" onClick={() => setMobileMenuOpen(false)} />
+      )}
+
+      {/* Sidebar Container */}
+      <div className={`fixed xl:static inset-y-0 left-0 z-50 flex flex-col bg-slate-900 border-r border-slate-800 transition-all duration-300 ease-in-out ${mobileMenuOpen ? 'translate-x-0' : '-translate-x-full'} xl:translate-x-0 ${sidebarExpanded ? 'w-64' : 'w-20'}`}>
+        
+        {/* Top Logo Area */}
+        <div className="h-16 flex items-center justify-between px-4 border-b border-slate-800 shrink-0">
+          <div className="flex items-center gap-3 overflow-hidden">
+            <div className="w-8 h-8 bg-amber-600 rounded flex items-center justify-center shrink-0 shadow-lg">
               <span className="font-black text-lg text-white">B</span>
             </div>
-            <div className="hidden sm:block">
-              <h1 className="text-lg font-bold text-white leading-none">BeerHouse</h1>
-            </div>
+            <h1 className={`text-lg font-bold text-white whitespace-nowrap transition-opacity duration-300 ${sidebarExpanded ? 'opacity-100' : 'opacity-0 xl:hidden'}`}>BeerHouse</h1>
           </div>
+          <button className="xl:hidden p-1 text-slate-400 hover:text-white" onClick={() => setMobileMenuOpen(false)}>
+            <X className="w-5 h-5" />
+          </button>
+        </div>
 
-          {/* Tabs */}
-          <div className="flex items-center gap-3 overflow-x-auto custom-scrollbar flex-1 justify-center">
-            <div className="flex items-center gap-1 bg-slate-800/50 p-1 rounded-lg border border-slate-700/50">
-              <button onClick={() => setActiveTab('suppliers')} className={`px-3 py-1.5 rounded-md text-xs font-medium flex items-center gap-2 transition-all whitespace-nowrap ${activeTab === 'suppliers' ? 'bg-slate-700 text-white shadow' : 'text-slate-400 hover:text-white'}`}><Users className="w-3.5 h-3.5" /> Fornecedores</button>
-              <button onClick={() => setActiveTab('database')} className={`px-3 py-1.5 rounded-md text-xs font-medium flex items-center gap-2 transition-all whitespace-nowrap ${activeTab === 'database' ? 'bg-slate-700 text-white shadow' : 'text-slate-400 hover:text-white'}`}><Database className="w-3.5 h-3.5" /> Produtos</button>
-              <button onClick={() => setActiveTab('sales')} className={`px-3 py-1.5 rounded-md text-xs font-medium flex items-center gap-2 transition-all whitespace-nowrap ${activeTab === 'sales' ? 'bg-slate-700 text-white shadow' : 'text-slate-400 hover:text-white'}`}><BarChart3 className="w-3.5 h-3.5" /> Vendas</button>
-              <button onClick={() => setActiveTab('catalog')} className={`px-3 py-1.5 rounded-md text-xs font-medium flex items-center gap-2 transition-all whitespace-nowrap ${activeTab === 'catalog' ? 'bg-slate-700 text-white shadow' : 'text-slate-400 hover:text-white'}`}><FileText className="w-3.5 h-3.5" /> Catálogo</button>
-              <button onClick={() => setActiveTab('comparator')} className={`px-3 py-1.5 rounded-md text-xs font-medium flex items-center gap-2 transition-all whitespace-nowrap ${activeTab === 'comparator' ? 'bg-slate-700 text-white shadow' : 'text-slate-400 hover:text-white'}`}><Scale className="w-3.5 h-3.5" /> Comparador</button>
-              <button onClick={() => setActiveTab('purchase_orders')} className={`px-3 py-1.5 rounded-md text-xs font-medium flex items-center gap-2 transition-all whitespace-nowrap ${activeTab === 'purchase_orders' ? 'bg-slate-700 text-white shadow' : 'text-slate-400 hover:text-white'}`}>
-                <ClipboardList className="w-3.5 h-3.5" /> Pedidos de Compra
-                {activeOrdersCount > 0 && (
-                  <span className="ml-1 bg-amber-600 px-1.5 rounded-full text-[10px] text-white">{activeOrdersCount}</span>
-                )}
-              </button>
-              <button onClick={() => setActiveTab('schedule')} className={`px-3 py-1.5 rounded-md text-xs font-medium flex items-center gap-2 transition-all whitespace-nowrap ${activeTab === 'schedule' ? 'bg-slate-700 text-white shadow' : 'text-slate-400 hover:text-white'}`}><CalendarDays className="w-3.5 h-3.5" /> Cronograma</button>
-              <button onClick={() => setActiveTab('quote_request')} className={`px-3 py-1.5 rounded-md text-xs font-medium flex items-center gap-2 transition-all whitespace-nowrap ${activeTab === 'quote_request' ? 'bg-amber-600 text-white shadow' : 'text-amber-500/70 hover:text-amber-400'}`}><MessageSquare className="w-3.5 h-3.5" /> Abrir Cotação</button>
-            </div>
-          </div>
-
-          {/* Direita: settings + notificações + perfil */}
-          <div className="flex items-center gap-2">
+        {/* Navigation Items */}
+        <div className="flex-1 overflow-y-auto py-4 px-3 space-y-1 custom-scrollbar">
+          {navItems.map(({ tab, icon, label, highlight }) => (
             <button
-              onClick={() => setActiveTab('settings')}
-              className={`p-1.5 rounded-md transition-all ${activeTab === 'settings' ? 'bg-slate-700 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}
-              title="Configurações"
+              key={tab}
+              onClick={() => navigateTo(tab)}
+              className={`group relative w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all ${
+                activeTab === tab
+                  ? (highlight ? 'bg-amber-600 text-white shadow-md' : 'bg-slate-800 text-white shadow-sm ring-1 ring-slate-700')
+                  : (highlight ? 'text-amber-500/80 hover:bg-slate-800/50 hover:text-amber-400' : 'text-slate-400 hover:text-white hover:bg-slate-800/50')
+              }`}
             >
-              <Settings className="w-4 h-4" />
+              <div className="w-5 h-5 flex items-center justify-center shrink-0">
+                {icon}
+              </div>
+              <span className={`whitespace-nowrap transition-opacity duration-300 ${sidebarExpanded ? 'opacity-100' : 'opacity-0 xl:hidden'}`}>
+                {label}
+              </span>
+              {tab === 'purchase_orders' && activeOrdersCount > 0 && (
+                <span className={`ml-auto bg-amber-500 px-2 py-0.5 rounded-full text-[10px] text-white font-bold transition-opacity duration-300 ${sidebarExpanded ? 'opacity-100' : 'opacity-0 xl:hidden'}`}>
+                  {activeOrdersCount}
+                </span>
+              )}
+
+              {/* Tooltip for collapsed mode */}
+              {!sidebarExpanded && (
+                <div className="absolute left-full ml-3 px-2 py-1 bg-slate-800 text-white text-[11px] font-bold tracking-wider uppercase rounded opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all whitespace-nowrap z-[60] border border-slate-700 shadow-xl hidden xl:block pointer-events-none">
+                  {label}
+                </div>
+              )}
+            </button>
+          ))}
+        </div>
+
+        {/* Bottom Actions Area */}
+        <div className="border-t border-slate-800 p-3 flex flex-col gap-2 shrink-0">
+          <div className={`flex ${sidebarExpanded ? 'flex-row' : 'flex-col'} items-center justify-center gap-2`}>
+            <NotificationCenter
+              notifications={notifications}
+              onResolve={handleNotificationResolve}
+              onClearConsole={handleClearConsole}
+            />
+            <button
+              onClick={() => navigateTo('settings')}
+              title="Configurações"
+              className={`p-2 rounded-xl transition-all ${activeTab === 'settings' ? 'bg-slate-800 text-white ring-1 ring-slate-700' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}
+            >
+              <Settings className="w-5 h-5" />
+            </button>
+          </div>
+
+          <div className="relative" ref={profileDropdownRef}>
+            <button
+              onClick={() => setProfileDropdownOpen(v => !v)}
+              className={`w-full flex items-center ${sidebarExpanded ? 'gap-3 px-3' : 'justify-center'} py-2 rounded-xl hover:bg-slate-800 transition-all focus:outline-none`}
+              title={!sidebarExpanded ? "Perfil" : undefined}
+            >
+              {user.photoURL ? (
+                <img src={user.photoURL} alt="avatar" className="w-8 h-8 rounded-full border border-slate-600 shrink-0" />
+              ) : (
+                <div className="w-8 h-8 rounded-full bg-slate-700 flex items-center justify-center text-white text-sm font-bold shrink-0">
+                  {(userProfile.displayName || user.email || 'U')[0].toUpperCase()}
+                </div>
+              )}
+              
+              <div className={`flex-1 flex items-center justify-between overflow-hidden transition-all duration-300 ${sidebarExpanded ? 'opacity-100 w-auto' : 'opacity-0 w-0 xl:hidden'}`}>
+                <div className="flex flex-col items-start truncate pr-2">
+                  <span className="text-sm font-medium text-white truncate max-w-[120px]">{userProfile.displayName || 'Meu Perfil'}</span>
+                  <span className="text-xs text-slate-400 truncate max-w-[120px]">{user.email}</span>
+                </div>
+                <ChevronDown className={`w-4 h-4 text-slate-500 shrink-0 transition-transform ${profileDropdownOpen ? 'rotate-180' : ''}`} />
+              </div>
             </button>
 
-            <div className="flex items-center gap-2 ml-2 pl-2 border-l border-slate-700">
-              <NotificationCenter
-                notifications={notifications}
-                onResolve={handleNotificationResolve}
-                onClearConsole={handleClearConsole}
-              />
-
-              {/* Dropdown de perfil */}
-              <div className="relative" ref={profileDropdownRef}>
+            {profileDropdownOpen && (
+              <div className={`absolute bottom-full mb-2 ${sidebarExpanded ? 'left-0 w-full' : 'left-full ml-2 w-48'} bg-slate-800 border border-slate-700 rounded-xl shadow-2xl z-50 overflow-hidden`}>
                 <button
-                  onClick={() => setProfileDropdownOpen(v => !v)}
-                  className="flex items-center gap-1 p-1 rounded-lg hover:bg-slate-800 transition-all"
-                  title="Perfil"
+                  onClick={() => { navigateTo('profile'); setProfileDropdownOpen(false); }}
+                  className="w-full flex items-center gap-3 px-4 py-3 text-sm text-slate-300 hover:text-white hover:bg-slate-700 transition-colors text-left"
                 >
-                  {user.photoURL ? (
-                    <img src={user.photoURL} alt="avatar" className="w-7 h-7 rounded-full border border-slate-600" />
-                  ) : (
-                    <div className="w-7 h-7 rounded-full bg-amber-600 flex items-center justify-center text-white text-xs font-bold">
-                      {(userProfile.displayName || user.email || 'U')[0].toUpperCase()}
-                    </div>
-                  )}
-                  <ChevronDown className={`w-3 h-3 text-slate-500 transition-transform ${profileDropdownOpen ? 'rotate-180' : ''}`} />
+                  <span className="text-base">👤</span> Meu Perfil
                 </button>
-
-                {profileDropdownOpen && (
-                  <div className="absolute right-0 top-full mt-2 w-44 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl z-50 overflow-hidden">
-                    <button
-                      onClick={() => { setActiveTab('profile'); setProfileDropdownOpen(false); }}
-                      className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm text-slate-300 hover:text-white hover:bg-slate-800 transition-colors text-left"
-                    >
-                      <span className="text-base">👤</span> Meu Perfil
-                    </button>
-                    <button
-                      onClick={() => { setOfferFlyerOpen(true); setProfileDropdownOpen(false); }}
-                      className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm text-slate-300 hover:text-white hover:bg-slate-800 transition-colors text-left"
-                    >
-                      <Tag className="w-4 h-4 text-red-400" /> Ofertas
-                    </button>
-                    <div className="border-t border-slate-800" />
-                    <button
-                      onClick={() => { setProfileDropdownOpen(false); handleLogout(); }}
-                      className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm text-red-400 hover:text-red-300 hover:bg-slate-800 transition-colors text-left"
-                    >
-                      <LogOut className="w-4 h-4" /> Sair
-                    </button>
-                  </div>
-                )}
+                <button
+                  onClick={() => { setOfferFlyerOpen(true); setProfileDropdownOpen(false); }}
+                  className="w-full flex items-center gap-3 px-4 py-3 text-sm text-slate-300 hover:text-white hover:bg-slate-700 transition-colors text-left"
+                >
+                  <Tag className="w-4 h-4 text-red-400" /> Ofertas
+                </button>
+                <div className="border-t border-slate-700" />
+                <button
+                  onClick={() => { setProfileDropdownOpen(false); handleLogout(); }}
+                  className="w-full flex items-center gap-3 px-4 py-3 text-sm text-red-400 hover:text-red-300 hover:bg-slate-700 transition-colors text-left"
+                >
+                  <LogOut className="w-4 h-4" /> Sair
+                </button>
               </div>
+            )}
+          </div>
+          
+          <button
+            onClick={() => setSidebarExpanded(!sidebarExpanded)}
+            className="hidden xl:flex items-center justify-center p-2 text-slate-500 hover:text-white hover:bg-slate-800 transition-all rounded-xl mt-1"
+            title={sidebarExpanded ? "Recolher Menus" : "Expandir Menus"}
+          >
+             <svg className={`w-5 h-5 transition-transform duration-300 ${sidebarExpanded ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 5l7 7-7 7M5 5l7 7-7 7" />
+             </svg>
+          </button>
+        </div>
+      </div>
+
+      {/* Main Content Wrapper */}
+      <div className="flex-1 flex flex-col min-w-0 h-screen overflow-hidden relative">
+        {/* Mobile Top Bar */}
+        <div className="xl:hidden h-16 bg-slate-900 border-b border-slate-800 flex items-center gap-3 px-4 shrink-0 transition-all">
+          <button
+            onClick={() => setMobileMenuOpen(true)}
+            className="p-2 -ml-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-all"
+          >
+            <Menu className="w-6 h-6" />
+          </button>
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 bg-amber-600 rounded flex items-center justify-center shadow-lg shrink-0">
+              <span className="font-black text-white">B</span>
             </div>
+            <h1 className="text-lg font-bold text-white">BeerHouse</h1>
           </div>
         </div>
-      </nav>
 
       {/* Modal OfferFlyer (acessado via dropdown) */}
       {offerFlyerOpen && (
@@ -583,13 +665,27 @@ const App: React.FC = () => {
         </div>
       )}
 
-      <main className="flex-1 overflow-hidden p-4 md:p-6 max-w-7xl mx-auto w-full">
+      <main className="flex-1 overflow-y-auto p-4 md:p-6 w-full max-w-7xl mx-auto custom-scrollbar">
+        {activeTab === 'dashboard' && (
+          <Dashboard
+            user={user}
+            userProfile={userProfile}
+            suppliers={suppliers}
+            purchaseOrders={purchaseOrders}
+            masterProducts={masterProducts}
+            notifications={notifications}
+            cart={cart}
+            onNavigate={(tab) => setActiveTab(tab as typeof activeTab)}
+          />
+        )}
+        <Suspense fallback={<div className="flex items-center justify-center h-full text-slate-500 text-sm">Carregando...</div>}>
         {activeTab === 'sales' && (
-          <SalesAnalyzer
+          <SalesModule
             setForecast={setForecast} salesData={salesData} setSalesData={setSalesData}
             csvContent={salesCsvContent} setCsvContent={setSalesCsvContent}
             salesConfig={salesConfig} setSalesConfig={setSalesConfig}
             salesUrl={salesUrl} setSalesUrl={setSalesUrl}
+            masterProducts={masterProducts}
           />
         )}
         {activeTab === 'comparator' && (
@@ -713,10 +809,12 @@ const App: React.FC = () => {
             />
           </div>
         )}
+        </Suspense>
       </main>
 
       {/* Assistente flutuante */}
       <BuyingAssistant suppliers={suppliers} cart={cart} setCart={setCart} salesData={salesData} />
+      </div>
     </div>
   );
 };

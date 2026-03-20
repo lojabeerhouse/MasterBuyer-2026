@@ -158,7 +158,7 @@ const NotificationCenter: React.FC<NotificationCenterProps> = ({
           </button>
 
           {openPanel === 'attention' && (
-            <div className="absolute right-0 top-full mt-2 w-80 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl z-50 overflow-hidden">
+            <div className="absolute left-0 bottom-full mb-2 w-80 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl z-50 overflow-hidden">
               <div className="flex items-center justify-between px-4 py-3 border-b border-slate-800">
                 <div className="flex items-center gap-2">
                   <AlertTriangle className="w-4 h-4 text-amber-400" />
@@ -219,7 +219,7 @@ const NotificationCenter: React.FC<NotificationCenterProps> = ({
           </button>
 
           {openPanel === 'console' && (
-            <div className="absolute right-0 top-full mt-2 w-80 bg-slate-950 border border-slate-700 rounded-xl shadow-2xl z-50 overflow-hidden font-mono">
+            <div className="absolute left-0 bottom-full mb-2 w-80 bg-slate-950 border border-slate-700 rounded-xl shadow-2xl z-50 overflow-hidden font-mono">
               <div className="flex items-center justify-between px-4 py-3 border-b border-slate-800 bg-slate-900">
                 <div className="flex items-center gap-2">
                   <Terminal className="w-4 h-4 text-emerald-400" />

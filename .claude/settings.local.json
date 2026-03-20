@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find 'c:\\\\Users\\\\Bruno Forcato\\\\Google Drive\\\\APPS\\\\CATOS-MASTER-BUYER\\\\MasterBuyer-2026/src' -type f -name *.tsx -o -name *.ts)"
+    ]
+  }
+}
