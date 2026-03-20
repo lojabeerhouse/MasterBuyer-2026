@@ -5,7 +5,7 @@ const POS = lazy(() => import('./POS'));
 const SalesOrders = lazy(() => import('./SalesOrders'));
 const SalesAnalyzer = lazy(() => import('./SalesAnalyzer'));
 
-interface SalesModuleProps {
+interface SalesDashboardProps {
     setForecast: any;
     salesData: any;
     setSalesData: any;
@@ -18,7 +18,7 @@ interface SalesModuleProps {
     masterProducts: any; // Using any or MasterProduct[] here
 }
 
-const SalesModule: React.FC<SalesModuleProps> = (props) => {
+const SalesDashboard: React.FC<SalesDashboardProps> = (props) => {
     const [salesTab, setSalesTab] = useState<'pos' | 'orders' | 'reports'>('pos');
 
     return (
@@ -57,11 +57,21 @@ const SalesModule: React.FC<SalesModuleProps> = (props) => {
                 </div>}>
                     {salesTab === 'pos' && <POS masterProducts={props.masterProducts} />}
                     {salesTab === 'orders' && <SalesOrders />}
-                    {salesTab === 'reports' && <SalesAnalyzer {...props} />}
+                    {salesTab === 'reports' && <SalesAnalyzer 
+                        setForecast={props.setForecast} 
+                        salesData={props.salesData} 
+                        setSalesData={props.setSalesData} 
+                        csvContent={props.csvContent} 
+                        setCsvContent={props.setCsvContent} 
+                        salesConfig={props.salesConfig} 
+                        setSalesConfig={props.setSalesConfig} 
+                        salesUrl={props.salesUrl} 
+                        setSalesUrl={props.setSalesUrl} 
+                    />}
                 </Suspense>
             </div>
         </div>
     );
 };
 
-export default SalesModule;
+export default SalesDashboard;

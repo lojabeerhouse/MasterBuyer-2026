@@ -6,7 +6,7 @@ import { loadNotifications, saveNotifications, processBatchIntoHistory, resolveD
 import { loadAllCatalogs, processBatchIntoCatalog, saveCatalog } from './services/supplierCatalogService';
 import NotificationCenter from './components/NotificationCenter';
 import Dashboard from './components/Dashboard';
-const SalesModule = lazy(() => import('./components/SalesModule'));
+const SalesDashboard = lazy(() => import("./components/SalesDashboard"));
 const QuoteComparator = lazy(() => import('./components/QuoteComparator'));
 const OrderManager = lazy(() => import('./components/OrderManager'));
 const Schedule = lazy(() => import('./components/Schedule'));
@@ -680,7 +680,7 @@ const App: React.FC = () => {
         )}
         <Suspense fallback={<div className="flex items-center justify-center h-full text-slate-500 text-sm">Carregando...</div>}>
         {activeTab === 'sales' && (
-          <SalesModule
+          <SalesDashboard
             setForecast={setForecast} salesData={salesData} setSalesData={setSalesData}
             csvContent={salesCsvContent} setCsvContent={setSalesCsvContent}
             salesConfig={salesConfig} setSalesConfig={setSalesConfig}
