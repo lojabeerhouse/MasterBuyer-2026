@@ -150,7 +150,6 @@ export const processBatchIntoHistory = async (
     if (existingRecord) {
       // Only notify if price changed
       if (Math.abs(existingRecord.unitPrice - item.unitPrice) > 0.001) {
-        const shortName = item.name.substring(0, 10);
         const dateStr = new Date(batch.timestamp).toLocaleDateString('pt-BR', {
           day: '2-digit', month: '2-digit', year: '2-digit'
         });
@@ -161,8 +160,8 @@ export const processBatchIntoHistory = async (
         const notification: AppNotification = {
           id: crypto.randomUUID(),
           type: 'attention',
-          title: `Duplicidade: "${shortName}"`,
-          message: `Produto: "${shortName}" ${dateStr} - ${timeStr} [${supplier.name}] — VERIFIQUE QUAL MANTER CLICANDO AQUI!`,
+          title: `Duplicidade: "${item.name}"`,
+          message: `Produto: "${item.name}" ${dateStr} - ${timeStr} [${supplier.name}] — VERIFIQUE QUAL MANTER CLICANDO AQUI!`,
           timestamp: Date.now(),
           resolved: false,
           supplierId: supplier.id,
@@ -170,6 +169,7 @@ export const processBatchIntoHistory = async (
           batchId: batch.id,
           payload: {
             productName: item.name,
+            existingName: history.productName,
             normalizedKey,
             existing: {
               batchId: existingRecord.batchId,
@@ -260,6 +260,7 @@ export const resolveDuplicate = async (
   if (!history) return;
 
   if (keepWhich === 'incoming') {
+    history.productName = productName;
     // Remove existing record, add incoming
     history.records = history.records.filter(
       r => !(r.supplierId === existing.supplierId && r.batchId === existing.batchId)

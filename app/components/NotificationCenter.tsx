@@ -1,6 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { AppNotification, DuplicatePayload } from '../types';
-import { Bell, Terminal, X, CheckCircle, AlertTriangle, Clock, ChevronRight, Trash2 } from 'lucide-react';
+import { Bell, Terminal, X, CheckCircle, AlertTriangle, Clock, ChevronRight, Trash2, Maximize2 } from 'lucide-react';
+import ExpandedNotifications from './ExpandedNotifications';
 
 interface NotificationCenterProps {
   notifications: AppNotification[];
@@ -54,10 +56,13 @@ const DuplicateModal: React.FC<{
             onClick={() => onKeep('existing')}
             className="w-full text-left bg-slate-800 hover:bg-slate-700 border border-slate-700 hover:border-slate-500 rounded-xl p-4 transition-all group"
           >
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-xs font-bold text-slate-400 uppercase tracking-wide">Registro Atual</span>
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-xs font-bold text-slate-400 uppercase tracking-wide">Registro Anterior</span>
               <span className="text-xs text-slate-500">{timeAgo(payload.existing.timestamp)}</span>
             </div>
+            {payload.existingName && (
+              <p className="text-slate-400 text-xs italic truncate mb-2" title={payload.existingName}>· {payload.existingName} antes da modific.</p>
+            )}
             <div className="flex items-center justify-between">
               <span className="text-slate-300 text-sm">{payload.existing.supplierName}</span>
               <div className="text-right">
@@ -102,6 +107,7 @@ const NotificationCenter: React.FC<NotificationCenterProps> = ({
 }) => {
   const [openPanel, setOpenPanel] = useState<'attention' | 'console' | null>(null);
   const [selectedNotif, setSelectedNotif] = useState<AppNotification | null>(null);
+  const [expandedOpen, setExpandedOpen] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
 
   const attentionNotifs = notifications.filter(n => n.type === 'attention' && !n.resolved);
@@ -125,6 +131,15 @@ const NotificationCenter: React.FC<NotificationCenterProps> = ({
 
   return (
     <>
+      {expandedOpen && createPortal(
+        <ExpandedNotifications
+          notifications={notifications}
+          onResolve={onResolve}
+          onClose={() => setExpandedOpen(false)}
+        />,
+        document.body
+      )}
+
       {/* Duplicate resolution modal */}
       {selectedNotif && (
         <DuplicateModal
@@ -169,6 +184,13 @@ const NotificationCenter: React.FC<NotificationCenterProps> = ({
                     </span>
                   )}
                 </div>
+                <button
+                  onClick={() => { setExpandedOpen(true); setOpenPanel(null); }}
+                  className="flex items-center gap-1 text-slate-400 hover:text-amber-400 text-xs transition-colors"
+                  title="Expandir notificações"
+                >
+                  Expandir <Maximize2 className="w-3 h-3" />
+                </button>
               </div>
 
               <div className="max-h-80 overflow-y-auto">

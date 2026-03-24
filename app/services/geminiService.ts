@@ -2,7 +2,7 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { ProductQuote } from "../types";
 
-const getAI = () => new GoogleGenAI({ apiKey: process.env.API_KEY });
+const getAI = () => new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY });
 
 // Parse text or file content into structured product quotes
 export const parseQuoteContent = async (
@@ -40,15 +40,15 @@ export const parseQuoteContent = async (
   `;
 
   let parts: any[] = [];
-  
+
   // SANITIZE MIME TYPE: Gemini rejects 'application/vnd.ms-excel' (Windows CSVs)
   let safeMimeType = mimeType;
   if (safeMimeType === 'application/vnd.ms-excel' || safeMimeType === 'application/csv') {
-      safeMimeType = 'text/csv';
+    safeMimeType = 'text/csv';
   }
 
   if (isBase64) {
-     parts = [
+    parts = [
       {
         inlineData: {
           mimeType: safeMimeType,
@@ -56,7 +56,7 @@ export const parseQuoteContent = async (
         }
       },
       { text: prompt }
-     ];
+    ];
   } else {
     parts = [{ text: `${prompt}\n\nDATA:\n${content}` }];
   }
@@ -112,30 +112,30 @@ export const parseQuoteContent = async (
     };
 
     try {
-        const parsed = JSON.parse(text);
-        const rawItems = (parsed.items ?? parsed) as ProductQuote[];
-        return {
-          items: parseItems(rawItems),
-          detectedDate: parseDateStr(parsed.documentDate),
-        };
+      const parsed = JSON.parse(text);
+      const rawItems = (parsed.items ?? parsed) as ProductQuote[];
+      return {
+        items: parseItems(rawItems),
+        detectedDate: parseDateStr(parsed.documentDate),
+      };
     } catch (parseError) {
-        console.warn("JSON Parse failed, attempting auto-repair for truncated JSON...");
-        const lastClose = text.lastIndexOf('}');
-        if (lastClose !== -1) {
-            const repaired = text.substring(0, lastClose + 1) + "}";
-            try {
-                const parsed = JSON.parse(repaired);
-                const rawItems = (parsed.items ?? []) as ProductQuote[];
-                return {
-                  items: parseItems(rawItems),
-                  detectedDate: parseDateStr(parsed.documentDate),
-                };
-            } catch (e2) {
-                console.error("Repair failed:", e2);
-                throw parseError;
-            }
+      console.warn("JSON Parse failed, attempting auto-repair for truncated JSON...");
+      const lastClose = text.lastIndexOf('}');
+      if (lastClose !== -1) {
+        const repaired = text.substring(0, lastClose + 1) + "}";
+        try {
+          const parsed = JSON.parse(repaired);
+          const rawItems = (parsed.items ?? []) as ProductQuote[];
+          return {
+            items: parseItems(rawItems),
+            detectedDate: parseDateStr(parsed.documentDate),
+          };
+        } catch (e2) {
+          console.error("Repair failed:", e2);
+          throw parseError;
         }
-        throw parseError;
+      }
+      throw parseError;
     }
 
   } catch (error) {
@@ -145,21 +145,21 @@ export const parseQuoteContent = async (
 };
 
 export interface RawCatalogItem {
-    rawName: string;
-    baseName: string; // Name without flavor
-    flavor: string; // The specific flavor or variation
-    packFactor: number; // 12 if "12x", 6 if "cx 6", else 1
-    val1: number; // First price found on line
-    val2: number; // Second price found on line
+  rawName: string;
+  baseName: string; // Name without flavor
+  flavor: string; // The specific flavor or variation
+  packFactor: number; // 12 if "12x", 6 if "cx 6", else 1
+  val1: number; // First price found on line
+  val2: number; // Second price found on line
 }
 
 export const extractCatalogRawData = async (
-    base64: string,
-    mimeType: string
+  base64: string,
+  mimeType: string
 ): Promise<RawCatalogItem[]> => {
-    const ai = getAI();
-    
-    const prompt = `
+  const ai = getAI();
+
+  const prompt = `
         TASK: Analyze this catalog image/PDF and extract raw product lines for CSV processing.
         
         For each product line, identify:
@@ -173,72 +173,72 @@ export const extractCatalogRawData = async (
         OUTPUT: JSON Array of objects.
     `;
 
-    try {
-        const response = await ai.models.generateContent({
-            model: 'gemini-2.5-flash',
-            contents: {
-                parts: [
-                    { inlineData: { mimeType, data: base64 } },
-                    { text: prompt }
-                ]
-            },
-            config: {
-                responseMimeType: "application/json",
-                responseSchema: {
-                    type: Type.ARRAY,
-                    items: {
-                        type: Type.OBJECT,
-                        properties: {
-                            rawName: { type: Type.STRING },
-                            baseName: { type: Type.STRING },
-                            flavor: { type: Type.STRING },
-                            packFactor: { type: Type.INTEGER },
-                            val1: { type: Type.NUMBER },
-                            val2: { type: Type.NUMBER }
-                        }
-                    }
-                }
+  try {
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: {
+        parts: [
+          { inlineData: { mimeType, data: base64 } },
+          { text: prompt }
+        ]
+      },
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.ARRAY,
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              rawName: { type: Type.STRING },
+              baseName: { type: Type.STRING },
+              flavor: { type: Type.STRING },
+              packFactor: { type: Type.INTEGER },
+              val1: { type: Type.NUMBER },
+              val2: { type: Type.NUMBER }
             }
-        });
-
-        let text = response.text;
-        if (!text) return [];
-
-        // Clean Markdown if present
-        text = text.replace(/^```json\s*/, "").replace(/^```\s*/, "").replace(/```$/, "");
-
-        try {
-            return JSON.parse(text);
-        } catch (parseError) {
-            console.warn("JSON Parse failed in extractCatalogRawData, attempting auto-repair...", parseError);
-            // Attempt to repair truncated JSON
-            const lastClose = text.lastIndexOf('}');
-            if (lastClose !== -1) {
-                const repaired = text.substring(0, lastClose + 1) + "]";
-                try {
-                    return JSON.parse(repaired);
-                } catch (e2) {
-                    console.error("Repair failed:", e2);
-                    throw parseError; 
-                }
-            }
-            throw parseError;
+          }
         }
-    } catch (e) {
-        console.error("Raw Extraction Error:", e);
-        return [];
+      }
+    });
+
+    let text = response.text;
+    if (!text) return [];
+
+    // Clean Markdown if present
+    text = text.replace(/^```json\s*/, "").replace(/^```\s*/, "").replace(/```$/, "");
+
+    try {
+      return JSON.parse(text);
+    } catch (parseError) {
+      console.warn("JSON Parse failed in extractCatalogRawData, attempting auto-repair...", parseError);
+      // Attempt to repair truncated JSON
+      const lastClose = text.lastIndexOf('}');
+      if (lastClose !== -1) {
+        const repaired = text.substring(0, lastClose + 1) + "]";
+        try {
+          return JSON.parse(repaired);
+        } catch (e2) {
+          console.error("Repair failed:", e2);
+          throw parseError;
+        }
+      }
+      throw parseError;
     }
+  } catch (e) {
+    console.error("Raw Extraction Error:", e);
+    return [];
+  }
 };
 
 export const batchSmartIdentify = async (
-    items: { index: number, name: string, price: number }[]
+  items: { index: number, name: string, price: number }[]
 ): Promise<{ index: number, suggestedName: string, suggestedPackQty: number }[]> => {
-    const ai = getAI();
-    
-    // Safety limit to avoid huge payload
-    const chunk = items.slice(0, 50);
+  const ai = getAI();
 
-    const prompt = `
+  // Safety limit to avoid huge payload
+  const chunk = items.slice(0, 50);
+
+  const prompt = `
         You are a product identification expert for Brazilian supermarkets/wholesalers.
         
         I will provide a list of UNIDENTIFIED items (names and prices).
@@ -256,30 +256,30 @@ export const batchSmartIdentify = async (
         OUTPUT format: JSON Array of objects: { "index": number, "suggestedName": string, "suggestedPackQty": number }
     `;
 
-    try {
-        const response = await ai.models.generateContent({
-            model: 'gemini-2.5-flash',
-            contents: prompt,
-            config: {
-                responseMimeType: "application/json",
-                responseSchema: {
-                    type: Type.ARRAY,
-                    items: {
-                        type: Type.OBJECT,
-                        properties: {
-                            index: { type: Type.INTEGER },
-                            suggestedName: { type: Type.STRING },
-                            suggestedPackQty: { type: Type.INTEGER }
-                        }
-                    }
-                }
+  try {
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: prompt,
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.ARRAY,
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              index: { type: Type.INTEGER },
+              suggestedName: { type: Type.STRING },
+              suggestedPackQty: { type: Type.INTEGER }
             }
-        });
-        return JSON.parse(response.text || "[]");
-    } catch (e) {
-        console.error("Batch ID Error:", e);
-        return [];
-    }
+          }
+        }
+      }
+    });
+    return JSON.parse(response.text || "[]");
+  } catch (e) {
+    console.error("Batch ID Error:", e);
+    return [];
+  }
 };
 
 export const generatePurchaseStrategy = async (
@@ -311,9 +311,9 @@ export const generatePurchaseStrategy = async (
 };
 
 export const interpretBulkEditCommand = async (command: string): Promise<{ field: string | null, value: any, error?: string }> => {
-    const ai = getAI();
-    
-    const prompt = `
+  const ai = getAI();
+
+  const prompt = `
         You are a system that interprets natural language commands to update database fields in Portuguese.
         
         The user will provide a command like "Change price to 10.50" or "Set brand to Nike".
@@ -360,65 +360,65 @@ export const interpretBulkEditCommand = async (command: string): Promise<{ field
         USER COMMAND: "${command}"
     `;
 
-    try {
-        const response = await ai.models.generateContent({
-            model: 'gemini-2.5-flash',
-            contents: prompt,
-            config: {
-                responseMimeType: "application/json",
-                responseSchema: {
-                    type: Type.OBJECT,
-                    properties: {
-                        field: { type: Type.STRING, description: "The internal field name (e.g., priceSell) or null if invalid." },
-                        value: { type: Type.STRING, description: "The value to set. Return 'AUTO_GENERATE' if user wants AI lookup." }
-                    }
-                }
-            }
-        });
+  try {
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: prompt,
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            field: { type: Type.STRING, description: "The internal field name (e.g., priceSell) or null if invalid." },
+            value: { type: Type.STRING, description: "The value to set. Return 'AUTO_GENERATE' if user wants AI lookup." }
+          }
+        }
+      }
+    });
 
-        const result = JSON.parse(response.text || "{}");
-        
-        // Post-processing to cast types
-        if (result.field) {
-            const numericFields = ['priceSell', 'priceCost', 'stock', 'minStock', 'maxStock', 'netWeight', 'grossWeight', 'width', 'height', 'depth'];
-            if (numericFields.includes(result.field)) {
-                let valStr = String(result.value).trim();
-                
-                // PT-BR small decimal handling (e.g. 0,050 -> 0.050)
-                if (valStr.includes(',')) {
-                    // Check if it's a thousands separator (1.000,00) or just a decimal (0,050)
-                    if (valStr.includes('.') && valStr.indexOf('.') < valStr.indexOf(',')) {
-                        // 1.000,00 format
-                        valStr = valStr.replace(/\./g, '').replace(',', '.');
-                    } else {
-                        // 0,050 format or 10,50 format
-                        valStr = valStr.replace(',', '.');
-                    }
-                }
-                
-                const num = parseFloat(valStr);
-                return { field: result.field, value: isNaN(num) ? 0 : num };
-            }
-            return { field: result.field, value: result.value };
+    const result = JSON.parse(response.text || "{}");
+
+    // Post-processing to cast types
+    if (result.field) {
+      const numericFields = ['priceSell', 'priceCost', 'stock', 'minStock', 'maxStock', 'netWeight', 'grossWeight', 'width', 'height', 'depth'];
+      if (numericFields.includes(result.field)) {
+        let valStr = String(result.value).trim();
+
+        // PT-BR small decimal handling (e.g. 0,050 -> 0.050)
+        if (valStr.includes(',')) {
+          // Check if it's a thousands separator (1.000,00) or just a decimal (0,050)
+          if (valStr.includes('.') && valStr.indexOf('.') < valStr.indexOf(',')) {
+            // 1.000,00 format
+            valStr = valStr.replace(/\./g, '').replace(',', '.');
+          } else {
+            // 0,050 format or 10,50 format
+            valStr = valStr.replace(',', '.');
+          }
         }
 
-        return { field: null, value: null, error: "Não entendi qual campo alterar." };
-
-    } catch (e) {
-        console.error(e);
-        return { field: null, value: null, error: "Erro ao interpretar comando." };
+        const num = parseFloat(valStr);
+        return { field: result.field, value: isNaN(num) ? 0 : num };
+      }
+      return { field: result.field, value: result.value };
     }
+
+    return { field: null, value: null, error: "Não entendi qual campo alterar." };
+
+  } catch (e) {
+    console.error(e);
+    return { field: null, value: null, error: "Erro ao interpretar comando." };
+  }
 }
 
 export const batchSuggestNCM = async (
-    items: { id: string, name: string }[]
+  items: { id: string, name: string }[]
 ): Promise<{ id: string, ncm: string }[]> => {
-    const ai = getAI();
-    
-    // Process in chunks of 30 to avoid token limits
-    const chunk = items.slice(0, 30);
+  const ai = getAI();
 
-    const prompt = `
+  // Process in chunks of 30 to avoid token limits
+  const chunk = items.slice(0, 30);
+
+  const prompt = `
         You are a Brazilian Tax Expert (Contabilidade/Fiscal).
         
         TASK: Identify the correct NCM (Nomenclatura Comum do Mercosul) code (8 digits, format XXXX.XX.XX) for each product below based on its description.
@@ -432,29 +432,29 @@ export const batchSuggestNCM = async (
         Ensure the 'id' matches the input.
     `;
 
-    try {
-        const response = await ai.models.generateContent({
-            model: 'gemini-2.5-flash',
-            contents: prompt,
-            config: {
-                responseMimeType: "application/json",
-                responseSchema: {
-                    type: Type.ARRAY,
-                    items: {
-                        type: Type.OBJECT,
-                        properties: {
-                            id: { type: Type.STRING },
-                            ncm: { type: Type.STRING }
-                        }
-                    }
-                }
+  try {
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: prompt,
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.ARRAY,
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              id: { type: Type.STRING },
+              ncm: { type: Type.STRING }
             }
-        });
-        return JSON.parse(response.text || "[]");
-    } catch (e) {
-        console.error("Batch NCM Error:", e);
-        return [];
-    }
+          }
+        }
+      }
+    });
+    return JSON.parse(response.text || "[]");
+  } catch (e) {
+    console.error("Batch NCM Error:", e);
+    return [];
+  }
 };
 
 export const generateProductVariations = async (productName: string): Promise<string[]> => {

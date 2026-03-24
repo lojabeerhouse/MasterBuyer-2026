@@ -252,6 +252,7 @@ export interface AppNotification {
 
 export interface DuplicatePayload {
   productName: string;
+  existingName?: string;
   existing: {
     batchId: string;
     supplierId: string;
