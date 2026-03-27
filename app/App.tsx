@@ -3,7 +3,7 @@ import { signInWithPopup, signOut, onAuthStateChanged, User } from 'firebase/aut
 import { auth, googleProvider } from './firebaseConfig';
 import { saveUserData, loadUserData, saveChunkedData, loadChunkedData } from './services/firebaseService';
 import { loadNotifications, saveNotifications, processBatchIntoHistory, resolveDuplicate, normalizeProductKey, loadPriceHistory, savePriceHistory } from './services/historyService';
-import { loadAllCatalogs, processBatchIntoCatalog, saveCatalog } from './services/supplierCatalogService';
+import { loadAllCatalogs, processBatchIntoCatalog, saveCatalog, normForMapping, makeProductId } from './services/supplierCatalogService';
 import NotificationCenter from './components/NotificationCenter';
 import Dashboard from './components/Dashboard';
 const SalesDashboard = lazy(() => import("./components/SalesDashboard"));
@@ -287,6 +287,35 @@ const App: React.FC = () => {
   useEffect(() => { if (uid && isLoaded) saveUserData(uid, 'userProfile', userProfile); }, [userProfile, uid, isLoaded]);
   useEffect(() => { if (uid) saveNotifications(uid, notifications); }, [notifications, uid]);
 
+  // --- ARQUIVAMENTO AUTOMÁTICO DE COTAÇÕES ANTIGAS ---
+  useEffect(() => {
+    if (!isLoaded || !uid) return;
+    const archiveDays = priceValidityConfig.quoteArchiveDays ?? 90;
+    const threshold = archiveDays * 86_400_000;
+    const now = Date.now();
+    let changed = false;
+
+    const updated = suppliers.map(s => ({
+      ...s,
+      quotes: s.quotes.map(q => {
+        if (!q.isSaved || q.archivedCsv || !q.items.length || q.status !== 'completed') return q;
+        const age = now - (q.savedAt ?? q.timestamp);
+        if (age < threshold) return q;
+
+        const header = 'SKU;Produto;PrecoLista;Unidade;QtdEmbalagem;PrecoUnitarioCalculado';
+        const rows = q.items.map(item => {
+          const listPrice = item.priceStrategy === 'unit' ? item.unitPrice : item.price;
+          return `${item.sku};${item.name};"${listPrice.toFixed(2).replace('.', ',')}";${item.unit};${item.packQuantity};"${item.unitPrice.toFixed(2).replace('.', ',')}"`;
+        });
+        changed = true;
+        return { ...q, archivedCsv: [header, ...rows].join('\n'), archivedItemCount: q.items.length, items: [], rawContent: undefined };
+      }),
+    }));
+
+    if (changed) setSuppliers(updated);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isLoaded]); // roda uma vez após o carregamento inicial
+
   // --- NOTIFICATION HANDLERS ---
   const handleNotificationResolve = useCallback(async (id: string, keepWhich?: 'existing' | 'incoming') => {
     const notif = notifications.find(n => n.id === id);
@@ -308,17 +337,93 @@ const App: React.FC = () => {
     const supplier = suppliers.find(s => s.id === supplierId);
     if (!supplier) return;
 
+    // --- DICIONÁRIO INTERCEPTOR (TRADUÇÃO E UNIFICAÇÃO) ---
+    // Pega os itens, joga no Dicionário Global. Se o Bruno já apertou o "Botão Verde" pra esse texto no passado...
+    const translatedItems = batch.items.map(item => {
+      const itemNormForMapping = item.name.toLowerCase()
+        .normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]/g, '');
+      const mapping = productMappings.find(m => m.supplierProductNameNormalized === itemNormForMapping);
+      if (mapping?.targetSku) {
+        // Caso A: mapeado para produto master (comportamento original)
+        if (!mapping.targetType || mapping.targetType === 'master') {
+          const master = masterProducts.find((mp: MasterProduct) => mp.sku === mapping.targetSku);
+          if (master) {
+            return { ...item, name: master.name };
+          }
+        }
+        // Caso B: mapeado para alias histórico do fornecedor
+        if (mapping.targetType === 'supplier' && mapping.targetName) {
+          return { ...item, name: mapping.targetName };
+        }
+      }
+      return item;
+    });
+
+    const finalBatch = { ...batch, items: translatedItems };
+
+    // Persiste o batch com os nomes ORIGINAIS do fornecedor (para que os mapeamentos continuem funcionando ao reabrir)
+    // finalBatch (com nomes traduzidos) é usado apenas para catálogo e histórico
+    setSuppliers(prev => prev.map(s => {
+      if (s.id !== supplierId) return s;
+      return {
+        ...s,
+        quotes: s.quotes.map(q => q.id === batch.id ? batch : q)
+      };
+    }));
+
     const { newNotifications } = await processBatchIntoHistory(
-      user.uid, batch, supplier, productMappings, notifications
+      user.uid, finalBatch, supplier, productMappings, notifications
     );
     if (newNotifications.length > 0) {
       setNotifications(prev => [...newNotifications, ...prev]);
     }
 
     const { catalog, newProducts, updatedProducts } = await processBatchIntoCatalog(
-      user.uid, batch, supplierId, supplier.name, masterProducts
+      user.uid, finalBatch, supplierId, supplier.name, masterProducts
     );
-    setSupplierCatalogs(prev => ({ ...prev, [supplierId]: catalog }));
+
+    // Remove entradas antigas do catálogo cujos nomes foram traduzidos (evita duplicidade)
+    const orphanedIds = batch.items
+      .map((item, i) => {
+        const translatedName = translatedItems[i].name;
+        if (item.name !== translatedName) return makeProductId(item.name);
+        return null;
+      })
+      .filter((id): id is string => id !== null);
+
+    let processedCatalog = catalog;
+    if (orphanedIds.length > 0) {
+      processedCatalog = {
+        ...catalog,
+        products: catalog.products.filter(p => !orphanedIds.includes(p.id)),
+        updatedAt: Date.now(),
+      };
+    }
+
+    // Merge + save único: preserva linkConfirmed do estado em memória (set por addMapping)
+    // para não sobrescrever links confirmados com versão desatualizada lida do Firestore
+    setSupplierCatalogs(prev => {
+      const current = prev[supplierId];
+      const products = processedCatalog.products.map(p => {
+        const inMem = current?.products.find(c => c.id === p.id);
+        if (inMem?.linkConfirmed && !p.linkConfirmed) {
+          return {
+            ...p,
+            linkConfirmed: true,
+            masterSku: inMem.masterSku,
+            masterProductName: inMem.masterProductName,
+            masterCategory: inMem.masterCategory,
+            masterTags: inMem.masterTags,
+            linkSuggestion: undefined,
+            linkSuggestionScore: undefined,
+          };
+        }
+        return p;
+      });
+      const merged = { ...processedCatalog, products };
+      saveCatalog(user.uid, merged);
+      return { ...prev, [supplierId]: merged };
+    });
 
     if (newProducts > 0 || updatedProducts > 0) {
       setNotifications(prev => [{
@@ -428,23 +533,99 @@ const App: React.FC = () => {
   };
 
   // --- HELPERS ---
-  const addMapping = useCallback((supplierProductName: string, targetSku: string) => {
-    const normalized = supplierProductName.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]/g, "");
+  const addMapping = useCallback((supplierProductName: string, targetSku: string, targetType?: 'master' | 'supplier', targetName?: string) => {
+    const normalized = normForMapping(supplierProductName);
     setProductMappings(prev => {
       const existing = prev.findIndex(m => m.supplierProductNameNormalized === normalized);
+      let newMappings: ProductMapping[];
       if (existing >= 0) {
         const copy = [...prev];
-        copy[existing].targetSku = targetSku;
-        return copy;
+        copy[existing] = { ...copy[existing], targetSku, targetType, targetName };
+        newMappings = copy;
+      } else {
+        newMappings = [...prev, { supplierProductNameNormalized: normalized, targetSku, targetType, targetName }];
       }
-      return [...prev, { supplierProductNameNormalized: normalized, targetSku }];
+      // PARTE 2: save immediately, not only via useEffect
+      if (uid) saveUserData(uid, 'mappings', newMappings);
+      return newMappings;
     });
-  }, []);
+
+    // PARTE 1a + PARTE 5: propagate link to supplierCatalogs and dedup entries with same masterSku
+    if (!targetType || targetType === 'master') {
+      const masterProduct = masterProducts.find(p => p.sku === targetSku);
+      if (masterProduct && uid) {
+        setSupplierCatalogs(prev => {
+          const updated = { ...prev };
+          for (const [, catalog] of Object.entries(updated)) {
+            const hasMatch = catalog.products.some(p => normForMapping(p.name) === normalized);
+            if (!hasMatch) continue;
+
+            // Apply link to matched products
+            let updatedProducts = catalog.products.map(p =>
+              normForMapping(p.name) === normalized
+                ? { ...p, masterSku: targetSku, masterProductName: masterProduct.name,
+                    masterCategory: masterProduct.category, masterTags: masterProduct.tags,
+                    linkConfirmed: true, linkSuggestion: undefined }
+                : p
+            );
+
+            // Dedup: merge all entries sharing the same masterSku into the most recent one
+            const dupes = updatedProducts.filter(p => p.masterSku === targetSku);
+            if (dupes.length > 1) {
+              const newest = dupes.reduce((a, b) => a.lastSeenDate > b.lastSeenDate ? a : b);
+              const allHistory = dupes.flatMap(p => p.priceHistory);
+              const mergedHistory = [...new Map(allHistory.map(e => [e.batchId, e])).values()]
+                .sort((a, b) => b.date - a.date)
+                .slice(0, 60);
+              const dupeIds = new Set(dupes.map(p => p.id));
+              dupeIds.delete(newest.id);
+              updatedProducts = updatedProducts
+                .filter(p => !dupeIds.has(p.id))
+                .map(p => p.id === newest.id ? { ...newest, priceHistory: mergedHistory } : p);
+            }
+
+            const updatedCatalog = { ...catalog, products: updatedProducts };
+            saveCatalog(uid, updatedCatalog);
+            updated[catalog.supplierId] = updatedCatalog;
+          }
+          return updated;
+        });
+      }
+    }
+  }, [uid, masterProducts]);
 
   const removeMapping = useCallback((supplierProductName: string) => {
-    const normalized = supplierProductName.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]/g, "");
-    setProductMappings(prev => prev.filter(m => m.supplierProductNameNormalized !== normalized));
-  }, []);
+    const normalized = normForMapping(supplierProductName);
+    setProductMappings(prev => {
+      const newMappings = prev.filter(m => m.supplierProductNameNormalized !== normalized);
+      // PARTE 2: save immediately
+      if (uid) saveUserData(uid, 'mappings', newMappings);
+      return newMappings;
+    });
+
+    // PARTE 1b: propagate unlink to supplierCatalogs
+    if (uid) {
+      setSupplierCatalogs(prev => {
+        const updated = { ...prev };
+        for (const [, catalog] of Object.entries(updated)) {
+          const hasMatch = catalog.products.some(p => normForMapping(p.name) === normalized);
+          if (!hasMatch) continue;
+          const updatedCatalog = {
+            ...catalog,
+            products: catalog.products.map(p =>
+              normForMapping(p.name) === normalized
+                ? { ...p, masterSku: undefined, masterProductName: undefined,
+                    masterCategory: undefined, masterTags: undefined, linkConfirmed: false }
+                : p
+            ),
+          };
+          saveCatalog(uid, updatedCatalog);
+          updated[catalog.supplierId] = updatedCatalog;
+        }
+        return updated;
+      });
+    }
+  }, [uid]);
 
   const ignoreMapping = useCallback((supplierProductName: string, targetSku: string) => {
     const normalized = supplierProductName.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]/g, "");
@@ -751,6 +932,8 @@ const App: React.FC = () => {
                   onCatalogUpdate={updated => setSupplierCatalogs(prev => ({ ...prev, [updated.supplierId]: updated }))}
                   onHideProduct={handleHideProduct}
                   onUnhideProduct={handleUnhideProduct}
+                  onAddMapping={addMapping}
+                  onRemoveMapping={removeMapping}
                 />
               )}
             </div>
@@ -769,6 +952,12 @@ const App: React.FC = () => {
             onBatchCompleted={handleBatchCompleted}
             uid={uid ?? ''}
             onBatchDateChange={handleBatchDateChange}
+            productMappings={productMappings}
+            masterProducts={masterProducts}
+            onAddMapping={addMapping}
+            onRemoveMapping={removeMapping}
+            priceValidityConfig={priceValidityConfig}
+            setPriceValidityConfig={setPriceValidityConfig}
           />
         )}
         {activeTab === 'quote_request' && (

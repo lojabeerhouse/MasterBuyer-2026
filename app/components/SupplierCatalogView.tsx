@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, startTransition } from 'react';
 import {
   SupplierCatalog, SupplierCatalogProduct, MasterProduct,
   PriceValidityMode, HiddenProduct, Supplier,
@@ -33,6 +33,8 @@ interface SupplierCatalogViewProps {
   onCatalogUpdate: (catalog: SupplierCatalog) => void;
   onHideProduct: (product: SupplierCatalogProduct, supplierId: string, supplierName: string) => void;
   onUnhideProduct: (productId: string) => void;
+  onAddMapping?: (supplierProductName: string, targetSku: string, targetType?: 'master' | 'supplier', targetName?: string) => void;
+  onRemoveMapping?: (supplierProductName: string) => void;
 }
 
 // ─── LINK MODAL ──────────────────────────────────────────────────────────────
@@ -202,9 +204,16 @@ const ProductCard: React.FC<{
       {product.linkSuggestion && !product.linkConfirmed && !isHidden && (
         <div className="flex items-center gap-2 px-3 py-2 bg-amber-950/30 border-b border-amber-800/30">
           <AlertCircle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-          <span className="text-amber-300 text-xs flex-1 truncate">
-            Sugestão: <strong>{product.masterProductName}</strong> <span className="text-amber-500">({product.linkSuggestionScore}%)</span>
-          </span>
+          <div className="ticker-wrap flex-1 overflow-hidden">
+            <div className="ticker-inner flex w-max gap-12">
+              <span className="text-amber-300 text-xs whitespace-nowrap">
+                Sugestão: <strong>{product.masterProductName}</strong> <span className="text-amber-500">({product.linkSuggestionScore}%)</span>
+              </span>
+              <span className="text-amber-300 text-xs whitespace-nowrap" aria-hidden="true">
+                Sugestão: <strong>{product.masterProductName}</strong> <span className="text-amber-500">({product.linkSuggestionScore}%)</span>
+              </span>
+            </div>
+          </div>
           <button onClick={() => onConfirmSuggestion(product)} className="text-emerald-400 hover:text-emerald-300 p-0.5 transition-colors" title="Confirmar">
             <Check className="w-3.5 h-3.5" />
           </button>
@@ -321,10 +330,13 @@ const CatalogContent: React.FC<{
   onCatalogUpdate: (c: SupplierCatalog) => void;
   onHideProduct: (p: SupplierCatalogProduct, supplierId: string, supplierName: string) => void;
   onUnhideProduct: (id: string) => void;
-}> = ({ catalog, masterProducts, uid, globalValidityDays, showInactive, hiddenProducts, onCatalogUpdate, onHideProduct, onUnhideProduct }) => {
+  onAddMapping?: (supplierProductName: string, targetSku: string, targetType?: 'master' | 'supplier', targetName?: string) => void;
+  onRemoveMapping?: (supplierProductName: string) => void;
+}> = ({ catalog, masterProducts, uid, globalValidityDays, showInactive, hiddenProducts, onCatalogUpdate, onHideProduct, onUnhideProduct, onAddMapping, onRemoveMapping }) => {
   const [localCatalog, setLocalCatalog] = useState(catalog);
   const [search, setSearch] = useState('');
-  const [filterLinked, setFilterLinked] = useState<'all' | 'linked' | 'unlinked' | 'expired'>('all');
+  const [filterLinked, setFilterLinked] = useState<'all' | 'linked' | 'suggestions' | 'unlinked' | 'expired'>('all');
+  const [page, setPage] = useState(0);
   const [filterCategory, setFilterCategory] = useState('');
   const [linkingProduct, setLinkingProduct] = useState<SupplierCatalogProduct | null>(null);
   const [hideConfirmProduct, setHideConfirmProduct] = useState<SupplierCatalogProduct | null>(null);
@@ -332,6 +344,7 @@ const CatalogContent: React.FC<{
   const [historyPage, setHistoryPage] = useState(0);
 
   useEffect(() => { setLocalCatalog(catalog); }, [catalog]);
+  useEffect(() => { setPage(0); }, [search, filterLinked, filterCategory]);
 
   const effectiveDays = localCatalog.priceValidityMode === 'custom'
     ? (localCatalog.priceValidityDays ?? globalValidityDays) : globalValidityDays;
@@ -362,9 +375,10 @@ const CatalogContent: React.FC<{
     }
     if (filterCategory) prods = prods.filter(p => p.masterCategory?.includes(filterCategory));
     switch (filterLinked) {
-      case 'linked':   prods = prods.filter(p => p.linkConfirmed); break;
-      case 'unlinked': prods = prods.filter(p => !p.linkConfirmed && !p.linkSuggestion); break;
-      case 'expired':  prods = prods.filter(p => !getValidPrice(p, localCatalog.priceValidityMode, effectiveDays)); break;
+      case 'linked':      prods = prods.filter(p => p.linkConfirmed); break;
+      case 'suggestions': prods = prods.filter(p => p.linkSuggestion && !p.linkConfirmed); break;
+      case 'unlinked':    prods = prods.filter(p => !p.linkConfirmed && !p.linkSuggestion); break;
+      case 'expired':     prods = prods.filter(p => !getValidPrice(p, localCatalog.priceValidityMode, effectiveDays)); break;
     }
     return [...prods].sort((a, b) => {
       // ocultos vão para o final
@@ -375,24 +389,34 @@ const CatalogContent: React.FC<{
     });
   }, [localCatalog.products, search, filterLinked, filterCategory, effectiveDays, showInactive, hiddenIds, localCatalog.priceValidityMode]);
 
+  const PAGE_SIZE = 30;
+  const totalPages = Math.ceil(filteredProducts.length / PAGE_SIZE);
+  const pagedProducts = filteredProducts.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+
   const stats = useMemo(() => ({
     total: localCatalog.products.length,
     linked: localCatalog.products.filter(p => p.linkConfirmed).length,
     suggestions: localCatalog.products.filter(p => p.linkSuggestion && !p.linkConfirmed).length,
     hidden: hiddenIds.size,
-  }), [localCatalog, hiddenIds]);
+    unlinked: localCatalog.products.filter(p => !p.linkConfirmed && !p.linkSuggestion).length,
+    expired: localCatalog.products.filter(p => !getValidPrice(p, localCatalog.priceValidityMode, effectiveDays)).length,
+  }), [localCatalog, hiddenIds, effectiveDays]);
 
   const update = (updated: SupplierCatalog) => { setLocalCatalog(updated); onCatalogUpdate(updated); };
 
   const handleConfirmLink = async (productId: string, masterSku: string) => {
     const master = masterProducts.find(mp => mp.sku === masterSku);
     if (!master) return;
+    const product = localCatalog.products.find(p => p.id === productId);
     update(await confirmProductLink(uid, localCatalog, productId, master));
+    if (product) onAddMapping?.(product.name, masterSku, 'master', master.name);
     setLinkingProduct(null);
   };
   const handleUnlink = async (productId: string) => {
     if (!window.confirm('Remover link deste produto?')) return;
+    const product = localCatalog.products.find(p => p.id === productId);
     update(await removeProductLink(uid, localCatalog, productId));
+    if (product) onRemoveMapping?.(product.name);
   };
   const handleRejectSuggestion = async (productId: string) => {
     update(await rejectLinkSuggestion(uid, localCatalog, productId));
@@ -499,18 +523,22 @@ const CatalogContent: React.FC<{
         );
       })()}
 
-      {/* Stats */}
-      <div className="grid grid-cols-4 gap-2">
-        {[
-          { label: 'Total',      value: stats.total,       color: 'text-white' },
-          { label: 'Linkados',   value: stats.linked,      color: 'text-emerald-400' },
-          { label: 'Sugestões',  value: stats.suggestions, color: 'text-amber-400' },
-          { label: 'Ocultos',    value: stats.hidden,      color: 'text-slate-500' },
-        ].map(s => (
-          <div key={s.label} className="bg-slate-900 border border-slate-800 rounded-xl p-3 text-center">
-            <p className={`text-xl font-black ${s.color}`}>{s.value}</p>
-            <p className="text-slate-600 text-[11px] mt-0.5">{s.label}</p>
-          </div>
+      {/* Stats + Filtros combinados */}
+      <div className="grid grid-cols-5 gap-2">
+        {([
+          { k: 'all'         as const, l: 'Todos',     v: stats.total,       c: 'text-white',       a: 'bg-slate-800 border-slate-600' },
+          { k: 'linked'      as const, l: 'Linkados',  v: stats.linked,      c: 'text-emerald-400', a: 'bg-emerald-900/20 border-emerald-700/50' },
+          { k: 'suggestions' as const, l: 'Sugestões', v: stats.suggestions, c: 'text-amber-400',   a: 'bg-amber-900/20 border-amber-700/50' },
+          { k: 'unlinked'    as const, l: 'Sem link',  v: stats.unlinked,    c: 'text-slate-400',   a: 'bg-slate-800/60 border-slate-600' },
+          { k: 'expired'     as const, l: 'Expirados', v: stats.expired,     c: 'text-red-400',     a: 'bg-red-900/20 border-red-700/50' },
+        ]).map(s => (
+          <button key={s.k} onClick={() => setFilterLinked(s.k)}
+            className={`rounded-xl p-2.5 text-center border transition-all ${
+              filterLinked === s.k ? s.a : 'bg-slate-900 border-slate-800 hover:border-slate-700'
+            }`}>
+            <p className={`text-xl font-black ${s.c}`}>{s.v}</p>
+            <p className="text-slate-600 text-[10px] mt-0.5">{s.l}</p>
+          </button>
         ))}
       </div>
 
@@ -545,7 +573,7 @@ const CatalogContent: React.FC<{
         </div>
       </div>
 
-      {/* Filtros */}
+      {/* Busca + Categoria */}
       <div className="flex gap-2 flex-wrap">
         <div className="relative flex-1 min-w-40">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-500" />
@@ -553,14 +581,6 @@ const CatalogContent: React.FC<{
             onChange={e => setSearch(e.target.value)}
             className="w-full bg-slate-900 border border-slate-700 rounded-xl pl-8 pr-3 py-2 text-white text-sm placeholder-slate-500 focus:outline-none focus:border-amber-500" />
         </div>
-        {(['all', 'linked', 'unlinked', 'expired'] as const).map(f => (
-          <button key={f} onClick={() => setFilterLinked(f)}
-            className={`px-3 py-2 rounded-xl text-xs font-medium transition-all ${
-              filterLinked === f ? 'bg-amber-600 text-white' : 'bg-slate-900 border border-slate-700 text-slate-400 hover:text-white'
-            }`}>
-            {{ all: 'Todos', linked: '🔗 Linkados', unlinked: '❓ Sem link', expired: '⏰ Expirados' }[f]}
-          </button>
-        ))}
         {categories.length > 0 && (
           <select value={filterCategory} onChange={e => setFilterCategory(e.target.value)}
             className="bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-slate-400 text-xs focus:outline-none focus:border-amber-500">
@@ -579,20 +599,37 @@ const CatalogContent: React.FC<{
           <p className="text-xs mt-1 text-slate-700">Processe uma cotação para popular o catálogo</p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-          {filteredProducts.map(product => (
-            <ProductCard key={product.id} product={product} masterProducts={masterProducts}
-              validityMode={localCatalog.priceValidityMode} validityDays={effectiveDays}
-              isHidden={hiddenIds.has(product.id)}
-              onLink={setLinkingProduct} onUnlink={handleUnlink}
-              onConfirmSuggestion={p => handleConfirmLink(p.id, p.linkSuggestion!)}
-              onRejectSuggestion={handleRejectSuggestion}
-              onHide={handleHide}
-              onUnhide={onUnhideProduct}
-              onShowHistory={p => { setHistoryModal(p); setHistoryPage(0); }}
-            />
-          ))}
-        </div>
+        <>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+            {pagedProducts.map(product => (
+              <ProductCard key={product.id} product={product} masterProducts={masterProducts}
+                validityMode={localCatalog.priceValidityMode} validityDays={effectiveDays}
+                isHidden={hiddenIds.has(product.id)}
+                onLink={setLinkingProduct} onUnlink={handleUnlink}
+                onConfirmSuggestion={p => handleConfirmLink(p.id, p.linkSuggestion!)}
+                onRejectSuggestion={handleRejectSuggestion}
+                onHide={handleHide}
+                onUnhide={onUnhideProduct}
+                onShowHistory={p => { setHistoryModal(p); setHistoryPage(0); }}
+              />
+            ))}
+          </div>
+          {totalPages > 1 && (
+            <div className="flex items-center justify-center gap-3 pt-2 pb-1">
+              <button onClick={() => setPage(p => Math.max(0, p - 1))} disabled={page === 0}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-white disabled:opacity-30 disabled:cursor-default transition-colors">
+                <ChevronLeft className="w-4 h-4" />
+              </button>
+              <span className="text-slate-500 text-xs">
+                {page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, filteredProducts.length)} de {filteredProducts.length}
+              </span>
+              <button onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))} disabled={page === totalPages - 1}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-white disabled:opacity-30 disabled:cursor-default transition-colors">
+                <ChevronRight className="w-4 h-4" />
+              </button>
+            </div>
+          )}
+        </>
       )}
     </div>
   );
@@ -603,6 +640,7 @@ const SupplierCatalogView: React.FC<SupplierCatalogViewProps> = ({
   suppliers, catalogs, masterProducts, uid,
   globalValidityDays, showInactive, hiddenProducts,
   onCatalogUpdate, onHideProduct, onUnhideProduct,
+  onAddMapping, onRemoveMapping,
 }) => {
   const [selectedSupplierId, setSelectedSupplierId] = useState<string | null>(
     suppliers.filter(s => s.isEnabled)[0]?.id ?? null
@@ -645,7 +683,7 @@ const SupplierCatalogView: React.FC<SupplierCatalogViewProps> = ({
 
           return (
             <div key={s.id}
-              onClick={() => setSelectedSupplierId(s.id)}
+              onClick={() => startTransition(() => setSelectedSupplierId(s.id))}
               className={`group relative flex flex-col gap-1 px-3 py-2.5 rounded-xl cursor-pointer transition-all border ${
                 isSelected
                   ? 'bg-amber-600/10 border-amber-600/50 text-white'
@@ -717,6 +755,8 @@ const SupplierCatalogView: React.FC<SupplierCatalogViewProps> = ({
             onCatalogUpdate={onCatalogUpdate}
             onHideProduct={onHideProduct}
             onUnhideProduct={onUnhideProduct}
+            onAddMapping={onAddMapping}
+            onRemoveMapping={onRemoveMapping}
           />
         )}
       </div>

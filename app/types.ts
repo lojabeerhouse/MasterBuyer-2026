@@ -24,6 +24,8 @@ export interface QuoteBatch {
   savedAt?: number;       // timestamp de quando o usuário clicou em "Salvar cotação"
   isSaved?: boolean;      // true = cotação foi confirmada/salva manualmente
   detectedDate?: number;  // data extraída do arquivo (XML dhEmi, PDF Gemini)
+  archivedCsv?: string;       // CSV comprimido dos itens (após arquivamento automático)
+  archivedItemCount?: number; // quantidade de itens arquivados (sem precisar parsear o CSV)
 }
 
 export interface PackRule {
@@ -114,7 +116,9 @@ export interface ForecastItem {
 
 export interface ProductMapping {
     supplierProductNameNormalized: string; // The normalized name coming from the supplier quote
-    targetSku: string; // The SKU in your forecast/sales system
+    targetSku: string; // The SKU in your forecast/sales system (or normalized supplier name when targetType='supplier')
+    targetType?: 'master' | 'supplier'; // 'master' = linked to master catalog SKU; 'supplier' = linked to supplier historical alias
+    targetName?: string; // Display name when targetType='supplier'
 }
 
 export interface ComparisonResult {
@@ -347,7 +351,8 @@ export interface SupplierCatalog {
 
 /** Configuração global de validade de preços */
 export interface PriceValidityConfig {
-  globalDays: number; // padrão: 7 dias
+  globalDays: number;          // padrão: 7 dias
+  quoteArchiveDays?: number;   // dias para arquivar cotações salvas (padrão: 90)
 }
 
 /** Produto oculto globalmente (catálogo + comparador) */

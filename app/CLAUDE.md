@@ -53,6 +53,28 @@ As chaves salvas são:
 
 ---
 
+## Palavras-chave de Modo
+
+### PLANEJAMENTO
+Quando o prompt iniciar com "PLANEJAMENTO":
+- NÃO execute nenhuma alteração no código
+- Antes de responder, escreva um breve resumo do que entendeu que o usuário quer
+- Retorne um plano em etapas pontuais e consecutivas contendo:
+  - Quais arquivos serão criados ou modificados
+  - Quais cuidados tomar (regressões, breaking changes, dependências)
+  - O que haverá de novo no app
+  - O que será removido ou alterado
+  - Se há chance de quebrar alguma coisa ou um conflito negativo com outra função já existente
+- Ao final, adicione uma seção "💬 Recomendação do Agente" com sua opinião honesta: pontos positivos, riscos, e motivação para cada um
+
+### PESQUISA
+Quando a palavra "PESQUISA" aparecer nos primeiros 40 caracteres do prompt:
+- Não execute código
+- Pesquise e sintetize o tema citado no prompt
+- Foque em como o tema se aplica ao contexto do MasterBuyer 2026
+- Retorne um resumo objetivo com pontos práticos e relevantes para o projeto
+- A pesquisa deve ser um adicional ao prompt, não uma substituição
+
 ## ⚠️ REGRAS CRÍTICAS — LEIA ANTES DE QUALQUER MODIFICAÇÃO
 
 ### 1. NUNCA renomeie campos existentes em types.ts

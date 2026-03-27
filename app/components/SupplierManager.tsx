@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { Supplier, QuoteBatch, ProductQuote, PackRule, BusinessHours, BusinessDayHours } from '../types';
-import { Upload, Trash2, FileText, CheckCircle, AlertCircle, Loader2, Plus, Ban, Eye, Package, Pencil, Save, X, Maximize2, XCircle, RefreshCw, HardDrive, Download, Coins, BoxSelect, Sparkles, ChevronLeft, ChevronRight, Wand2, ChevronDown, ChevronUp, AlertTriangle, Check, CheckSquare, Square, Undo2, Timer, Search, Files, FilePlus, Settings, Bot, FileStack, Scissors, MessageCircle, MapPin, Truck, Calendar, Clock, Phone, ArrowUpDown, SortAsc, SortDesc } from 'lucide-react';
+import { Supplier, QuoteBatch, ProductQuote, PackRule, BusinessHours, BusinessDayHours, ProductMapping, MasterProduct, PriceValidityConfig } from '../types';
+import { Upload, Trash2, FileText, CheckCircle, AlertCircle, Loader2, Plus, Ban, Eye, Package, Pencil, Save, X, Maximize2, XCircle, RefreshCw, HardDrive, Download, Coins, BoxSelect, Sparkles, ChevronLeft, ChevronRight, Wand2, ChevronDown, ChevronUp, AlertTriangle, Check, CheckSquare, Square, Undo2, Timer, Search, Files, FilePlus, Settings, Bot, FileStack, Scissors, MessageCircle, MapPin, Truck, Calendar, Clock, Phone, ArrowUpDown, SortAsc, SortDesc, Archive } from 'lucide-react';
+import QuoteDetailModal from './QuoteDetailModal';
 import { parseQuoteContent, generateProductVariations, batchSmartIdentify, extractCatalogRawData, RawCatalogItem } from '../services/geminiService';
 import { parseQuoteLocal } from '../services/parseQuoteLocal';
 import { isNFeXml, parseNFeFile } from '../services/parseNFe';
@@ -43,9 +44,15 @@ interface SupplierManagerProps {
   onBatchCompleted?: (batch: QuoteBatch, supplierId: string) => void;
   uid?: string;
   onBatchDateChange?: (supplierId: string, batchId: string, newTimestamp: number, items: ProductQuote[]) => void;
+  productMappings?: ProductMapping[];
+  masterProducts?: MasterProduct[];
+  onAddMapping?: (normalizedName: string, targetSku: string, targetType?: 'master' | 'supplier', targetName?: string) => void;
+  onRemoveMapping?: (supplierProductName: string) => void;
+  priceValidityConfig?: PriceValidityConfig;
+  setPriceValidityConfig?: React.Dispatch<React.SetStateAction<PriceValidityConfig>>;
 }
 
-const SupplierManager: React.FC<SupplierManagerProps> = ({ suppliers, setSuppliers, globalPackRules, setGlobalPackRules, onBatchCompleted, uid, onBatchDateChange }) => {
+const SupplierManager: React.FC<SupplierManagerProps> = ({ suppliers, setSuppliers, globalPackRules, setGlobalPackRules, onBatchCompleted, uid, onBatchDateChange, productMappings, masterProducts, onAddMapping, onRemoveMapping, priceValidityConfig, setPriceValidityConfig }) => {
   const [newSupplierName, setNewSupplierName] = useState('');
   const [activeTab, setActiveTab] = useState<string | null>(null);
   const [textInput, setTextInput] = useState('');
@@ -121,6 +128,9 @@ const SupplierManager: React.FC<SupplierManagerProps> = ({ suppliers, setSupplie
 
   // Quote sort mode
   const [quoteSortMode, setQuoteSortMode] = useState<'quoteDate' | 'uploadDate'>('quoteDate');
+
+  // Pre-processor visibility
+  const [preProcessorOpen, setPreProcessorOpen] = useState(false);
 
   // Raw content viewer
   const [viewingRawContent, setViewingRawContent] = useState<{
@@ -429,6 +439,17 @@ const SupplierManager: React.FC<SupplierManagerProps> = ({ suppliers, setSupplie
       document.body.removeChild(link);
   };
 
+  const downloadArchivedCsv = (batch: QuoteBatch) => {
+    if (!batch.archivedCsv) return;
+    const csvContent = 'data:text/csv;charset=utf-8,' + encodeURIComponent(batch.archivedCsv);
+    const link = document.createElement('a');
+    link.setAttribute('href', csvContent);
+    link.setAttribute('download', `Cotacao_${batch.fileName || 'Texto'}_${new Date(batch.timestamp).toLocaleDateString('pt-BR').replace(/\//g, '-')}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   // --- PACK RULES LOGIC ---
   const addPackRule = (supplierId: string | null) => {
       if (!newRuleTerm.trim() || newRuleQty < 1) return;
@@ -520,66 +541,10 @@ const SupplierManager: React.FC<SupplierManagerProps> = ({ suppliers, setSupplie
 
   // --- PACK RULES LEARNING (ao salvar cotação) ---
   const learnPackRulesFromBatch = (batch: QuoteBatch, supplierId: string, supplierName: string) => {
-    const newGlobal: PackRule[] = [];
-    const newExceptions: { rule: PackRule; supplierId: string }[] = [];
-
-    batch.items.forEach(item => {
-      if (item.packQuantity <= 1) return;
-      const nameLower = item.name.toLowerCase();
-
-      // Tenta encontrar um term já existente que cubra este produto
-      const globalMatch = globalPackRules.find(r => nameLower.includes(r.term.toLowerCase()));
-      const supplierMatch = suppliers.find(s => s.id === supplierId)?.packRules?.find(r => nameLower.includes(r.term.toLowerCase()));
-
-      if (supplierMatch) return; // Já tem exceção para este fornecedor, não muda
-
-      if (globalMatch) {
-        // Existe regra global — se quantidade difere, cria exceção para este fornecedor
-        if (globalMatch.quantity !== item.packQuantity) {
-          // Verifica se exceção já existe
-          const alreadyHasException = suppliers.find(s => s.id === supplierId)?.packRules?.some(r => nameLower.includes(r.term.toLowerCase()));
-          if (!alreadyHasException) {
-            newExceptions.push({
-              supplierId,
-              rule: {
-                id: crypto.randomUUID(),
-                term: globalMatch.term,
-                quantity: item.packQuantity,
-                supplierId,
-                supplierName,
-                isLearned: true,
-                learnedAt: Date.now(),
-              }
-            });
-          }
-        }
-        return; // Regra global cobre, sem divergência
-      }
-
-      // Não existe regra global — cria uma nova com o nome mais curto possível
-      // Usa as últimas 2-3 palavras do nome como term (ex: "350ML LATA")
-      const words = item.name.trim().split(/\s+/);
-      const term = words.slice(-2).join(' ');
-      const alreadyInNew = newGlobal.some(r => r.term.toLowerCase() === term.toLowerCase());
-      if (!alreadyInNew && term.length > 3) {
-        newGlobal.push({
-          id: crypto.randomUUID(),
-          term,
-          quantity: item.packQuantity,
-          isLearned: true,
-          learnedAt: Date.now(),
-        });
-      }
-    });
-
-    if (newGlobal.length > 0) setGlobalPackRules(prev => [...prev, ...newGlobal]);
-    if (newExceptions.length > 0) {
-      setSuppliers(prev => prev.map(s => {
-        const exceptions = newExceptions.filter(e => e.supplierId === s.id).map(e => e.rule);
-        if (exceptions.length === 0) return s;
-        return { ...s, packRules: [...(s.packRules || []), ...exceptions] };
-      }));
-    }
+    // DESATIVADO: A Inteligência Artificial (Gemini) na leitura principal já extrai corretamente os lotes das NFs/PDFs.
+    // Ditar por regra global as últimas duas palavras estava sobrepujando decisões do usuário.
+    // O Dicionário Translador Inteligente no App.tsx agora lida perfeitamente com produtos mapeados.
+    return;
   };
 
   // --- CLOSE BATCH MODAL WITH UNSAVED CHECK ---
@@ -1447,60 +1412,6 @@ const SupplierManager: React.FC<SupplierManagerProps> = ({ suppliers, setSupplie
           }
       `}</style>
       
-      {/* CONFIRMATION POPUP (Small Bubble) */}
-      {confirmAction && (
-          <div className="fixed inset-0 z-[120] flex items-center justify-center pointer-events-auto">
-             <div className="absolute inset-0 bg-transparent" onClick={() => setConfirmAction(null)}></div>
-             <div className="bg-slate-800 border border-slate-600 rounded-lg shadow-2xl p-4 w-72 transform transition-all animate-in fade-in zoom-in-95 relative z-10">
-                 <h4 className="font-bold text-white mb-1">
-                     {confirmAction.type === 'ban' ? 'Bloquear Item?' : 'Excluir Item?'}
-                 </h4>
-                 <p className="text-xs text-slate-400 mb-3 line-clamp-2">
-                     {confirmAction.type === 'ban' 
-                         ? `Isso irá adicionar "${confirmAction.itemName}" à lista negra.`
-                         : `Isso removerá "${confirmAction.itemName}" desta cotação.`}
-                 </p>
-                 <div className="flex items-center gap-2 mb-3 cursor-pointer" onClick={() => setDontAskAgain(!dontAskAgain)}>
-                     <div className={`w-3 h-3 border rounded flex items-center justify-center ${dontAskAgain ? 'bg-amber-500 border-amber-500' : 'border-slate-500'}`}>
-                         {dontAskAgain && <Check className="w-2 h-2 text-slate-900"/>}
-                     </div>
-                     <span className="text-[10px] text-slate-400">Não perguntar novamente nesta sessão</span>
-                 </div>
-                 <div className="flex gap-2 justify-end">
-                     <button onClick={() => setConfirmAction(null)} className="px-3 py-1.5 text-xs text-slate-300 hover:text-white">Cancelar</button>
-                     <button onClick={confirmPendingAction} className={`px-3 py-1.5 text-xs text-white rounded font-medium shadow-md ${confirmAction.type === 'ban' ? 'bg-red-600 hover:bg-red-700' : 'bg-slate-600 hover:bg-slate-500'}`}>Confirmar</button>
-                 </div>
-             </div>
-          </div>
-      )}
-
-      {/* UNSAVED CHANGES DIALOG */}
-      {showUnsavedDialog && (
-          <div className="fixed inset-0 z-[130] flex items-center justify-center pointer-events-auto">
-              <div className="absolute inset-0 bg-black/50" onClick={() => setShowUnsavedDialog(null)}/>
-              <div className="bg-slate-800 border border-slate-600 rounded-xl shadow-2xl p-5 w-80 relative z-10">
-                  <div className="flex items-center gap-2 mb-2">
-                      <AlertTriangle className="w-4 h-4 text-amber-400"/>
-                      <h4 className="font-bold text-white text-sm">Alterações não salvas</h4>
-                  </div>
-                  <p className="text-xs text-slate-400 mb-4">
-                      Você fez alterações nesta cotação. O que deseja fazer?
-                  </p>
-                  <div className="flex flex-col gap-2">
-                      <button onClick={handleSaveAndClose} className="px-3 py-2 text-xs text-white bg-amber-600 hover:bg-amber-500 rounded-lg font-semibold flex items-center gap-2 transition-colors">
-                          <Save className="w-3.5 h-3.5"/> Salvar e fechar
-                      </button>
-                      <button onClick={handleDiscardAndClose} className="px-3 py-2 text-xs text-slate-200 bg-slate-700 hover:bg-slate-600 rounded-lg font-medium flex items-center gap-2 transition-colors">
-                          <X className="w-3.5 h-3.5"/> Fechar sem salvar
-                      </button>
-                      <button onClick={() => setShowUnsavedDialog(null)} className="px-3 py-1.5 text-xs text-slate-400 hover:text-white text-center transition-colors">
-                          Cancelar
-                      </button>
-                  </div>
-              </div>
-          </div>
-      )}
-
       {/* Modals */}
       {showGlobalRules && renderRulesModal(true)}
       {showPackRules && selectedSupplier && renderRulesModal(false)}
@@ -1758,209 +1669,21 @@ const SupplierManager: React.FC<SupplierManagerProps> = ({ suppliers, setSupplie
       )}
 
       {/* Detail Modal */}
-      {viewingBatch && (
-        <div className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-            <div className="bg-slate-900 w-full max-w-6xl max-h-[90vh] rounded-xl border border-slate-700 flex flex-col shadow-2xl">
-                <div className="p-3 border-b border-slate-700 flex flex-col md:flex-row justify-between items-start bg-slate-800 rounded-t-xl shrink-0 gap-3">
-                    <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 flex-wrap">
-                            <h3 className="text-base font-bold text-white">Detalhes da Cotação</h3>
-                            {/* Contador verificados/total */}
-                            <span className="text-xs bg-slate-700 text-slate-300 px-2 py-0.5 rounded-full">
-                                ✓ {viewingBatch.items.filter(i => i.isVerified).length}/{viewingBatch.items.length}
-                            </span>
-                            {viewingBatch.isSaved && <span className="text-xs bg-emerald-900/40 text-emerald-400 border border-emerald-900/40 px-2 py-0.5 rounded-full">✓ Salva</span>}
-                        </div>
-                        {/* Data editável */}
-                        <div className="flex items-center gap-1.5 mt-1">
-                            <p className="text-xs text-slate-500 truncate">
-                                {viewingBatch.sourceType === 'file' ? viewingBatch.fileName : 'Texto Importado'}
-                            </p>
-                            <span className="text-slate-700">·</span>
-                            {editingBatchDate ? (
-                                <div className="flex items-center gap-1">
-                                    <input type="datetime-local" value={tempBatchDate} onChange={e => setTempBatchDate(e.target.value)}
-                                        className="bg-slate-700 border border-amber-500 rounded px-1.5 py-0.5 text-white text-xs focus:outline-none"/>
-                                    <button onClick={() => saveBatchDate(activeTab!, viewingBatch.id)} className="text-green-400 p-0.5"><Check className="w-3 h-3"/></button>
-                                    <button onClick={() => setEditingBatchDate(false)} className="text-red-400 p-0.5"><X className="w-3 h-3"/></button>
-                                </div>
-                            ) : (
-                                <>
-                                <button onClick={() => startEditingBatchDate(viewingBatch)} className="flex items-center gap-1 text-slate-400 hover:text-amber-400 transition-colors group/date">
-                                    <span className="text-xs">{new Date(viewingBatch.timestamp).toLocaleString('pt-BR')}</span>
-                                    <Pencil className="w-2.5 h-2.5 opacity-0 group-hover/date:opacity-100 transition-opacity"/>
-                                </button>
-                                {viewingBatch.uploadedAt && viewingBatch.uploadedAt !== viewingBatch.timestamp && (
-                                    <span className="text-[9px] text-slate-700 ml-1">
-                                        · upload: {new Date(viewingBatch.uploadedAt).toLocaleString('pt-BR')}
-                                    </span>
-                                )}
-                                </>
-                            )}
-                        </div>
-                    </div>
-                    
-                    <div className="flex items-center gap-2 flex-wrap justify-end">
-                        {/* Ordenação */}
-                        <select value={detailsSortBy} onChange={e => setDetailsSortBy(e.target.value as any)}
-                            className="bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-xs text-slate-300 focus:outline-none focus:border-amber-500">
-                            <option value="default">Ordem original</option>
-                            <option value="name">Nome A→Z</option>
-                            <option value="price_asc">Preço ↑</option>
-                            <option value="price_desc">Preço ↓</option>
-                            <option value="pack">Lote ↓</option>
-                        </select>
-                        {/* Estratégia em lote */}
-                        <div className="flex items-center gap-1 bg-slate-900 p-0.5 rounded border border-slate-700">
-                            <button onClick={() => updateBatchStrategy(viewingBatch.id, 'pack')} className="flex items-center gap-1 px-2 py-1 rounded text-xs hover:bg-slate-700 text-blue-400 font-medium"><BoxSelect className="w-3 h-3"/> Lote</button>
-                            <div className="w-px h-3 bg-slate-700"/>
-                            <button onClick={() => updateBatchStrategy(viewingBatch.id, 'unit')} className="flex items-center gap-1 px-2 py-1 rounded text-xs hover:bg-slate-700 text-amber-400 font-medium"><Coins className="w-3 h-3"/> Unit.</button>
-                        </div>
-                        {/* Busca */}
-                        <div className="relative">
-                            <Search className="absolute left-2 top-1.5 w-3.5 h-3.5 text-slate-500"/>
-                            <input type="text" placeholder="Filtrar..." value={detailsSearchTerm} onChange={e => setDetailsSearchTerm(e.target.value)}
-                                className="bg-slate-900 border border-slate-600 rounded py-1.5 pl-7 pr-3 text-xs text-white w-36 focus:border-amber-500 focus:outline-none focus:w-48 transition-all"/>
-                        </div>
-                        {/* Botão Salvar cotação */}
-                        <div className="flex flex-col items-center">
-                            <button onClick={() => { saveBatch(activeTab!, viewingBatch.id); learnPackRulesFromBatch(viewingBatch, activeTab!, selectedSupplier?.name || ''); }}
-                                disabled={viewingBatch.isSaved}
-                                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${viewingBatch.isSaved ? 'bg-emerald-900/30 text-emerald-400 border border-emerald-900/40 cursor-default' : 'bg-amber-600 hover:bg-amber-500 text-white shadow-lg shadow-amber-900/30'}`}>
-                                <Save className="w-3.5 h-3.5"/>
-                                {viewingBatch.isSaved ? 'Salva' : 'Salvar cotação'}
-                            </button>
-                            {viewingBatch.savedAt && <span className="text-[10px] text-slate-600 mt-0.5">{new Date(viewingBatch.savedAt).toLocaleTimeString('pt-BR', {hour:'2-digit',minute:'2-digit'})}</span>}
-                        </div>
-                        {/* Fechar com check de mudanças */}
-                        <button onClick={() => handleCloseBatchModal(activeTab!)} className="text-slate-400 hover:text-white p-1.5"><XCircle className="w-6 h-6"/></button>
-                    </div>
-                </div>
-                
-                <div className="overflow-auto p-4 flex-1 space-y-6 bg-slate-900">
-                    {(() => {
-                        const filteredItems = viewingBatch.items.map((it, idx) => ({ item: it, originalIndex: idx }))
-                            .filter(x => {
-                                if (!detailsSearchTerm) return true;
-                                const term = detailsSearchTerm.toLowerCase();
-                                return x.item.name.toLowerCase().includes(term) || x.item.sku.toLowerCase().includes(term);
-                            })
-                            .sort((a, b) => {
-                                switch (detailsSortBy) {
-                                    case 'name': return a.item.name.localeCompare(b.item.name);
-                                    case 'price_asc': return a.item.unitPrice - b.item.unitPrice;
-                                    case 'price_desc': return b.item.unitPrice - a.item.unitPrice;
-                                    case 'pack': return b.item.packQuantity - a.item.packQuantity;
-                                    default: return 0;
-                                }
-                            });
-                        
-                        // Categorization Logic
-                        // 1. Reprocessed: Not Verified AND Reprocessed flag is true
-                        const reprocessed = filteredItems.filter(x => !x.item.isVerified && x.item.isReprocessed);
-                        
-                        // 2. Pending: Not Verified AND Reprocessed flag is false (or undefined)
-                        const pending = filteredItems.filter(x => !x.item.isVerified && !x.item.isReprocessed);
-                        
-                        // 3. Ready: Verified
-                        const ready = filteredItems.filter(x => x.item.isVerified);
-                        
-                        const allPendingIndices = pending.map(p => p.originalIndex);
-                        const isAllSelected = allPendingIndices.length > 0 && allPendingIndices.every(i => selectedPendingItems.has(i));
-
-                        return (
-                            <>
-                                {/* SECTION 1: REPROCESSED AUTOMATICALLY (BLUE/YELLOW) */}
-                                <div className="border border-blue-900/30 bg-blue-950/5 rounded-lg overflow-hidden">
-                                    <div className="p-3 bg-blue-950/20 border-b border-blue-900/30 flex justify-between items-center cursor-pointer hover:bg-blue-950/30 transition-colors" onClick={() => setCollapsedSections(prev => ({ ...prev, reprocessed: !prev.reprocessed }))}>
-                                        <h4 className="font-bold text-blue-400 flex items-center gap-2"><Bot className="w-5 h-5"/> Reprocessados Automaticamente ({reprocessed.length})</h4>
-                                        <div className="flex items-center gap-2">
-                                            {collapsedSections.reprocessed ? <ChevronDown className="w-5 h-5 text-blue-500"/> : <ChevronUp className="w-5 h-5 text-blue-500"/>}
-                                        </div>
-                                    </div>
-                                    {!collapsedSections.reprocessed && (reprocessed.length === 0 ? <div className="p-4 text-center text-slate-500 italic text-xs">Nenhum item reprocessado por regra.</div> : 
-                                        <table className="w-full text-left text-sm text-slate-300">
-                                            <thead className="bg-blue-950/20 text-blue-400 uppercase tracking-wider text-xs sticky top-0">
-                                                <tr>
-                                                    <th className="p-3 w-10"></th>
-                                                    <th className="p-3">Produto Identificado</th>
-                                                    <th className="p-3 text-center w-28">Emb. (Qtd)</th>
-                                                    <th className="p-3 text-center">Interpretação</th>
-                                                    <th className="p-3 text-right">Total Lote</th>
-                                                    <th className="p-3 text-right w-32">Unitário</th>
-                                                    <th className="p-3 text-center w-24">Ações</th>
-                                                </tr>
-                                            </thead>
-                                            <tbody className="divide-y divide-blue-900/10">{reprocessed.map(x => renderItemRow(x.item, x.originalIndex, viewingBatch.id))}</tbody>
-                                        </table>
-                                    )}
-                                </div>
-
-                                {/* SECTION 2: PENDING (AMBER) */}
-                                <div className="border border-amber-900/30 bg-amber-950/5 rounded-lg overflow-hidden">
-                                    <div className="p-3 bg-amber-950/20 border-b border-amber-900/30 flex justify-between items-center cursor-pointer hover:bg-amber-950/30 transition-colors" onClick={() => setCollapsedSections(prev => ({ ...prev, pending: !prev.pending }))}>
-                                        <h4 className="font-bold text-amber-500 flex items-center gap-2"><AlertTriangle className="w-5 h-5"/> Itens Pendentes / Revisão ({pending.length})</h4>
-                                        <div className="flex items-center gap-2">
-                                            {pending.length > 0 && !collapsedSections.pending && (
-                                                <button onClick={(e) => { e.stopPropagation(); handleBatchMagic(viewingBatch.id, pending); }} disabled={isBatchProcessing || selectedPendingItems.size === 0} className="px-3 py-1 bg-amber-600 hover:bg-amber-500 text-white rounded text-xs font-bold flex items-center gap-1 shadow-lg shadow-amber-900/20 disabled:opacity-50 disabled:cursor-not-allowed">
-                                                    {isBatchProcessing ? <Loader2 className="w-3 h-3 animate-spin"/> : <Sparkles className="w-3 h-3 fill-white"/>}
-                                                    {isBatchProcessing ? 'Processando...' : `Identificar Selecionados (${selectedPendingItems.size}) com IA`}
-                                                </button>
-                                            )}
-                                            {collapsedSections.pending ? <ChevronDown className="w-5 h-5 text-amber-500"/> : <ChevronUp className="w-5 h-5 text-amber-500"/>}
-                                        </div>
-                                    </div>
-                                    {!collapsedSections.pending && (pending.length === 0 ? <div className="p-8 text-center text-slate-500 italic">Todos os itens identificados!</div> : 
-                                        <table className="w-full text-left text-sm text-slate-300">
-                                            <thead className="bg-amber-950/20 text-amber-600 uppercase tracking-wider text-xs sticky top-0">
-                                                <tr>
-                                                    <th className="p-3 text-center w-10"><button onClick={() => toggleSelectAll(allPendingIndices)}>{isAllSelected ? <CheckSquare className="w-4 h-4"/> : <Square className="w-4 h-4"/>}</button></th>
-                                                    <th className="p-3">Produto Identificado</th>
-                                                    <th className="p-3 text-center w-28">Emb. (Qtd)</th>
-                                                    <th className="p-3 text-center">Interpretação</th>
-                                                    <th className="p-3 text-right">Total Lote</th>
-                                                    <th className="p-3 text-right w-32">Unitário</th>
-                                                    <th className="p-3 text-center w-24">Ações</th>
-                                                </tr>
-                                            </thead>
-                                            <tbody className="divide-y divide-amber-900/10">{pending.map(x => renderItemRow(x.item, x.originalIndex, viewingBatch.id))}</tbody>
-                                        </table>
-                                    )}
-                                </div>
-
-                                {/* SECTION 3: IDENTIFIED (GREEN) */}
-                                <div className="border border-green-900/30 bg-green-950/5 rounded-lg overflow-hidden">
-                                    <div className="p-3 bg-green-950/20 border-b border-green-900/30 flex justify-between items-center cursor-pointer hover:bg-green-950/30 transition-colors" onClick={() => setCollapsedSections(prev => ({ ...prev, ready: !prev.ready }))}>
-                                        <h4 className="font-bold text-green-500 flex items-center gap-2"><CheckCircle className="w-5 h-5"/> Itens Identificados ({ready.length})</h4>
-                                        <div className="flex items-center gap-2">{collapsedSections.ready ? <ChevronDown className="w-5 h-5 text-green-500"/> : <ChevronUp className="w-5 h-5 text-green-500"/>}</div>
-                                    </div>
-                                    {!collapsedSections.ready && (ready.length === 0 ? <div className="p-8 text-center text-slate-500 italic">Nenhum item identificado ainda.</div> : 
-                                        <table className="w-full text-left text-sm text-slate-300">
-                                            <thead className="bg-green-950/20 text-green-600 uppercase tracking-wider text-xs">
-                                                <tr>
-                                                    <th className="p-3 w-10"></th>
-                                                    <th className="p-3">Produto Identificado</th>
-                                                    <th className="p-3 text-center w-28">Emb. (Qtd)</th>
-                                                    <th className="p-3 text-center">Interpretação</th>
-                                                    <th className="p-3 text-right">Total Lote</th>
-                                                    <th className="p-3 text-right w-32">Unitário</th>
-                                                    <th className="p-3 text-center w-24">Ações</th>
-                                                </tr>
-                                            </thead>
-                                            <tbody className="divide-y divide-green-900/10">{ready.map(x => renderItemRow(x.item, x.originalIndex, viewingBatch.id))}</tbody>
-                                        </table>
-                                    )}
-                                </div>
-                            </>
-                        );
-                    })()}
-                </div>
-                <div className="p-4 border-t border-slate-700 bg-slate-800 rounded-b-xl flex justify-between items-center text-sm text-slate-400 shrink-0">
-                    <span>{viewingBatch.items.length} itens · ✓ {viewingBatch.items.filter(i => i.isVerified).length} verificados</span>
-                    <button onClick={() => handleCloseBatchModal(activeTab!)} className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded text-sm">Fechar</button>
-                </div>
-            </div>
-        </div>
+      {viewingBatch && selectedSupplier && (
+        <QuoteDetailModal
+          batch={viewingBatch}
+          supplierId={activeTab!}
+          supplier={selectedSupplier}
+          setSuppliers={setSuppliers}
+          onClose={() => { setViewingBatch(null); setBatchSnapshot(null); }}
+          onBatchCompleted={onBatchCompleted}
+          onBatchDateChange={onBatchDateChange}
+          onBanItem={(itemName) => toggleBlacklist(itemName)}
+          productMappings={productMappings}
+          masterProducts={masterProducts}
+          onAddMapping={onAddMapping}
+          onRemoveMapping={onRemoveMapping}
+        />
       )}
 
       {/* Sidebar List */}
@@ -2019,56 +1742,70 @@ const SupplierManager: React.FC<SupplierManagerProps> = ({ suppliers, setSupplie
       {/* Main Panel */}
       <div className="md:col-span-3 bg-slate-800 rounded-lg p-6 border border-slate-700 overflow-y-auto h-full relative">
         
-        {/* NEW: Pre-Processor Module */}
-        <div className="mb-8 bg-slate-900/50 rounded-lg border border-slate-700 p-4 border-dashed relative">
+        {/* Pre-Processor Module — collapsible */}
+        {preProcessorOpen ? (
+          <div className="mb-6 bg-slate-900/50 rounded-lg border border-slate-700 border-dashed p-4 relative">
             <div className="flex items-center justify-between mb-4">
-                <h3 className="text-slate-300 font-bold flex items-center gap-2 text-sm uppercase">
-                    <Scissors className="w-4 h-4 text-pink-500"/> Pré-Processador de Catálogo (PDF/Imagem)
-                </h3>
-                <span className="text-[10px] text-slate-500 bg-slate-900 px-2 py-1 rounded border border-slate-800">
-                    Módulo Independente
-                </span>
+              <h3 className="text-slate-300 font-bold flex items-center gap-2 text-sm uppercase">
+                <Scissors className="w-4 h-4 text-pink-500" /> Pré-Processador de Catálogo (PDF/Imagem)
+              </h3>
+              <button
+                onClick={() => setPreProcessorOpen(false)}
+                className="text-slate-500 hover:text-white p-1 rounded hover:bg-slate-700 transition-colors"
+                title="Recolher pré-processador"
+              >
+                <X className="w-4 h-4" />
+              </button>
             </div>
-            
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {/* Input Area */}
-                <div 
-                    onClick={() => preProcessInputRef.current?.click()}
-                    className="border-2 border-dashed border-slate-600 rounded-lg p-6 flex flex-col items-center justify-center cursor-pointer hover:bg-slate-800 transition-colors h-40"
+              {/* Input Area */}
+              <div
+                onClick={() => preProcessInputRef.current?.click()}
+                className="border-2 border-dashed border-slate-600 rounded-lg p-6 flex flex-col items-center justify-center cursor-pointer hover:bg-slate-800 transition-colors h-40"
+              >
+                <input type="file" ref={preProcessInputRef} onChange={handlePreProcess} className="hidden" accept="image/*, application/pdf" />
+                {isPreProcessing ? (
+                  <div className="text-center">
+                    <Loader2 className="w-8 h-8 text-pink-500 animate-spin mx-auto mb-2" />
+                    <p className="text-xs text-pink-400 font-bold">Analisando imagem e agrupando sabores...</p>
+                  </div>
+                ) : (
+                  <div className="text-center text-slate-400">
+                    <FileStack className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                    <p className="text-sm font-medium">Upload PDF ou Imagem</p>
+                    <p className="text-[10px] text-slate-500 mt-1">Converte para CSV e agrupa sabores (min 3).</p>
+                  </div>
+                )}
+              </div>
+              {/* Output Area */}
+              <div className="flex flex-col h-40">
+                <textarea
+                  className="flex-1 bg-slate-950 border border-slate-800 rounded p-2 text-xs font-mono text-green-400 resize-none focus:outline-none custom-scrollbar mb-2"
+                  placeholder="O resultado CSV aparecerá aqui..."
+                  value={preProcessResult}
+                  readOnly
+                />
+                <button
+                  onClick={downloadPreProcessCsv}
+                  disabled={!preProcessResult}
+                  className="w-full bg-pink-600 hover:bg-pink-700 disabled:opacity-50 disabled:bg-slate-700 text-white text-xs font-bold py-2 rounded flex items-center justify-center gap-2"
                 >
-                    <input type="file" ref={preProcessInputRef} onChange={handlePreProcess} className="hidden" accept="image/*, application/pdf" />
-                    {isPreProcessing ? (
-                        <div className="text-center">
-                            <Loader2 className="w-8 h-8 text-pink-500 animate-spin mx-auto mb-2"/>
-                            <p className="text-xs text-pink-400 font-bold">Analisando imagem e agrupando sabores...</p>
-                        </div>
-                    ) : (
-                        <div className="text-center text-slate-400">
-                            <FileStack className="w-8 h-8 mx-auto mb-2 opacity-50"/>
-                            <p className="text-sm font-medium">Upload PDF ou Imagem</p>
-                            <p className="text-[10px] text-slate-500 mt-1">Converte para CSV e agrupa sabores (min 3).</p>
-                        </div>
-                    )}
-                </div>
-
-                {/* Output Area */}
-                <div className="flex flex-col h-40">
-                    <textarea 
-                        className="flex-1 bg-slate-950 border border-slate-800 rounded p-2 text-xs font-mono text-green-400 resize-none focus:outline-none custom-scrollbar mb-2"
-                        placeholder="O resultado CSV aparecerá aqui..."
-                        value={preProcessResult}
-                        readOnly
-                    ></textarea>
-                    <button 
-                        onClick={downloadPreProcessCsv}
-                        disabled={!preProcessResult}
-                        className="w-full bg-pink-600 hover:bg-pink-700 disabled:opacity-50 disabled:bg-slate-700 text-white text-xs font-bold py-2 rounded flex items-center justify-center gap-2"
-                    >
-                        <Download className="w-3 h-3"/> Baixar CSV Processado
-                    </button>
-                </div>
+                  <Download className="w-3 h-3" /> Baixar CSV Processado
+                </button>
+              </div>
             </div>
-        </div>
+          </div>
+        ) : (
+          <div className="mb-6 flex justify-end">
+            <button
+              onClick={() => setPreProcessorOpen(true)}
+              title="Abrir Pré-Processador de Catálogo"
+              className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-pink-400 border border-slate-700 hover:border-pink-900/50 bg-slate-900/50 hover:bg-pink-950/20 px-3 py-1.5 rounded-lg transition-all"
+            >
+              <Scissors className="w-3.5 h-3.5" /> Pré-Processador
+            </button>
+          </div>
+        )}
 
         {selectedSupplier ? (
           <div className="space-y-6">
@@ -2174,7 +1911,23 @@ const SupplierManager: React.FC<SupplierManagerProps> = ({ suppliers, setSupplie
                      </div>
                    </div>
 
-                   <div className="relative w-64">
+                   <div className="flex items-center gap-3">
+                        {setPriceValidityConfig && (
+                          <div className="flex items-center gap-1.5 text-xs text-slate-500">
+                            <Archive className="w-3 h-3" />
+                            <span>Arquivar após</span>
+                            <input
+                              type="number"
+                              min={7}
+                              max={730}
+                              value={priceValidityConfig?.quoteArchiveDays ?? 90}
+                              onChange={e => setPriceValidityConfig(prev => ({ ...prev, quoteArchiveDays: Math.max(7, Number(e.target.value)) }))}
+                              className="w-14 bg-slate-900 border border-slate-700 rounded px-1.5 py-0.5 text-xs text-white text-center focus:border-amber-500 focus:outline-none"
+                            />
+                            <span>dias</span>
+                          </div>
+                        )}
+                        <div className="relative w-64">
                         <Search className="absolute left-2.5 top-2 w-4 h-4 text-slate-500" />
                         <input
                             type="text"
@@ -2183,6 +1936,7 @@ const SupplierManager: React.FC<SupplierManagerProps> = ({ suppliers, setSupplie
                             onChange={(e) => setHistorySearchTerm(e.target.value)}
                             className="w-full bg-slate-900 border border-slate-700 rounded-md py-1.5 pl-9 pr-4 text-xs text-white focus:border-amber-500 focus:outline-none"
                         />
+                        </div>
                    </div>
                </div>
 
@@ -2196,7 +1950,9 @@ const SupplierManager: React.FC<SupplierManagerProps> = ({ suppliers, setSupplie
                      if (!historySearchTerm) return true;
                      const term = historySearchTerm.toLowerCase();
                      const matchName = (q.fileName || 'Texto Colado').toLowerCase().includes(term);
-                     const matchItem = q.items.some(i => i.name.toLowerCase().includes(term));
+                     const matchItem = q.archivedCsv
+                       ? q.archivedCsv.toLowerCase().includes(term)
+                       : q.items.some(i => i.name.toLowerCase().includes(term));
                      return matchName || matchItem;
                  })
                  .sort((a, b) => {
@@ -2205,7 +1961,33 @@ const SupplierManager: React.FC<SupplierManagerProps> = ({ suppliers, setSupplie
                      }
                      return b.timestamp - a.timestamp;
                  })
-                 .map((quote) => (
+                 .map((quote) => {
+                   // Cotação arquivada → linha compacta
+                   if (quote.archivedCsv) {
+                     return (
+                       <div key={quote.id} className="flex items-center gap-3 px-3 py-2 bg-slate-900/50 border border-slate-800 rounded text-xs text-slate-500 group hover:border-slate-700 transition-all">
+                         <Archive className="w-3.5 h-3.5 text-slate-600 shrink-0" />
+                         <span className="text-slate-500 truncate flex-1">
+                           {quote.sourceType === 'file' ? quote.fileName : 'Texto Colado'}
+                         </span>
+                         <span className="text-slate-600 whitespace-nowrap">
+                           {new Date(quote.timestamp).toLocaleDateString('pt-BR')}
+                         </span>
+                         <span className="text-slate-600 whitespace-nowrap">
+                           {quote.archivedItemCount ?? '?'} itens
+                         </span>
+                         <span className="text-slate-700 text-[10px] whitespace-nowrap italic">Arquivado</span>
+                         <button onClick={() => downloadArchivedCsv(quote)} title="Baixar CSV" className="text-slate-600 hover:text-blue-400 p-0.5 opacity-0 group-hover:opacity-100 transition-all">
+                           <Download className="w-3.5 h-3.5" />
+                         </button>
+                         <button onClick={() => removeQuoteBatch(selectedSupplier.id, quote.id)} title="Apagar" className="text-slate-600 hover:text-red-400 p-0.5 opacity-0 group-hover:opacity-100 transition-all">
+                           <Trash2 className="w-3.5 h-3.5" />
+                         </button>
+                       </div>
+                     );
+                   }
+                   // Cotação normal → card completo
+                   return (
                  <div key={quote.id} className="bg-slate-900 border border-slate-700 rounded p-4 relative group hover:border-amber-500/30 transition-all">
                     <div className="absolute top-2 right-2 flex items-center gap-1">
                         {quote.rawContent && (
@@ -2282,17 +2064,29 @@ const SupplierManager: React.FC<SupplierManagerProps> = ({ suppliers, setSupplie
                                     </div>
                                 </div>
                             )}
+                            {quote.status === 'completed' && !quote.isSaved && (
+                                <div className="flex items-center gap-2 px-3 py-2 bg-amber-950/70 border-t border-amber-900/50 rounded-b-lg">
+                                    <Clock className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                                    <span className="text-xs font-bold text-amber-400 tracking-wide uppercase">
+                                        Cotação aguardando conferência —{' '}
+                                        <span className="font-semibold">Salve a lista para entrada no sistema</span>
+                                    </span>
+                                </div>
+                            )}
                             {quote.status === 'error' && (
                                 <p className="text-red-400 text-sm mt-1">{quote.errorMessage}</p>
                             )}
                         </div>
                     </div>
                  </div>
-               ))}
+               ); // fim do card completo
+               })}
                {historySearchTerm && selectedSupplier.quotes.filter(q => {
                      const term = historySearchTerm.toLowerCase();
                      const matchName = (q.fileName || 'Texto Colado').toLowerCase().includes(term);
-                     const matchItem = q.items.some(i => i.name.toLowerCase().includes(term));
+                     const matchItem = q.archivedCsv
+                       ? q.archivedCsv.toLowerCase().includes(term)
+                       : q.items.some(i => i.name.toLowerCase().includes(term));
                      return matchName || matchItem;
                  }).length === 0 && (
                      <div className="text-center text-slate-500 text-sm py-4">Nenhuma cotação encontrada para "{historySearchTerm}"</div>

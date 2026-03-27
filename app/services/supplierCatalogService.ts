@@ -20,7 +20,11 @@ export const normalizeProductName = (name: string): string =>
     .replace(/\s+/g, ' ')
     .trim();
 
-const makeProductId = (name: string): string =>
+/** Normalização usada como chave em productMappings (mesma lógica do addMapping no App.tsx) */
+export const normForMapping = (name: string): string =>
+  name.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]/g, '');
+
+export const makeProductId = (name: string): string =>
   normalizeProductName(name).toLowerCase().replace(/\s+/g, '_');
 
 // ─── SIMILARIDADE (Levenshtein) ──────────────────────────────────────────────
@@ -47,6 +51,43 @@ export const similarityScore = (a: string, b: string): number => {
   return Math.round((1 - levenshtein(na, nb) / maxLen) * 100);
 };
 
+/**
+ * Similaridade inteligente: máximo entre Levenshtein puro, Token-Sort e Token-Set.
+ * - Token-Sort: ordena palavras antes de comparar → ignora ordem dos tokens
+ * - Token-Set: compara tokens comuns vs tokens exclusivos → premia conteúdo compartilhado
+ * Resultado: "Cerveja 330ml Heineken" score mais alto com "CERVEJA LongNeck Heineken 330ml"
+ * do que com "CERVEJA LATA HEINEKEN 350ML" mesmo que a ordem clássica favoreça o segundo.
+ */
+export const smartSimilarityScore = (a: string, b: string): number => {
+  const na = normalizeProductName(a);
+  const nb = normalizeProductName(b);
+
+  // 1. Levenshtein tradicional
+  const rawScore = similarityScore(a, b);
+
+  // 2. Token-Sort: ordena tokens alfabeticamente antes de comparar
+  const tokensA = na.split(' ').filter(Boolean).sort();
+  const tokensB = nb.split(' ').filter(Boolean).sort();
+  const sortedA = tokensA.join(' ');
+  const sortedB = tokensB.join(' ');
+  const maxSorted = Math.max(sortedA.length, sortedB.length);
+  const sortedScore = maxSorted === 0 ? 100 : Math.round((1 - levenshtein(sortedA, sortedB) / maxSorted) * 100);
+
+  // 3. Token-Set: separa tokens em comum dos exclusivos de cada lado
+  const setB = new Set(tokensB);
+  const intersection = tokensA.filter(t => setB.has(t)).sort();
+  const onlyA = tokensA.filter(t => !setB.has(t)).sort();
+  const setA = new Set(tokensA);
+  const onlyB = tokensB.filter(t => !setA.has(t)).sort();
+  const base = intersection.join(' ');
+  const s1 = [base, ...onlyA].filter(Boolean).join(' ');
+  const s2 = [base, ...onlyB].filter(Boolean).join(' ');
+  const maxSet = Math.max(s1.length, s2.length, 1);
+  const setScore = Math.round((1 - levenshtein(s1, s2) / maxSet) * 100);
+
+  return Math.max(rawScore, sortedScore, setScore);
+};
+
 /** Retorna os N melhores matches do meu catálogo para um produto do fornecedor */
 export const findMasterProductMatches = (
   productName: string,
@@ -57,7 +98,7 @@ export const findMasterProductMatches = (
     .map(mp => ({
       sku: mp.sku,
       name: mp.name,
-      score: similarityScore(productName, mp.name),
+      score: smartSimilarityScore(productName, mp.name),
     }))
     .filter(m => m.score >= 40)
     .sort((a, b) => b.score - a.score)
@@ -145,18 +186,22 @@ export const processBatchIntoCatalog = async (
 
     if (existingIdx >= 0) {
       const prod = catalog.products[existingIdx];
-      // Só adiciona ao histórico se este batch ainda não foi processado
-      if (!prod.priceHistory.some(e => e.batchId === batch.id)) {
+      const existingHistoryIdx = prod.priceHistory.findIndex(e => e.batchId === batch.id);
+      if (existingHistoryIdx >= 0) {
+        // Re-save do mesmo batch: substitui a entrada existente (permite corrigir priceStrategy)
+        prod.priceHistory[existingHistoryIdx] = priceEntry;
+      } else {
         prod.priceHistory = [priceEntry, ...prod.priceHistory].slice(0, 60); // max 60 entradas
-        prod.lastSeenDate = batch.timestamp;
-        prod.lastUnitPrice = item.unitPrice;
-        prod.lastPackPrice = item.price;
-        prod.packQuantity = item.packQuantity;
-        prod.name = item.name;
-        if (item.sku && item.sku !== 'S/N') prod.supplierSku = item.sku;
-        catalog.products[existingIdx] = prod;
-        updatedProducts++;
       }
+      // Sempre atualiza os valores mais recentes
+      prod.lastSeenDate = batch.timestamp;
+      prod.lastUnitPrice = item.unitPrice;
+      prod.lastPackPrice = item.price;
+      prod.packQuantity = item.packQuantity;
+      prod.name = item.name;
+      if (item.sku && item.sku !== 'S/N') prod.supplierSku = item.sku;
+      catalog.products[existingIdx] = prod;
+      updatedProducts++;
     } else {
       const newProduct: SupplierCatalogProduct = {
         id: productId,

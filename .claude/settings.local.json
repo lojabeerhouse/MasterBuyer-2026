@@ -1,7 +1,9 @@
 {
   "permissions": {
     "allow": [
-      "Bash(find 'c:\\\\Users\\\\Bruno Forcato\\\\Google Drive\\\\APPS\\\\CATOS-MASTER-BUYER\\\\MasterBuyer-2026/src' -type f -name *.tsx -o -name *.ts)"
+      "Bash(find 'c:\\\\Users\\\\Bruno Forcato\\\\Google Drive\\\\APPS\\\\CATOS-MASTER-BUYER\\\\MasterBuyer-2026/src' -type f -name *.tsx -o -name *.ts)",
+      "Bash(./node_modules/.bin/tsc --noEmit)",
+      "Bash(find 'c:/Users/Bruno Forcato/Google Drive/APPS/CATOS-MASTER-BUYER/MasterBuyer-2026' -name *.css)"
     ]
   }
 }

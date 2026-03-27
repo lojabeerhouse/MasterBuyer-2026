@@ -25,7 +25,15 @@
         border-radius: 4px;
       }
       ::-webkit-scrollbar-thumb:hover {
-        background: #64748b; 
+        background: #64748b;
+      }
+      /* Ticker / marquee animation */
+      @keyframes ticker-scroll {
+        0%   { transform: translateX(0); }
+        100% { transform: translateX(-50%); }
+      }
+      .ticker-wrap:hover .ticker-inner {
+        animation: ticker-scroll 8s linear infinite;
       }
     </style>
   <script type="importmap">
