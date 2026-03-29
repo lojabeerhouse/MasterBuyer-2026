@@ -4,8 +4,8 @@ import { X, Search, CheckCircle, ChevronDown, ChevronUp, History, BookOpen } fro
 import { normalizeProductName, smartSimilarityScore } from '../services/supplierCatalogService';
 
 interface LinkProductModalProps {
-  item: ProductQuote;
-  supplier: Supplier;
+  item: { name: string; [key: string]: any };
+  supplier?: Supplier;
   masterProducts: MasterProduct[];
   onLink: (normalizedName: string, targetSku: string, targetType: 'master' | 'supplier', targetName: string) => void;
   onClose: () => void;
@@ -28,6 +28,7 @@ const LinkProductModal: React.FC<LinkProductModalProps> = ({
 
   // Unique product names from this supplier's saved quotes (excluding current batch name)
   const historicalNames = useMemo(() => {
+    if (!supplier) return [];
     const seen = new Set<string>();
     const names: string[] = [];
     supplier.quotes
@@ -41,7 +42,7 @@ const LinkProductModal: React.FC<LinkProductModalProps> = ({
         })
       );
     return names.sort((a, b) => a.localeCompare(b));
-  }, [supplier.quotes]);
+  }, [supplier]);
 
   // Master products filtered and ranked by similarity
   const filteredMaster = useMemo(() => {
@@ -163,48 +164,50 @@ const LinkProductModal: React.FC<LinkProductModalProps> = ({
           </div>
 
           {/* Section B: Histórico do Fornecedor */}
-          <div className="border-t border-slate-800">
-            <button
-              className="w-full px-4 py-2.5 bg-slate-800/20 hover:bg-slate-800/40 flex items-center justify-between transition-colors"
-              onClick={() => setHistoryExpanded(v => !v)}
-            >
-              <div className="flex items-center gap-2">
-                <History className="w-3.5 h-3.5 text-blue-400" />
-                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">
-                  Histórico deste Fornecedor ({historicalNames.length})
-                </span>
-              </div>
-              {historyExpanded ? (
-                <ChevronUp className="w-3.5 h-3.5 text-slate-600" />
-              ) : (
-                <ChevronDown className="w-3.5 h-3.5 text-slate-600" />
-              )}
-            </button>
-
-            {historyExpanded && (
-              <div className="divide-y divide-slate-800/30">
-                {filteredHistory.length === 0 ? (
-                  <div className="px-4 py-4 text-center text-slate-600 text-sm italic">
-                    Nenhum produto no histórico
-                  </div>
+          {supplier && (
+            <div className="border-t border-slate-800">
+              <button
+                className="w-full px-4 py-2.5 bg-slate-800/20 hover:bg-slate-800/40 flex items-center justify-between transition-colors"
+                onClick={() => setHistoryExpanded(v => !v)}
+              >
+                <div className="flex items-center gap-2">
+                  <History className="w-3.5 h-3.5 text-blue-400" />
+                  <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">
+                    Histórico deste Fornecedor ({historicalNames.length})
+                  </span>
+                </div>
+                {historyExpanded ? (
+                  <ChevronUp className="w-3.5 h-3.5 text-slate-600" />
                 ) : (
-                  filteredHistory.map((name, i) => (
-                    <button
-                      key={i}
-                      onClick={() => handleHistoryClick(name)}
-                      title="Clique para usar como busca no catálogo master"
-                      className="w-full text-left px-4 py-2 hover:bg-blue-950/20 transition-colors group"
-                    >
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-slate-400 text-xs truncate group-hover:text-blue-300">{name}</span>
-                        <Search className="w-3 h-3 text-slate-700 group-hover:text-blue-400 shrink-0" />
-                      </div>
-                    </button>
-                  ))
+                  <ChevronDown className="w-3.5 h-3.5 text-slate-600" />
                 )}
-              </div>
-            )}
-          </div>
+              </button>
+
+              {historyExpanded && (
+                <div className="divide-y divide-slate-800/30">
+                  {filteredHistory.length === 0 ? (
+                    <div className="px-4 py-4 text-center text-slate-600 text-sm italic">
+                      Nenhum produto no histórico
+                    </div>
+                  ) : (
+                    filteredHistory.map((name, i) => (
+                      <button
+                        key={i}
+                        onClick={() => handleHistoryClick(name)}
+                        title="Clique para usar como busca no catálogo master"
+                        className="w-full text-left px-4 py-2 hover:bg-blue-950/20 transition-colors group"
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-slate-400 text-xs truncate group-hover:text-blue-300">{name}</span>
+                          <Search className="w-3 h-3 text-slate-700 group-hover:text-blue-400 shrink-0" />
+                        </div>
+                      </button>
+                    ))
+                  )}
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Footer hint */}

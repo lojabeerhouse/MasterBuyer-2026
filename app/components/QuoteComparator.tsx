@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Supplier, ForecastItem, CartItem, ProductMapping, MasterProduct } from '../types';
 import { ShoppingCart, Package, ChevronDown, ChevronRight, X, Link as LinkIcon, RefreshCw, ChevronLeft, GripVertical, Merge, Tags, LayoutGrid, Sparkles, Box, Unlink, Search, TrendingUp, TrendingDown, BarChart2 } from 'lucide-react';
+import LinkProductModal from './LinkProductModal';
 
 interface QuoteComparatorProps {
   suppliers: Supplier[];
@@ -73,13 +74,14 @@ interface StockMarketEntry {
  * Calcula maiores altas e baixas da semana a partir das quotes dos suppliers.
  * Chamado manualmente para não pesar o app.
  */
-function calcPriceMovers(suppliers: Supplier[]): {
+function calcPriceMovers(suppliers: Supplier[], searchTerm: string = ''): {
   topGainers: StockMarketEntry[];
   topLosers: StockMarketEntry[];
   lastUpdated: number | null;
 } {
   const ONE_WEEK = 7 * 24 * 60 * 60 * 1000;
   const now = Date.now();
+  const searchTerms = searchTerm.toLowerCase().trim().split(/\s+/).filter(Boolean);
 
   const priceMap = new Map<string, { price: number; date: number; supplierName: string; productName: string; supplierId: string }[]>();
 
@@ -91,6 +93,8 @@ function calcPriceMovers(suppliers: Supplier[]): {
     for (const batch of savedQuotes) {
       for (const item of batch.items) {
         if (!item.isVerified || item.unitPrice <= 0) continue;
+        const itemNameLower = item.name.toLowerCase();
+        if (searchTerms.length > 0 && !searchTerms.every(t => itemNameLower.includes(t))) continue;
         const key = `${supplier.id}|${item.name.toLowerCase().trim()}`;
         if (!priceMap.has(key)) priceMap.set(key, []);
         priceMap.get(key)!.push({
@@ -147,19 +151,19 @@ const QuoteComparator: React.FC<QuoteComparatorProps> = ({
   const [stockMarketData, setStockMarketData] = useState<{ topGainers: StockMarketEntry[]; topLosers: StockMarketEntry[]; lastUpdated: number | null } | null>(null);
   const [stockMarketOpen, setStockMarketOpen] = useState(true);
   const [stockMarketLoading, setStockMarketLoading] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
 
   const handleCalcMovers = useCallback(() => {
     setStockMarketLoading(true);
     // setTimeout para não bloquear o render
     setTimeout(() => {
-      setStockMarketData(calcPriceMovers(suppliers));
+      setStockMarketData(calcPriceMovers(suppliers, searchTerm));
       setStockMarketLoading(false);
     }, 0);
-  }, [suppliers]);
+  }, [suppliers, searchTerm]);
   const [collapsedCategories, setCollapsedCategories] = useState<Set<string>>(new Set());
   const [categorySearchTerms, setCategorySearchTerms] = useState<Record<string, string>>({});
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
-  const [searchTerm, setSearchTerm] = useState('');
   const [sortOption, setSortOption] = useState<'sales' | 'alpha'>('sales');
   const [allProcessedRows, setAllProcessedRows] = useState<UnifiedRow[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -175,11 +179,9 @@ const QuoteComparator: React.FC<QuoteComparatorProps> = ({
   const [packsToBuy, setPacksToBuy] = useState<number>(1);
   const [unitsToBuy, setUnitsToBuy] = useState<number>(0);
 
-  const [isMappingModalOpen, setIsMappingModalOpen] = useState(false);
-  const [mappingSourceProduct, setMappingSourceProduct] = useState<string | null>(null);
-  const [mappingSearchTerm, setMappingSearchTerm] = useState('');
+  const [linkingProduct, setLinkingProduct] = useState<{name: string, supplierId?: string} | null>(null);
   const [unlinkConfirm, setUnlinkConfirm] = useState<{ productName: string } | null>(null);
-  const [categoryMode, setCategoryMode] = useState<'database' | 'auto'>('database');
+  const [categoryMode, setCategoryMode] = useState<'database' | 'auto' | 'none'>('database');
 
   const toggleCategory = (cat: string) => {
       const newSet = new Set(collapsedCategories);
@@ -294,7 +296,7 @@ const QuoteComparator: React.FC<QuoteComparatorProps> = ({
             processedCanonicalIds.add(item.sku);
             let finalQtyNeeded = item.suggestedQty;
             if (considerStock && item.currentStock !== undefined) finalQtyNeeded = Math.max(0, item.suggestedQty - item.currentStock);
-            const cat = categoryMode === 'database' ? getDbCategory(item.sku) : getAutoCategory(fixEncoding(item.name));
+            const cat = categoryMode === 'none' ? 'Todos os Produtos' : (categoryMode === 'database' ? getDbCategory(item.sku) : getAutoCategory(fixEncoding(item.name)));
             const winner = [...vars].sort((a, b) => a.unitPrice - b.unitPrice)[0];
             const optionsPerSup: Record<string, VariationOption | null> = {};
             enabledSuppliers.forEach(s => {
@@ -307,14 +309,21 @@ const QuoteComparator: React.FC<QuoteComparatorProps> = ({
         variationsByCanonicalId.forEach((vars, cid) => {
             if (processedCanonicalIds.has(cid)) return;
             const firstVar = vars[0];
-            const cat = categoryMode === 'database' ? getDbCategory(cid.replace('VIRT-', '')) : getAutoCategory(firstVar.productName);
+            
+            let displayName = firstVar.productName;
+            if (!cid.startsWith('VIRT-')) {
+                const mProd = masterProducts?.find(m => m.sku === cid);
+                if (mProd) displayName = mProd.name;
+            }
+
+            const cat = categoryMode === 'none' ? 'Todos os Produtos' : (categoryMode === 'database' ? getDbCategory(cid.replace('VIRT-', '')) : getAutoCategory(displayName));
             const winner = [...vars].sort((a, b) => a.unitPrice - b.unitPrice)[0];
             const optionsPerSup: Record<string, VariationOption | null> = {};
             enabledSuppliers.forEach(s => {
                 const supVars = vars.filter(v => v.supplierId === s.id).sort((a,b) => a.unitPrice - b.unitPrice);
                 optionsPerSup[s.id] = supVars[0] || null;
             });
-            finalRows.push({ type: 'orphan', id: cid, sku: cid.startsWith('VIRT-') ? 'S/N' : cid, name: firstVar.productName, category: cat, qtyNeeded: 0, totalSold: 0, currentStock: 0, bestUnitPrice: winner ? winner.unitPrice : 0, bestSupplierId: winner ? winner.supplierId : null, bestOptionsPerSupplier: optionsPerSup, allVariations: vars });
+            finalRows.push({ type: 'orphan', id: cid, sku: cid.startsWith('VIRT-') ? 'S/N' : cid, name: displayName, category: cat, qtyNeeded: 0, totalSold: 0, currentStock: 0, bestUnitPrice: winner ? winner.unitPrice : 0, bestSupplierId: winner ? winner.supplierId : null, bestOptionsPerSupplier: optionsPerSup, allVariations: vars });
         });
         setAllProcessedRows(finalRows);
         setIsProcessing(false);
@@ -325,6 +334,8 @@ const QuoteComparator: React.FC<QuoteComparatorProps> = ({
 
   const groupedData = useMemo(() => {
       const groups: Record<string, UnifiedRow[]> = {};
+      const globalSearchTerms = searchTerm.toLowerCase().trim().split(/\s+/).filter(Boolean);
+      
       allProcessedRows.forEach(row => {
           // Filtra produtos ocultos (a menos que showInactive esteja ativo)
           const rowNormalizedId = row.id.toLowerCase().replace(/\s+/g, '_');
@@ -332,9 +343,15 @@ const QuoteComparator: React.FC<QuoteComparatorProps> = ({
 
           const cat = row.category || "Sem Categoria";
           if (!groups[cat]) groups[cat] = [];
-          const matchGlobal = !searchTerm || row.name.toLowerCase().includes(searchTerm.toLowerCase()) || row.sku.toLowerCase().includes(searchTerm.toLowerCase());
+          
+          const nameLower = row.name.toLowerCase();
+          const skuLower = row.sku.toLowerCase();
+          const matchGlobal = globalSearchTerms.length === 0 || globalSearchTerms.every(term => nameLower.includes(term) || skuLower.includes(term));
+          
           const catSearch = categorySearchTerms[cat] || '';
-          const matchLocal = !catSearch || row.name.toLowerCase().includes(catSearch.toLowerCase());
+          const catSearchTerms = catSearch.toLowerCase().trim().split(/\s+/).filter(Boolean);
+          const matchLocal = catSearchTerms.length === 0 || catSearchTerms.every(term => nameLower.includes(term));
+          
           if (matchGlobal && matchLocal) groups[cat].push(row);
       });
       return groups;
@@ -385,45 +402,56 @@ const QuoteComparator: React.FC<QuoteComparatorProps> = ({
           <div className="bg-slate-900/40 rounded-b-lg border-t border-slate-700 overflow-x-auto">
             <table className="w-full text-left border-collapse">
                 <thead className="bg-slate-950 text-slate-500 text-[10px] uppercase tracking-wider sticky top-0 z-20">
-                    <tr><th className="p-4 w-8"></th><th className="p-4">Produto</th>{suppliers.filter(s => s.isEnabled).map(s => <th key={s.id} className="p-4 text-center w-32">{s.name}</th>)}<th className="p-4 text-right bg-slate-900 sticky right-0">Melhor</th></tr>
+                    <tr><th className="p-2 w-8"></th><th className="p-2">Produto</th>{suppliers.filter(s => s.isEnabled).map(s => <th key={s.id} className="p-2 text-center w-28">{s.name}</th>)}<th className="p-2 text-right bg-slate-900 sticky right-0">Melhor</th></tr>
                 </thead>
-                <tbody className="text-sm text-slate-300 divide-y divide-slate-800">
+                <tbody className="text-[11px] text-slate-300 divide-y divide-slate-800">
                     {paginated.map((row, idx) => {
                         const isExpanded = expandedRows.has(row.id);
                         return (
                             <React.Fragment key={idx}>
                                 <tr 
                                     className={`transition-all ${isExpanded ? 'bg-slate-800/80' : 'hover:bg-slate-800/60'}`}
-                                    draggable onDragStart={() => setDraggedRow(row)} onDragOver={(e) => { e.preventDefault(); }} onDrop={() => { if(draggedRow && draggedRow.id !== row.id && confirm(`Agrupar "${draggedRow.name}" em "${row.name}"?`)) draggedRow.allVariations.forEach(v => addMapping(v.productName, row.id)); }}
+                                    draggable onDragStart={() => setDraggedRow(row)} onDragOver={(e) => { e.preventDefault(); }} 
+                                    onDrop={() => { 
+                                        if(draggedRow && draggedRow.id !== row.id && confirm(`Agrupar "${draggedRow.name}" em "${row.name}"?`)) {
+                                            if (row.id.startsWith('VIRT-')) {
+                                                alert('Dica: Esses produtos foram agrupados temporariamente. Para manter o agrupamento permanentemente e com nome padronizado, clique no botão "Link" deste produto e mapeie-o para o Catálogo Master!');
+                                            }
+                                            draggedRow.allVariations.forEach(v => addMapping(v.productName, row.id)); 
+                                        }
+                                    }}
                                 >
-                                    <td className="p-2 text-center cursor-grab text-slate-600"><GripVertical className="w-4 h-4 mx-auto"/></td>
-                                    <td className="p-4">
-                                        <div className="flex items-start gap-2">
-                                            <button onClick={() => toggleRow(row.id)} className="mt-1 p-1 rounded hover:bg-slate-700 text-amber-500">{isExpanded ? <ChevronDown className="w-4 h-4"/> : <ChevronRight className="w-4 h-4"/>}</button>
-                                            <div><div className="font-bold text-white flex items-center gap-2">{row.name} <button onClick={() => { setMappingSourceProduct(row.name); setIsMappingModalOpen(true); }} className="text-slate-600 hover:text-amber-500"><LinkIcon className="w-3.5 h-3.5"/></button></div><div className="flex gap-2 text-[10px] mt-1"><span className="text-slate-500">SKU: {row.sku}</span>{row.totalSold > 0 && <span className="text-indigo-400 font-bold">Vendas: {row.totalSold}</span>}</div></div>
+                                    <td className="p-1 text-center cursor-grab text-slate-600"><GripVertical className="w-3.5 h-3.5 mx-auto"/></td>
+                                    <td className="px-2 py-1.5 min-w-[200px]">
+                                        <div className="flex items-start gap-1.5">
+                                            <button onClick={() => toggleRow(row.id)} className="mt-0.5 p-0.5 rounded hover:bg-slate-700 text-amber-500">{isExpanded ? <ChevronDown className="w-3.5 h-3.5"/> : <ChevronRight className="w-3.5 h-3.5"/>}</button>
+                                            <div className="flex-1 min-w-0">
+                                                <div className="font-bold text-white flex items-center gap-1.5 leading-tight"><span className="truncate">{row.name}</span> <button onClick={() => setLinkingProduct({ name: row.name, supplierId: row.allVariations[0]?.supplierId })} title="Vincular ao Catálogo Master" className="text-slate-600 hover:text-amber-500 shrink-0"><LinkIcon className="w-3.5 h-3.5"/></button></div>
+                                                <div className="flex items-center gap-2 text-[9px] mt-0.5 opacity-80"><span className="text-slate-400 font-mono">SKU: {row.sku}</span>{row.totalSold > 0 && <span className="text-indigo-400 font-bold">Vendas: {row.totalSold}</span>}</div>
+                                            </div>
                                         </div>
                                     </td>
                                     {suppliers.filter(s => s.isEnabled).map(s => {
                                         const opt = row.bestOptionsPerSupplier[s.id];
-                                        return <td key={s.id} className="p-4 text-center border-l border-slate-800/50">{opt ? <div className="flex flex-col items-center gap-1"><span className="font-bold text-xs">R$ {opt.unitPrice.toFixed(2)}</span><button onClick={() => openSelectionModal(row, s.id)} className="text-[10px] px-2 py-1 bg-slate-800 rounded border border-slate-700 text-slate-400 hover:bg-slate-700">+ N.P</button></div> : '-'}</td>;
+                                        return <td key={s.id} className="px-2 py-1.5 text-center border-l border-slate-800/50">{opt ? <div className="flex flex-col items-center justify-center h-full"><span className="font-bold text-[12px] text-slate-200">R$ {opt.unitPrice.toFixed(2)}</span><button onClick={() => openSelectionModal(row, s.id)} className="text-[9px] px-1.5 mt-0.5 bg-slate-800 rounded border border-slate-700 text-slate-400 hover:bg-slate-700 hover:text-white transition-colors">+ N.P</button></div> : '-'}</td>;
                                     })}
-                                    <td className="p-4 text-right bg-slate-900/80 sticky right-0 border-l border-slate-800">{row.bestSupplierId ? <div className="flex flex-col items-end"><span className="text-amber-400 font-black text-sm">R$ {row.bestUnitPrice.toFixed(2)}</span><span className="text-[10px] text-slate-500 truncate max-w-[80px]">{suppliers.find(sup => sup.id === row.bestSupplierId)?.name}</span></div> : '-'}</td>
+                                    <td className="px-2 py-1.5 text-right bg-slate-900/80 sticky right-0 border-l border-slate-800">{row.bestSupplierId ? <div className="flex flex-col items-end justify-center h-full"><span className="text-amber-400 font-black text-xs">R$ {row.bestUnitPrice.toFixed(2)}</span><span className="text-[9px] text-slate-500 truncate max-w-[80px] leading-tight">{suppliers.find(sup => sup.id === row.bestSupplierId)?.name}</span></div> : '-'}</td>
                                 </tr>
                                 {isExpanded && (
                                     <tr>
-                                        <td colSpan={10} className="bg-slate-950/80 p-4 border-b border-slate-800">
-                                            <div className="bg-slate-900 rounded border border-slate-700 overflow-hidden text-xs">
+                                        <td colSpan={10} className="bg-slate-950/80 p-2 border-b border-slate-800">
+                                            <div className="bg-slate-900 rounded border border-slate-700 overflow-hidden text-[10px]">
                                                 <table className="w-full">
-                                                    <thead className="text-slate-500 border-b border-slate-800"><tr><th className="p-2 text-left">Fornecedor</th><th className="p-2 text-left">Nome na Cotação</th><th className="p-2 text-center">Lote</th><th className="p-2 text-right">Preço Cx</th><th className="p-2 text-right">Unit.</th><th className="p-2 text-center">Ações</th></tr></thead>
+                                                    <thead className="text-slate-500 bg-slate-800/50"><tr><th className="px-2 py-1.5 text-left font-medium">Fornecedor</th><th className="px-2 py-1.5 text-left font-medium">Nome na Cotação</th><th className="px-2 py-1.5 text-center font-medium">Lote</th><th className="px-2 py-1.5 text-right font-medium">Preço Cx</th><th className="px-2 py-1.5 text-right font-medium">Unit.</th><th className="px-2 py-1.5 text-center font-medium">Ações</th></tr></thead>
                                                     <tbody>
                                                         {row.allVariations.sort((a,b)=>a.unitPrice-b.unitPrice).map((v, i) => (
-                                                            <tr key={i} className="hover:bg-slate-800 border-b border-slate-800 last:border-0">
-                                                                <td className="p-2 text-amber-500">{v.supplierName}</td>
-                                                                <td className="p-2">{v.productName}</td>
-                                                                <td className="p-2 text-center text-slate-500">x{v.packQuantity}</td>
-                                                                <td className="p-2 text-right">R$ {v.packPrice.toFixed(2)}</td>
-                                                                <td className="p-2 text-right font-bold text-green-400">R$ {v.unitPrice.toFixed(2)}</td>
-                                                                <td className="p-2 text-center"><button onClick={() => setUnlinkConfirm({ productName: v.productName })} className="p-1 hover:text-red-500" title="Desvincular"><Unlink className="w-3.5 h-3.5"/></button></td>
+                                                            <tr key={i} className="hover:bg-slate-800 border-b border-slate-800/50 last:border-0">
+                                                                <td className="px-2 py-1.5 text-amber-500 font-medium">{v.supplierName}</td>
+                                                                <td className="px-2 py-1.5 text-slate-300">{v.productName}</td>
+                                                                <td className="px-2 py-1.5 text-center text-slate-500">x{v.packQuantity}</td>
+                                                                <td className="px-2 py-1.5 text-right text-slate-400">R$ {v.packPrice.toFixed(2)}</td>
+                                                                <td className="px-2 py-1.5 text-right font-bold text-green-400 text-[11px]">R$ {v.unitPrice.toFixed(2)}</td>
+                                                                <td className="px-2 py-1.5 text-center"><button onClick={() => setUnlinkConfirm({ productName: v.productName })} className="p-1 hover:text-red-500 transition-colors" title="Desvincular do grupo"><Unlink className="w-3.5 h-3.5 mx-auto"/></button></td>
                                                             </tr>
                                                         ))}
                                                     </tbody>
@@ -490,46 +518,14 @@ const QuoteComparator: React.FC<QuoteComparatorProps> = ({
           {stockMarketOpen && stockMarketData && (
             <div className="grid grid-cols-1 lg:grid-cols-2 divide-y lg:divide-y-0 lg:divide-x divide-slate-800 border-t border-slate-800">
 
-              {/* Maiores Altas */}
+              {/* Maiores Baixas (Esquerda, Positivo - Verde) */}
               <div className="p-3">
                 <div className="flex items-center gap-1.5 mb-2 px-1">
-                  <TrendingUp className="w-3.5 h-3.5 text-green-400"/>
-                  <span className="text-[11px] font-bold text-green-400 uppercase tracking-wider">Maiores Altas</span>
-                </div>
-                {stockMarketData.topGainers.length === 0 ? (
-                  <p className="text-xs text-slate-600 px-1 py-2">Nenhuma alta esta semana</p>
-                ) : (
-                  <div className="space-y-1">
-                    {stockMarketData.topGainers.map((entry, i) => (
-                      <div key={i} className="flex items-center justify-between px-2 py-1.5 rounded-lg hover:bg-slate-800/60 transition-colors">
-                        <div className="flex-1 min-w-0">
-                          <p className="text-xs font-medium text-slate-200 truncate">{entry.productName}</p>
-                          <p className="text-[10px] text-slate-500 truncate">{entry.supplierName}</p>
-                        </div>
-                        <div className="flex items-center gap-3 ml-3 shrink-0">
-                          <div className="text-right">
-                            <p className="text-xs text-slate-500 line-through">R$ {entry.previousPrice.toFixed(2)}</p>
-                            <p className="text-xs font-bold text-white">R$ {entry.currentPrice.toFixed(2)}</p>
-                          </div>
-                          <div className="flex items-center gap-0.5 bg-green-900/30 border border-green-800/50 rounded px-1.5 py-0.5 min-w-[52px] justify-center">
-                            <TrendingUp className="w-3 h-3 text-green-400"/>
-                            <span className="text-[11px] font-bold text-green-400">+{entry.changePct.toFixed(1)}%</span>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              {/* Maiores Baixas */}
-              <div className="p-3">
-                <div className="flex items-center gap-1.5 mb-2 px-1">
-                  <TrendingDown className="w-3.5 h-3.5 text-red-400"/>
-                  <span className="text-[11px] font-bold text-red-400 uppercase tracking-wider">Maiores Baixas</span>
+                  <TrendingDown className="w-3.5 h-3.5 text-green-400"/>
+                  <span className="text-[11px] font-bold text-green-400 uppercase tracking-wider">Maiores Baixas</span>
                 </div>
                 {stockMarketData.topLosers.length === 0 ? (
-                  <p className="text-xs text-slate-600 px-1 py-2">Nenhuma baixa esta semana</p>
+                  <p className="text-xs text-slate-600 px-1 py-2">Nenhuma baixa detectada</p>
                 ) : (
                   <div className="space-y-1">
                     {stockMarketData.topLosers.map((entry, i) => (
@@ -543,9 +539,41 @@ const QuoteComparator: React.FC<QuoteComparatorProps> = ({
                             <p className="text-xs text-slate-500 line-through">R$ {entry.previousPrice.toFixed(2)}</p>
                             <p className="text-xs font-bold text-white">R$ {entry.currentPrice.toFixed(2)}</p>
                           </div>
+                          <div className="flex items-center gap-0.5 bg-green-900/30 border border-green-800/50 rounded px-1.5 py-0.5 min-w-[52px] justify-center">
+                            <TrendingDown className="w-3 h-3 text-green-400"/>
+                            <span className="text-[11px] font-bold text-green-400">{entry.changePct.toFixed(1)}%</span>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Maiores Altas (Direita, Negativo - Vermelho) */}
+              <div className="p-3">
+                <div className="flex items-center gap-1.5 mb-2 px-1">
+                  <TrendingUp className="w-3.5 h-3.5 text-red-400"/>
+                  <span className="text-[11px] font-bold text-red-400 uppercase tracking-wider">Maiores Altas</span>
+                </div>
+                {stockMarketData.topGainers.length === 0 ? (
+                  <p className="text-xs text-slate-600 px-1 py-2">Nenhuma alta detectada</p>
+                ) : (
+                  <div className="space-y-1">
+                    {stockMarketData.topGainers.map((entry, i) => (
+                      <div key={i} className="flex items-center justify-between px-2 py-1.5 rounded-lg hover:bg-slate-800/60 transition-colors">
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-medium text-slate-200 truncate">{entry.productName}</p>
+                          <p className="text-[10px] text-slate-500 truncate">{entry.supplierName}</p>
+                        </div>
+                        <div className="flex items-center gap-3 ml-3 shrink-0">
+                          <div className="text-right">
+                            <p className="text-xs text-slate-500 line-through">R$ {entry.previousPrice.toFixed(2)}</p>
+                            <p className="text-xs font-bold text-white">R$ {entry.currentPrice.toFixed(2)}</p>
+                          </div>
                           <div className="flex items-center gap-0.5 bg-red-900/30 border border-red-800/50 rounded px-1.5 py-0.5 min-w-[52px] justify-center">
-                            <TrendingDown className="w-3 h-3 text-red-400"/>
-                            <span className="text-[11px] font-bold text-red-400">{entry.changePct.toFixed(1)}%</span>
+                            <TrendingUp className="w-3 h-3 text-red-400"/>
+                            <span className="text-[11px] font-bold text-red-400">+{entry.changePct.toFixed(1)}%</span>
                           </div>
                         </div>
                       </div>
@@ -579,39 +607,33 @@ const QuoteComparator: React.FC<QuoteComparatorProps> = ({
             <div className="flex items-center gap-4 flex-1 w-full">
                 <div className="relative flex-1 max-w-sm"><Search className="absolute left-3 top-2.5 w-4 h-4 text-slate-500" /><input type="text" placeholder="Pesquisa Global..." className="w-full bg-slate-900 border border-slate-700 rounded-lg py-2 pl-9 text-sm text-white focus:outline-none" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} /></div>
                 <div className="flex bg-slate-900 p-1 rounded-lg border border-slate-700 text-[10px]">
-                    <button onClick={() => setCategoryMode('database')} className={`px-2 py-1.5 rounded transition-all ${categoryMode === 'database' ? 'bg-amber-600 text-white shadow' : 'text-slate-500'}`}>Banco</button>
-                    <button onClick={() => setCategoryMode('auto')} className={`px-2 py-1.5 rounded transition-all ${categoryMode === 'auto' ? 'bg-amber-600 text-white shadow' : 'text-slate-500'}`}>Automática</button>
+                    <button onClick={() => setCategoryMode('database')} className={`px-2 py-1.5 rounded transition-all ${categoryMode === 'database' ? 'bg-amber-600 text-white shadow' : 'text-slate-500 hover:text-white'}`}>Banco</button>
+                    <button onClick={() => setCategoryMode('auto')} className={`px-2 py-1.5 rounded transition-all ${categoryMode === 'auto' ? 'bg-amber-600 text-white shadow' : 'text-slate-500 hover:text-white'}`}>Automática</button>
+                    <button onClick={() => setCategoryMode('none')} className={`px-2 py-1.5 rounded transition-all ${categoryMode === 'none' ? 'bg-amber-600 text-white shadow' : 'text-slate-500 hover:text-white'}`}>S/ Grupo</button>
                 </div>
             </div>
             <button onClick={() => setConsiderStock?.(!considerStock)} className={`px-3 py-1.5 rounded text-xs font-bold border ${considerStock ? 'bg-blue-600/20 text-blue-400 border-blue-500' : 'bg-orange-600/20 text-orange-400 border-orange-500'}`}><Box className="w-3 h-3 inline mr-2"/>{considerStock ? 'Subtraindo Estoque' : 'Ignorando Estoque'}</button>
         </div>
 
-        <div className="space-y-4">
-            {Object.keys(groupedData).sort().map(cat => (
+        <div className="space-y-3">
+            {Object.keys(groupedData).sort().filter(cat => groupedData[cat].length > 0).map(cat => (
                 <div key={cat} className="bg-slate-800 rounded-lg border border-slate-700 overflow-hidden shadow-md">
-                    <div className="flex items-center justify-between p-4 bg-slate-900/50 cursor-pointer" onClick={() => toggleCategory(cat)}>
-                        <div className="flex items-center gap-3"><LayoutGrid className="w-4 h-4 text-indigo-400" /><div><h3 className="font-bold text-slate-200 uppercase text-xs">{cat}</h3><p className="text-[10px] text-slate-500">{groupedData[cat].length} produtos</p></div></div>
+                    <div className="flex items-center justify-between px-3 py-2 bg-slate-900/50 cursor-pointer border-b border-transparent hover:border-slate-700 transition-colors" onClick={() => toggleCategory(cat)}>
+                        <div className="flex items-center gap-2.5"><LayoutGrid className="w-3.5 h-3.5 text-indigo-400" /><div><h3 className="font-bold text-slate-200 uppercase text-[11px] leading-tight">{cat === 'Sem Categoria' ? 'Tudo' : cat}</h3><p className="text-[9px] text-slate-500 leading-tight">{groupedData[cat].length} produtos</p></div></div>
                     </div>
                     {!collapsedCategories.has(cat) && <PaginatedTable rows={groupedData[cat]} />}
                 </div>
             ))}
         </div>
 
-        {isMappingModalOpen && mappingSourceProduct && (
-            <div className="fixed inset-0 z-[160] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-                <div className="bg-slate-900 w-full max-w-lg rounded-xl border border-slate-700 flex flex-col max-h-[80vh]">
-                     <div className="p-4 border-b border-slate-800 font-bold">Vincular Produto</div>
-                     <div className="p-4 bg-slate-800 border-b border-slate-700"><input type="text" placeholder="Pesquisar item..." value={mappingSearchTerm} onChange={(e) => setMappingSearchTerm(e.target.value)} autoFocus className="w-full bg-slate-900 border border-slate-700 rounded px-3 py-2 text-sm text-white"/></div>
-                     <div className="flex-1 overflow-y-auto p-2">
-                        {allProcessedRows.filter(r => (r.name.toLowerCase().includes(mappingSearchTerm.toLowerCase())) && r.name !== mappingSourceProduct).slice(0,50).map(item => (
-                            <div key={item.id} onClick={() => { addMapping(mappingSourceProduct, item.id); setIsMappingModalOpen(false); }} className="p-3 hover:bg-amber-900/20 rounded cursor-pointer">
-                                <div className="text-sm font-medium">{item.name}</div>
-                            </div>
-                        ))}
-                     </div>
-                     <div className="p-4 bg-slate-950 flex justify-end"><button onClick={() => setIsMappingModalOpen(false)} className="px-4 py-2 text-slate-400">Fechar</button></div>
-                </div>
-            </div>
+        {linkingProduct && masterProducts && (
+            <LinkProductModal
+                item={{ name: linkingProduct.name }}
+                supplier={linkingProduct.supplierId ? suppliers.find(s => s.id === linkingProduct.supplierId) : undefined}
+                masterProducts={masterProducts}
+                onLink={(normalizedName, targetSku) => { addMapping(linkingProduct.name, targetSku); setLinkingProduct(null); }}
+                onClose={() => setLinkingProduct(null)}
+            />
         )}
 
         {isModalOpen && modalData && (
