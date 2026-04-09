@@ -9,6 +9,7 @@ export interface ProductQuote {
   priceStrategy?: 'pack' | 'unit'; // 'pack' = price is total for the box; 'unit' = price is for single unit
   isVerified?: boolean; // If true, the item is considered identified/ready
   isReprocessed?: boolean; // If true, rule was applied automatically, needs verification
+  isNovelty?: boolean; // If true, user explicitly marked this as a new/unknown product from this supplier
 }
 
 export interface QuoteBatch {
@@ -119,6 +120,7 @@ export interface ProductMapping {
     targetSku: string; // The SKU in your forecast/sales system (or normalized supplier name when targetType='supplier')
     targetType?: 'master' | 'supplier'; // 'master' = linked to master catalog SKU; 'supplier' = linked to supplier historical alias
     targetName?: string; // Display name when targetType='supplier'
+    supplierSku?: string; // Supplier's own product code — primary match key (no ambiguity when present)
 }
 
 export interface ComparisonResult {

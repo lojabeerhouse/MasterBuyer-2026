@@ -4,8 +4,9 @@ import { auth, googleProvider } from './firebaseConfig';
 import { saveUserData, loadUserData, saveChunkedData, loadChunkedData } from './services/firebaseService';
 import { loadNotifications, saveNotifications, processBatchIntoHistory, resolveDuplicate, normalizeProductKey, loadPriceHistory, savePriceHistory } from './services/historyService';
 import { loadAllCatalogs, processBatchIntoCatalog, saveCatalog, normForMapping, makeProductId } from './services/supplierCatalogService';
-import NotificationCenter from './components/NotificationCenter';
-import Dashboard from './components/Dashboard';
+const NotificationCenter = lazy(() => import('./components/NotificationCenter'));
+const Dashboard = lazy(() => import('./components/Dashboard'));
+const UploadCenter = lazy(() => import('./components/UploadCenter'));
 const SalesDashboard = lazy(() => import("./components/SalesDashboard"));
 const QuoteComparator = lazy(() => import('./components/QuoteComparator'));
 const OrderManager = lazy(() => import('./components/OrderManager'));
@@ -37,9 +38,9 @@ import {
 import {
   BarChart3, Users, FileText, Database, Scale, Settings,
   CalendarDays, ClipboardList, LogOut, ChevronDown, Tag, MessageSquare,
-  LayoutDashboard, Menu, X,
+  LayoutDashboard, Menu, X, UploadCloud
 } from 'lucide-react';
-import BuyingAssistant from './components/BuyingAssistant';
+const BuyingAssistant = lazy(() => import('./components/BuyingAssistant'));
 const QuoteRequest = lazy(() => import('./components/QuoteRequest'));
 
 // ─── defaults ────────────────────────────────────────────────────────────────
@@ -128,7 +129,7 @@ const App: React.FC = () => {
 
   // --- APP STATE ---
   const [activeTab, setActiveTab] = useState<
-    'dashboard' | 'sales' | 'comparator' | 'purchase_orders' | 'schedule' |
+    'dashboard' | 'uploads' | 'sales' | 'comparator' | 'purchase_orders' | 'schedule' |
     'catalog' | 'suppliers' | 'database' | 'settings' | 'profile' | 'quote_request'
   >('dashboard');
 
@@ -285,7 +286,7 @@ const App: React.FC = () => {
   useEffect(() => { if (uid && isLoaded) saveUserData(uid, 'hiddenProducts', hiddenProducts); }, [hiddenProducts, uid, isLoaded]);
   useEffect(() => { if (uid && isLoaded) saveUserData(uid, 'appSettings', appSettings); }, [appSettings, uid, isLoaded]);
   useEffect(() => { if (uid && isLoaded) saveUserData(uid, 'userProfile', userProfile); }, [userProfile, uid, isLoaded]);
-  useEffect(() => { if (uid) saveNotifications(uid, notifications); }, [notifications, uid]);
+  useEffect(() => { if (uid && isLoaded) saveNotifications(uid, notifications); }, [notifications, uid, isLoaded]);
 
   // --- ARQUIVAMENTO AUTOMÁTICO DE COTAÇÕES ANTIGAS ---
   useEffect(() => {
@@ -317,7 +318,7 @@ const App: React.FC = () => {
   }, [isLoaded]); // roda uma vez após o carregamento inicial
 
   // --- NOTIFICATION HANDLERS ---
-  const handleNotificationResolve = useCallback(async (id: string, keepWhich?: 'existing' | 'incoming') => {
+  const handleNotificationResolve = useCallback(async (id: string, keepWhich?: 'existing' | 'incoming' | 'both') => {
     const notif = notifications.find(n => n.id === id);
     if (notif?.payload && keepWhich && user?.uid) {
       await resolveDuplicate(user.uid, notif, keepWhich);
@@ -361,15 +362,22 @@ const App: React.FC = () => {
 
     const finalBatch = { ...batch, items: translatedItems };
 
-    // Persiste o batch com os nomes ORIGINAIS do fornecedor (para que os mapeamentos continuem funcionando ao reabrir)
-    // finalBatch (com nomes traduzidos) é usado apenas para catálogo e histórico
+    // Persiste o batch localmente (fila do fornecedor) caso seja UploadCenter/SupplierManager
     setSuppliers(prev => prev.map(s => {
       if (s.id !== supplierId) return s;
+      const exists = s.quotes.some(q => q.id === batch.id);
       return {
         ...s,
-        quotes: s.quotes.map(q => q.id === batch.id ? batch : q)
+        quotes: exists 
+          ? s.quotes.map(q => q.id === batch.id ? batch : q)
+          : [batch, ...s.quotes]
       };
     }));
+
+    // Impede que cotações recém-lidas "vazem" direto pro Catálogo sem o Confere Manual
+    if (!batch.isSaved) {
+       return;
+    }
 
     const { newNotifications } = await processBatchIntoHistory(
       user.uid, finalBatch, supplier, productMappings, notifications
@@ -426,17 +434,20 @@ const App: React.FC = () => {
     });
 
     if (newProducts > 0 || updatedProducts > 0) {
-      setNotifications(prev => [{
-        id: `catalog-${batch.id}`,
-        type: 'console',
-        title: 'Catálogo atualizado',
-        message: `${supplier.name}: ${newProducts} novo(s), ${updatedProducts} atualizado(s)`,
-        timestamp: Date.now(),
-        resolved: false,
-        supplierId,
-        supplierName: supplier.name,
-        batchId: batch.id,
-      }, ...prev]);
+      setNotifications(prev => {
+        const filtered = prev.filter(n => n.id !== `catalog-${batch.id}`);
+        return [{
+          id: `catalog-${batch.id}`,
+          type: 'console',
+          title: 'Catálogo atualizado',
+          message: `${supplier.name}: ${newProducts} novo(s), ${updatedProducts} atualizado(s)`,
+          timestamp: Date.now(),
+          resolved: false,
+          supplierId,
+          supplierName: supplier.name,
+          batchId: batch.id,
+        }, ...filtered];
+      });
     }
   }, [user?.uid, suppliers, productMappings, notifications, masterProducts]);
 
@@ -533,17 +544,21 @@ const App: React.FC = () => {
   };
 
   // --- HELPERS ---
-  const addMapping = useCallback((supplierProductName: string, targetSku: string, targetType?: 'master' | 'supplier', targetName?: string) => {
+  const addMapping = useCallback((supplierProductName: string, targetSku: string, targetType?: 'master' | 'supplier', targetName?: string, supplierSku?: string) => {
     const normalized = normForMapping(supplierProductName);
     setProductMappings(prev => {
       const existing = prev.findIndex(m => m.supplierProductNameNormalized === normalized);
       let newMappings: ProductMapping[];
       if (existing >= 0) {
         const copy = [...prev];
-        copy[existing] = { ...copy[existing], targetSku, targetType, targetName };
+        copy[existing] = {
+          ...copy[existing],
+          targetSku, targetType, targetName,
+          ...(supplierSku ? { supplierSku } : {}),
+        };
         newMappings = copy;
       } else {
-        newMappings = [...prev, { supplierProductNameNormalized: normalized, targetSku, targetType, targetName }];
+        newMappings = [...prev, { supplierProductNameNormalized: normalized, targetSku, targetType, targetName, ...(supplierSku ? { supplierSku } : {}) }];
       }
       // PARTE 2: save immediately, not only via useEffect
       if (uid) saveUserData(uid, 'mappings', newMappings);
@@ -556,7 +571,7 @@ const App: React.FC = () => {
       if (masterProduct && uid) {
         setSupplierCatalogs(prev => {
           const updated = { ...prev };
-          for (const [, catalog] of Object.entries(updated)) {
+          for (const catalog of Object.values(updated) as SupplierCatalog[]) {
             const hasMatch = catalog.products.some(p => normForMapping(p.name) === normalized);
             if (!hasMatch) continue;
 
@@ -574,8 +589,8 @@ const App: React.FC = () => {
             if (dupes.length > 1) {
               const newest = dupes.reduce((a, b) => a.lastSeenDate > b.lastSeenDate ? a : b);
               const allHistory = dupes.flatMap(p => p.priceHistory);
-              const mergedHistory = [...new Map(allHistory.map(e => [e.batchId, e])).values()]
-                .sort((a, b) => b.date - a.date)
+              const mergedHistory = [...new Map(allHistory.map(e => [e.batchId, e] as [string, any])).values()]
+                .sort((a: any, b: any) => b.date - a.date)
                 .slice(0, 60);
               const dupeIds = new Set(dupes.map(p => p.id));
               dupeIds.delete(newest.id);
@@ -607,7 +622,7 @@ const App: React.FC = () => {
     if (uid) {
       setSupplierCatalogs(prev => {
         const updated = { ...prev };
-        for (const [, catalog] of Object.entries(updated)) {
+        for (const catalog of Object.values(updated) as SupplierCatalog[]) {
           const hasMatch = catalog.products.some(p => normForMapping(p.name) === normalized);
           if (!hasMatch) continue;
           const updatedCatalog = {
@@ -642,6 +657,26 @@ const App: React.FC = () => {
     return Math.max(...purchaseOrders.map(o => o.seqNumber || 0)) + 1;
   }, [purchaseOrders]);
 
+  // Cria pedido a partir de itens processados no UploadCenter
+  const handleCreateOrderFromUpload = useCallback((items: import('./types').CartItem[], supplierId: string) => {
+    const supplier = suppliers.find(s => s.id === supplierId);
+    const now = Date.now();
+    const newOrder: import('./types').PurchaseOrder = {
+      id: crypto.randomUUID(),
+      seqNumber: Math.max(0, ...purchaseOrders.map(o => o.seqNumber || 0)) + 1,
+      supplierId,
+      supplierName: supplier?.name || supplierId,
+      items,
+      totalValue: items.reduce((s, i) => s + i.packPrice * i.quantityToBuy, 0),
+      status: 'draft',
+      createdAt: now,
+      updatedAt: now,
+      deliveryOrPickup: 'delivery',
+      transitions: [],
+    };
+    setPurchaseOrders(prev => [newOrder, ...prev]);
+  }, [suppliers, purchaseOrders]);
+
   // --- RENDER ---
   if (authLoading) return <LoadingScreen />;
   if (!user) return <LoginScreen onLogin={handleLogin} loading={loginLoading} />;
@@ -659,6 +694,7 @@ const App: React.FC = () => {
 
   const navItems: { tab: typeof activeTab; icon: React.ReactNode; label: string; highlight?: boolean }[] = [
     { tab: 'dashboard', icon: <LayoutDashboard className="w-5 h-5" />, label: 'Início' },
+    { tab: 'uploads', icon: <UploadCloud className="w-5 h-5" />, label: 'Uploads' },
     { tab: 'suppliers', icon: <Users className="w-5 h-5" />, label: 'Fornecedores' },
     { tab: 'database', icon: <Database className="w-5 h-5" />, label: 'Produtos' },
     { tab: 'sales', icon: <BarChart3 className="w-5 h-5" />, label: 'Vendas' },
@@ -730,11 +766,13 @@ const App: React.FC = () => {
         {/* Bottom Actions Area */}
         <div className="border-t border-slate-800 p-3 flex flex-col gap-2 shrink-0">
           <div className={`flex ${sidebarExpanded ? 'flex-row' : 'flex-col'} items-center justify-center gap-2`}>
-            <NotificationCenter
-              notifications={notifications}
-              onResolve={handleNotificationResolve}
-              onClearConsole={handleClearConsole}
-            />
+            <Suspense fallback={<div className="w-8 h-8" />}>
+              <NotificationCenter
+                notifications={notifications}
+                onResolve={handleNotificationResolve}
+                onClearConsole={handleClearConsole}
+              />
+            </Suspense>
             <button
               onClick={() => navigateTo('settings')}
               title="Configurações"
@@ -848,18 +886,29 @@ const App: React.FC = () => {
 
       <main className="flex-1 overflow-y-auto p-4 md:p-6 w-full max-w-7xl mx-auto custom-scrollbar">
         {activeTab === 'dashboard' && (
-          <Dashboard
-            user={user}
-            userProfile={userProfile}
-            suppliers={suppliers}
-            purchaseOrders={purchaseOrders}
-            masterProducts={masterProducts}
-            notifications={notifications}
-            cart={cart}
-            onNavigate={(tab) => setActiveTab(tab as typeof activeTab)}
-          />
+          <Suspense fallback={<div className="flex items-center justify-center h-full text-slate-500 text-sm">Carregando...</div>}>
+            <Dashboard
+              user={user}
+              userProfile={userProfile}
+              suppliers={suppliers}
+              purchaseOrders={purchaseOrders}
+              masterProducts={masterProducts}
+              notifications={notifications}
+              cart={cart}
+              onNavigate={(tab) => setActiveTab(tab as typeof activeTab)}
+            />
+          </Suspense>
         )}
         <Suspense fallback={<div className="flex items-center justify-center h-full text-slate-500 text-sm">Carregando...</div>}>
+        {activeTab === 'uploads' && (
+          <UploadCenter
+             suppliers={suppliers}
+             globalPackRules={globalPackRules}
+             onBatchCompleted={handleBatchCompleted}
+             onCreateOrder={handleCreateOrderFromUpload}
+             onNavigateToOrders={() => setActiveTab('purchase_orders')}
+          />
+        )}
         {activeTab === 'sales' && (
           <SalesDashboard
             setForecast={setForecast} salesData={salesData} setSalesData={setSalesData}
@@ -888,6 +937,7 @@ const App: React.FC = () => {
             setPurchaseOrders={setPurchaseOrders}
             cart={cart}
             setCart={setCart}
+            supplierCatalogs={supplierCatalogs}
             userProfile={userProfile}
             getNextSeqNumber={getNextSeqNumber}
           />
@@ -1002,7 +1052,9 @@ const App: React.FC = () => {
       </main>
 
       {/* Assistente flutuante */}
-      <BuyingAssistant suppliers={suppliers} cart={cart} setCart={setCart} salesData={salesData} />
+      <Suspense fallback={null}>
+        <BuyingAssistant suppliers={suppliers} cart={cart} setCart={setCart} salesData={salesData} />
+      </Suspense>
       </div>
     </div>
   );

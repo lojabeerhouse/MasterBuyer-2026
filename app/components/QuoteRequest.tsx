@@ -50,7 +50,7 @@ const QuoteRequest: React.FC<QuoteRequestProps> = ({ suppliers, catalogs, global
 
   const sections = useMemo<SupplierSection[]>(() => {
     return Object.entries(catalogs)
-      .map(([supplierId, catalog]) => {
+      .map(([supplierId, catalog]: [string, SupplierCatalog]) => {
         const supplier = suppliers.find(s => s.id === supplierId);
         const effectiveDays = catalog.priceValidityDays ?? globalValidityDays;
 
@@ -370,7 +370,7 @@ const QuoteRequest: React.FC<QuoteRequestProps> = ({ suppliers, catalogs, global
 
             {/* Supplier tabs */}
             <div className="flex gap-1.5 px-4 py-2.5 border-b border-slate-800 overflow-x-auto custom-scrollbar">
-              {Object.entries(selectedBySupplier).map(([supplierId, data]) => (
+              {Object.entries(selectedBySupplier).map(([supplierId, data]: [string, any]) => (
                 <button
                   key={supplierId}
                   onClick={() => setActiveTab(supplierId)}

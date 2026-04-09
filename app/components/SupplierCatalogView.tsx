@@ -33,7 +33,7 @@ interface SupplierCatalogViewProps {
   onCatalogUpdate: (catalog: SupplierCatalog) => void;
   onHideProduct: (product: SupplierCatalogProduct, supplierId: string, supplierName: string) => void;
   onUnhideProduct: (productId: string) => void;
-  onAddMapping?: (supplierProductName: string, targetSku: string, targetType?: 'master' | 'supplier', targetName?: string) => void;
+  onAddMapping?: (supplierProductName: string, targetSku: string, targetType?: 'master' | 'supplier', targetName?: string, supplierSku?: string) => void;
   onRemoveMapping?: (supplierProductName: string) => void;
 }
 
@@ -330,7 +330,7 @@ const CatalogContent: React.FC<{
   onCatalogUpdate: (c: SupplierCatalog) => void;
   onHideProduct: (p: SupplierCatalogProduct, supplierId: string, supplierName: string) => void;
   onUnhideProduct: (id: string) => void;
-  onAddMapping?: (supplierProductName: string, targetSku: string, targetType?: 'master' | 'supplier', targetName?: string) => void;
+  onAddMapping?: (supplierProductName: string, targetSku: string, targetType?: 'master' | 'supplier', targetName?: string, supplierSku?: string) => void;
   onRemoveMapping?: (supplierProductName: string) => void;
 }> = ({ catalog, masterProducts, uid, globalValidityDays, showInactive, hiddenProducts, onCatalogUpdate, onHideProduct, onUnhideProduct, onAddMapping, onRemoveMapping }) => {
   const [localCatalog, setLocalCatalog] = useState(catalog);

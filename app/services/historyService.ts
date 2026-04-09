@@ -244,13 +244,13 @@ export const processBatchIntoHistory = async (
 };
 
 /**
- * Resolve uma duplicata: mantém um dos dois registros
- * keepWhich: 'existing' | 'incoming'
+ * Resolve uma duplicata: mantém um dos dois registros, ou ambos
+ * keepWhich: 'existing' | 'incoming' | 'both'
  */
 export const resolveDuplicate = async (
   uid: string,
   notification: AppNotification,
-  keepWhich: 'existing' | 'incoming'
+  keepWhich: 'existing' | 'incoming' | 'both'
 ): Promise<void> => {
   if (!notification.payload) return;
   const payload = notification.payload as DuplicatePayload;
@@ -276,6 +276,24 @@ export const resolveDuplicate = async (
       batchId: incoming.batchId,
       sourceType: 'text',
     });
+  } else if (keepWhich === 'both') {
+    // Keep existing, also add incoming as a separate record (e.g. different lote size)
+    const alreadyIn = history.records.some(
+      r => r.supplierId === incoming.supplierId && r.batchId === incoming.batchId
+    );
+    if (!alreadyIn) {
+      history.records.push({
+        id: crypto.randomUUID(),
+        date: incoming.timestamp,
+        supplierId: incoming.supplierId,
+        supplierName: incoming.supplierName,
+        unitPrice: incoming.unitPrice,
+        packPrice: incoming.packPrice,
+        packQuantity: incoming.packQuantity,
+        batchId: incoming.batchId,
+        sourceType: 'text',
+      });
+    }
   }
   // If 'existing', keep as-is (incoming is discarded)
 

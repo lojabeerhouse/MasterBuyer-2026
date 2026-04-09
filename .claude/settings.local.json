@@ -6,7 +6,8 @@
       "Bash(find 'c:/Users/Bruno Forcato/Google Drive/APPS/CATOS-MASTER-BUYER/MasterBuyer-2026' -name *.css)",
       "Bash(wc -l services/*.ts)",
       "Bash(sort -k5 -rn)",
-      "Bash(grep -v \"\\\\.js$\")"
+      "Bash(grep -v \"\\\\.js$\")",
+      "Bash(npx tsc:*)"
     ]
   }
 }

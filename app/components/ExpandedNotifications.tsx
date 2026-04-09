@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { AppNotification, DuplicatePayload } from '../types';
-import { X, Bell, AlertTriangle, Layers, HelpCircle, CheckSquare, Square } from 'lucide-react';
+import { X, Bell, AlertTriangle, Layers, HelpCircle, CheckSquare, Square, GitMerge } from 'lucide-react';
 
 const timeAgo = (ts: number) => {
   const diff = Date.now() - ts;
@@ -17,7 +17,7 @@ const formatCurrency = (v: number) =>
 
 interface ExpandedNotificationsProps {
   notifications: AppNotification[];
-  onResolve: (id: string, keepWhich?: 'existing' | 'incoming') => void;
+  onResolve: (id: string, keepWhich?: 'existing' | 'incoming' | 'both') => void;
   onClose: () => void;
 }
 
@@ -83,7 +83,7 @@ const ExpandedNotifications: React.FC<ExpandedNotificationsProps> = ({
     else setSelectedIds(new Set(attentionNotifs.map(n => n.id)));
   };
 
-  const handleBulkResolve = (keepWhich: 'existing' | 'incoming') => {
+  const handleBulkResolve = (keepWhich: 'existing' | 'incoming' | 'both') => {
     selectedDuplicateIds.forEach(id => onResolve(id, keepWhich));
     setSelectedIds(new Set());
   };
@@ -91,7 +91,7 @@ const ExpandedNotifications: React.FC<ExpandedNotificationsProps> = ({
   const handleCardClick = (
     e: React.MouseEvent,
     notifId: string,
-    keepWhich: 'existing' | 'incoming'
+    keepWhich: 'existing' | 'incoming' | 'both'
   ) => {
     e.stopPropagation();
     if (hasDuplicatesSelected) {
@@ -133,51 +133,61 @@ const ExpandedNotifications: React.FC<ExpandedNotificationsProps> = ({
             )}
           </div>
 
-          {/* Botão: Manter nova cotação */}
-          <div className="relative group/nova">
-            <button
-              onClick={() => handleBulkResolve('incoming')}
-              disabled={!hasDuplicatesSelected}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all border ${
-                hasDuplicatesSelected
-                  ? 'bg-amber-600/20 text-amber-400 hover:bg-amber-600/30 border-amber-600/40'
-                  : 'bg-slate-800/50 text-slate-600 border-slate-700/50 cursor-not-allowed'
-              }`}
-            >
-              Manter nova cotação
-            </button>
-            {hasDuplicatesSelected && (
-              <div className="absolute bottom-full mb-1.5 left-1/2 -translate-x-1/2 opacity-0 group-hover/nova:opacity-100 transition-opacity pointer-events-none z-10">
-                <div className="bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 flex items-center gap-1.5 whitespace-nowrap shadow-lg">
-                  <Layers className="w-3.5 h-3.5 text-amber-400" />
-                  <span className="text-slate-300 text-[11px]">{selectedDuplicateIds.length} duplicidade(s)</span>
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Botão: Manter registro anterior */}
-          <div className="relative group/ant">
+          {/* Segmented button group: resolver duplicidades em massa */}
+          <div className={`relative flex rounded-lg overflow-hidden border transition-all ${
+            hasDuplicatesSelected ? 'border-slate-600' : 'border-slate-700/50'
+          }`}>
+            {/* Manter registro anterior */}
             <button
               onClick={() => handleBulkResolve('existing')}
               disabled={!hasDuplicatesSelected}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all border ${
+              title="Manter registro anterior"
+              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium transition-all border-r ${
                 hasDuplicatesSelected
-                  ? 'bg-slate-700/50 text-slate-300 hover:bg-slate-700 border-slate-600'
-                  : 'bg-slate-800/50 text-slate-600 border-slate-700/50 cursor-not-allowed'
+                  ? 'bg-slate-800 text-slate-300 hover:bg-slate-700 border-slate-600'
+                  : 'bg-slate-800/40 text-slate-600 border-slate-700/50 cursor-not-allowed'
               }`}
             >
-              Manter registro anterior
+              ← Anterior
             </button>
-            {hasDuplicatesSelected && (
-              <div className="absolute bottom-full mb-1.5 left-1/2 -translate-x-1/2 opacity-0 group-hover/ant:opacity-100 transition-opacity pointer-events-none z-10">
-                <div className="bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 flex items-center gap-1.5 whitespace-nowrap shadow-lg">
-                  <Layers className="w-3.5 h-3.5 text-slate-400" />
-                  <span className="text-slate-300 text-[11px]">{selectedDuplicateIds.length} duplicidade(s)</span>
-                </div>
-              </div>
-            )}
+
+            {/* Manter as duas */}
+            <button
+              onClick={() => handleBulkResolve('both')}
+              disabled={!hasDuplicatesSelected}
+              title="Manter as duas cotações"
+              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium transition-all border-r ${
+                hasDuplicatesSelected
+                  ? 'bg-teal-900/40 text-teal-400 hover:bg-teal-900/60 border-slate-600'
+                  : 'bg-slate-800/40 text-slate-600 border-slate-700/50 cursor-not-allowed'
+              }`}
+            >
+              <GitMerge className="w-3 h-3" />
+              Manter as duas
+            </button>
+
+            {/* Manter nova cotação */}
+            <button
+              onClick={() => handleBulkResolve('incoming')}
+              disabled={!hasDuplicatesSelected}
+              title="Manter nova cotação"
+              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium transition-all ${
+                hasDuplicatesSelected
+                  ? 'bg-slate-800 text-amber-400 hover:bg-amber-950/40 '
+                  : 'bg-slate-800/40 text-slate-600 cursor-not-allowed'
+              }`}
+            >
+              Nova →
+            </button>
           </div>
+
+          {/* Contador de selecionados (tooltip do grupo) */}
+          {hasDuplicatesSelected && (
+            <div className="flex items-center gap-1 text-slate-500 text-[10px]">
+              <Layers className="w-3 h-3" />
+              {selectedDuplicateIds.length}
+            </div>
+          )}
 
           {/* Ícone ? */}
           <div className="relative">
@@ -200,8 +210,9 @@ const ExpandedNotifications: React.FC<ExpandedNotificationsProps> = ({
                   </div>
                   <div className="border-t border-slate-800 pt-3">
                     <p className="text-slate-300 font-semibold mb-1">Ações em massa</p>
-                    <p className="mb-1"><span className="text-amber-400">Manter nova cotação</span> — substitui o histórico pelo registro mais recente.</p>
-                    <p><span className="text-slate-300">Manter registro anterior</span> — descarta a nova importação, preserva o existente.</p>
+                    <p className="mb-1"><span className="text-slate-300">← Anterior</span> — descarta a nova importação, preserva o existente.</p>
+                    <p className="mb-1"><span className="text-teal-400">Manter as duas</span> — adiciona a nova cotação sem remover a anterior. Útil para lotes com tamanhos ou preços diferentes.</p>
+                    <p><span className="text-amber-400">Nova →</span> — substitui o histórico pelo registro mais recente.</p>
                   </div>
                   <div className="border-t border-slate-800 pt-3 text-slate-600">
                     <p>Pressione <kbd className="bg-slate-800 px-1 py-0.5 rounded text-slate-400">ESC</kbd> para fechar.</p>
@@ -255,20 +266,34 @@ const ExpandedNotifications: React.FC<ExpandedNotificationsProps> = ({
                       {/* 3 Columns Grid */}
                       <div className="grid grid-cols-3 gap-3 flex-1 min-w-0 items-start">
                         {/* Zona esquerda: info */}
-                        <div className="min-w-0 pr-2 cursor-pointer" onClick={(e) => toggleSelect(n.id, e.shiftKey)}>
-                          <div className="flex items-start gap-1.5 mb-1 max-w-full">
-                            <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
-                            <p className="text-white text-xs font-semibold leading-snug break-words line-clamp-3" title={n.title}>{n.title}</p>
+                        <div className="min-w-0 pr-2">
+                          <div
+                            className="cursor-pointer"
+                            onClick={(e) => toggleSelect(n.id, e.shiftKey)}
+                          >
+                            <div className="flex items-start gap-1.5 mb-1 max-w-full">
+                              <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
+                              <p className="text-white text-xs font-semibold leading-snug break-words line-clamp-3" title={n.title}>{n.title}</p>
+                            </div>
+                            <span className="text-[10px] font-bold text-amber-500 bg-amber-500/10 border border-amber-500/20 px-1.5 py-0.5 rounded inline-block mb-1.5">
+                              DUPLICIDADE
+                            </span>
+                            <div className="flex items-center gap-2 mb-2">
+                              <span className="text-slate-600 text-[10px]">{timeAgo(n.timestamp)}</span>
+                              {n.supplierName && (
+                                <span className="text-slate-600 text-[10px] truncate">{n.supplierName}</span>
+                              )}
+                            </div>
                           </div>
-                          <span className="text-[10px] font-bold text-amber-500 bg-amber-500/10 border border-amber-500/20 px-1.5 py-0.5 rounded inline-block mb-1.5">
-                            DUPLICIDADE
-                          </span>
-                          <div className="flex items-center gap-2">
-                            <span className="text-slate-600 text-[10px]">{timeAgo(n.timestamp)}</span>
-                            {n.supplierName && (
-                              <span className="text-slate-600 text-[10px] truncate">{n.supplierName}</span>
-                            )}
-                          </div>
+                          {/* Ação rápida: manter as duas */}
+                          <button
+                            onClick={(e) => handleCardClick(e, n.id, 'both')}
+                            className="flex items-center gap-1 text-[10px] text-teal-500 hover:text-teal-300 transition-colors"
+                            title="Manter ambas as cotações no histórico"
+                          >
+                            <GitMerge className="w-3 h-3" />
+                            Manter as duas
+                          </button>
                         </div>
 
                         {/* Card: Registro Atual */}

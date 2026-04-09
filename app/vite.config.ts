@@ -19,6 +19,22 @@ export default defineConfig(({ mode, command }) => {
 
     build: {
       outDir: 'dist',
+      rollupOptions: {
+        output: {
+          manualChunks(id) {
+            if (id.includes('node_modules/react/') || id.includes('node_modules/react-dom/'))
+              return 'vendor-react';
+            if (id.includes('node_modules/firebase/') || id.includes('node_modules/@firebase/'))
+              return 'vendor-firebase';
+            if (id.includes('node_modules/@google/genai'))
+              return 'vendor-genai';
+            if (id.includes('node_modules/recharts') || id.includes('node_modules/d3-'))
+              return 'vendor-charts';
+            if (id.includes('node_modules/lucide-react'))
+              return 'vendor-lucide';
+          }
+        }
+      }
     }
   };
 });

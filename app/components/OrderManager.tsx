@@ -1,13 +1,13 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import {
-  PurchaseOrder, PurchaseOrderStatus, CartItem, Supplier
+  PurchaseOrder, PurchaseOrderStatus, CartItem, Supplier, SupplierCatalog, UserProfile
 } from '../types';
 import {
   Plus, Trash2, ChevronDown, ChevronUp, ChevronRight,
   CheckCircle, XCircle, Truck, Package, ClipboardList,
   MessageCircle, Clock, Calendar, AlertTriangle, Check,
   Send, RotateCcw, Archive, Eye, Edit3, X, Save,
-  ShoppingCart, MapPin, Phone
+  ShoppingCart, MapPin, Phone, Search
 } from 'lucide-react';
 
 interface OrderManagerProps {
@@ -16,6 +16,9 @@ interface OrderManagerProps {
   setPurchaseOrders: React.Dispatch<React.SetStateAction<PurchaseOrder[]>>;
   cart: CartItem[];
   setCart: React.Dispatch<React.SetStateAction<CartItem[]>>;
+  supplierCatalogs?: Record<string, SupplierCatalog>;
+  userProfile?: UserProfile;
+  getNextSeqNumber?: () => number;
 }
 
 // ── helpers ────────────────────────────────────────────────────────────────
@@ -105,7 +108,8 @@ function getWeekLabel(ts: number) {
 // ── componente principal ───────────────────────────────────────────────────
 
 const OrderManager: React.FC<OrderManagerProps> = ({
-  suppliers, purchaseOrders, setPurchaseOrders, cart, setCart
+  suppliers, purchaseOrders, setPurchaseOrders, cart, setCart,
+  supplierCatalogs = {}, userProfile, getNextSeqNumber,
 }) => {
   const [viewMode, setViewMode] = useState<'technical' | 'objective'>('technical');
   const [sortBy, setSortBy] = useState<'date' | 'supplier' | 'value'>('date');
@@ -123,6 +127,25 @@ const OrderManager: React.FC<OrderManagerProps> = ({
   const [editingExpected, setEditingExpected] = useState(false);
   const [tempExpectedDate, setTempExpectedDate] = useState('');
   const [tempExpectedTime, setTempExpectedTime] = useState('');
+
+  // Estado do modal de pedido manual
+  const [showManualModal, setShowManualModal] = useState(false);
+  const [manualSupplierId, setManualSupplierId] = useState('');
+  const [manualSearch, setManualSearch] = useState('');
+  const [manualQtys, setManualQtys] = useState<Record<string, number>>({});
+  const [manualSupplierSearch, setManualSupplierSearch] = useState('');
+  const [manualSupplierOpen, setManualSupplierOpen] = useState(false);
+  const manualSupplierRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (manualSupplierRef.current && !manualSupplierRef.current.contains(e.target as Node)) {
+        setManualSupplierOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   // Transição de status
   const transition = (orderId: string, to: PurchaseOrderStatus, extra?: Partial<PurchaseOrder>) => {
@@ -237,6 +260,58 @@ const OrderManager: React.FC<OrderManagerProps> = ({
   }, [purchaseOrders, sortBy]);
 
   const cartSupplierIds = useMemo(() => [...new Set(cart.map(i => i.supplierId))], [cart]);
+
+  const manualFilteredProducts = useMemo(() => {
+    const catalog = supplierCatalogs[manualSupplierId];
+    if (!catalog) return [];
+    const q = manualSearch.toLowerCase();
+    return catalog.products.filter(p => p.name.toLowerCase().includes(q));
+  }, [supplierCatalogs, manualSupplierId, manualSearch]);
+
+  const createManualOrder = () => {
+    const supplier = suppliers.find(s => s.id === manualSupplierId);
+    const catalog = supplierCatalogs[manualSupplierId];
+    if (!supplier || !catalog) return;
+
+    const items: CartItem[] = (Object.entries(manualQtys) as [string, number][])
+      .filter(([, qty]) => qty > 0)
+      .map(([productId, qty]) => {
+        const p = catalog.products.find(pr => pr.id === productId)!;
+        return {
+          id: `${manualSupplierId}-${p.name}-${p.packQuantity}`,
+          sku: p.supplierSku || p.name.substring(0, 10),
+          productName: p.name,
+          supplierId: manualSupplierId,
+          supplierName: supplier.name,
+          packQuantity: p.packQuantity || 1,
+          packPrice: p.lastPackPrice,
+          quantityToBuy: qty,
+          totalCost: p.lastPackPrice * qty,
+        };
+      });
+
+    if (items.length === 0) return;
+
+    const now = Date.now();
+    const newOrder: PurchaseOrder = {
+      id: crypto.randomUUID(),
+      seqNumber: getNextSeqNumber?.(),
+      supplierId: manualSupplierId,
+      supplierName: supplier.name,
+      items,
+      totalValue: items.reduce((s, i) => s + i.packPrice * i.quantityToBuy, 0),
+      status: 'draft',
+      createdAt: now,
+      updatedAt: now,
+      deliveryOrPickup: 'delivery',
+      transitions: [],
+    };
+    setPurchaseOrders(prev => [newOrder, ...prev]);
+    setShowManualModal(false);
+    setManualSupplierId('');
+    setManualSearch('');
+    setManualQtys({});
+  };
 
   // ── render helpers ───────────────────────────────────────────────────────
 
@@ -427,12 +502,18 @@ const OrderManager: React.FC<OrderManagerProps> = ({
               <option value="value">Maior valor</option>
             </select>
           )}
+          {/* Novo pedido manual */}
+          <button onClick={() => setShowManualModal(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-200 text-xs font-semibold transition-colors border border-slate-600">
+            <Plus className="w-3.5 h-3.5"/>
+            Novo Pedido
+          </button>
           {/* Criar pedido do carrinho */}
           {cartSupplierIds.length > 0 && (
             <button onClick={() => setShowCreateModal(true)}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold transition-colors">
               <ShoppingCart className="w-3.5 h-3.5"/>
-              Criar pedido do carrinho ({cart.length})
+              Carrinho ({cart.length})
             </button>
           )}
         </div>
@@ -593,6 +674,197 @@ const OrderManager: React.FC<OrderManagerProps> = ({
                 className="px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white text-sm font-semibold flex items-center gap-2">
                 <Plus className="w-4 h-4"/> Criar Pedido
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── MODAL: Novo Pedido Manual ── */}
+      {showManualModal && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-3xl shadow-2xl flex flex-col max-h-[90vh]">
+
+            {/* Header */}
+            <div className="p-4 border-b border-slate-800 flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-2">
+                <Plus className="w-4 h-4 text-amber-400"/>
+                <h3 className="font-bold text-white">Novo Pedido Manual</h3>
+                {Object.keys(manualQtys).length > 0 && (
+                  <span className="bg-amber-600 text-white text-[10px] font-bold px-2 py-0.5 rounded-full">
+                    {Object.keys(manualQtys).length} {Object.keys(manualQtys).length === 1 ? 'item' : 'itens'}
+                  </span>
+                )}
+              </div>
+              <button onClick={() => { setShowManualModal(false); setManualSupplierId(''); setManualSearch(''); setManualQtys({}); setManualSupplierSearch(''); setManualSupplierOpen(false); }}>
+                <X className="w-5 h-5 text-slate-500 hover:text-white"/>
+              </button>
+            </div>
+
+            {/* Body: 2 colunas */}
+            <div className="flex flex-1 min-h-0">
+
+              {/* Coluna esquerda — Catálogo */}
+              <div className="flex flex-col flex-[3] p-4 gap-3 border-r border-slate-800 min-h-0">
+
+                {/* Combobox de fornecedor */}
+                <div className="relative shrink-0" ref={manualSupplierRef}>
+                  <label className="text-xs text-slate-400 block mb-1">Fornecedor</label>
+                  <button
+                    type="button"
+                    onClick={() => setManualSupplierOpen(o => !o)}
+                    className={`w-full flex items-center justify-between px-3 py-2 border rounded-lg text-sm transition-colors ${
+                      !manualSupplierId ? 'bg-slate-800/60 border-slate-700 text-slate-400' : 'bg-slate-800 border-amber-600/50 text-white'
+                    }`}
+                  >
+                    <span className="truncate">{manualSupplierId ? suppliers.find(s => s.id === manualSupplierId)?.name : 'Selecionar fornecedor...'}</span>
+                    <ChevronDown className={`w-4 h-4 text-slate-400 shrink-0 transition-transform ${manualSupplierOpen ? 'rotate-180' : ''}`}/>
+                  </button>
+                  {manualSupplierOpen && (
+                    <div className="absolute top-full left-0 z-50 w-full mt-1 bg-slate-800 border border-slate-600 rounded-lg shadow-xl overflow-hidden">
+                      <div className="p-2 border-b border-slate-700 relative">
+                        <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400"/>
+                        <input
+                          type="text"
+                          autoFocus
+                          placeholder="Buscar..."
+                          value={manualSupplierSearch}
+                          onChange={e => setManualSupplierSearch(e.target.value)}
+                          className="w-full pl-8 pr-3 py-1.5 bg-slate-900 border border-slate-700 rounded text-sm text-white focus:outline-none focus:border-amber-500"
+                        />
+                      </div>
+                      <div className="max-h-40 overflow-y-auto">
+                        {suppliers.filter(s => s.name.toLowerCase().includes(manualSupplierSearch.toLowerCase())).length === 0 ? (
+                          <div className="p-3 text-xs text-slate-500 text-center">Nenhum encontrado</div>
+                        ) : suppliers.filter(s => s.name.toLowerCase().includes(manualSupplierSearch.toLowerCase())).map(s => (
+                          <button
+                            key={s.id}
+                            type="button"
+                            onClick={() => { setManualSupplierId(s.id); setManualSearch(''); setManualQtys({}); setManualSupplierOpen(false); setManualSupplierSearch(''); }}
+                            className={`w-full text-left px-3 py-2 text-sm transition-colors flex items-center gap-2 ${manualSupplierId === s.id ? 'bg-amber-600 text-white' : 'text-slate-200 hover:bg-slate-700'}`}
+                          >
+                            {manualSupplierId === s.id && <Check className="w-3.5 h-3.5 shrink-0"/>}
+                            {s.name}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Busca de produto */}
+                {manualSupplierId && (
+                  <div className="relative shrink-0">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-500"/>
+                    <input
+                      type="text"
+                      placeholder="Buscar produto no catálogo..."
+                      value={manualSearch}
+                      onChange={e => setManualSearch(e.target.value)}
+                      className="w-full bg-slate-800 border border-slate-700 rounded-lg pl-8 pr-3 py-2 text-white text-sm focus:outline-none focus:border-amber-500 placeholder-slate-600"
+                    />
+                  </div>
+                )}
+
+                {/* Lista de produtos */}
+                <div className="flex-1 overflow-y-auto min-h-0">
+                  {!manualSupplierId ? (
+                    <div className="flex items-center justify-center h-full text-slate-600 text-xs">Selecione um fornecedor para ver os produtos</div>
+                  ) : !supplierCatalogs[manualSupplierId] || supplierCatalogs[manualSupplierId].products.length === 0 ? (
+                    <div className="flex items-center justify-center h-full text-slate-600 text-xs">Este fornecedor não tem produtos no catálogo ainda</div>
+                  ) : manualFilteredProducts.length === 0 ? (
+                    <div className="flex items-center justify-center h-full text-slate-600 text-xs">Nenhum produto encontrado</div>
+                  ) : (
+                    <div className="space-y-1 pr-1">
+                      {manualFilteredProducts.map(p => {
+                        const qty = manualQtys[p.id] || 0;
+                        const isAdded = qty > 0;
+                        return (
+                          <div key={p.id}
+                            className={`flex items-center justify-between gap-2 px-3 py-2 rounded-lg transition-all ${
+                              isAdded
+                                ? 'bg-amber-950/40 border border-amber-600/50'
+                                : 'bg-slate-800/50 border border-transparent hover:border-slate-700'
+                            }`}>
+                            <div className="flex-1 min-w-0">
+                              <p className={`text-xs truncate ${isAdded ? 'text-amber-100' : 'text-slate-200'}`}>{p.name}</p>
+                              <p className="text-slate-500 text-[10px]">Cx {p.packQuantity} · {fmtCurrency(p.lastPackPrice)}/cx</p>
+                            </div>
+                            <div className="flex items-center gap-1 shrink-0">
+                              {isAdded && <Check className="w-3 h-3 text-amber-400"/>}
+                              <button
+                                onClick={() => setManualQtys(prev => { const n = { ...prev }; if ((n[p.id] || 0) <= 1) delete n[p.id]; else n[p.id]--; return n; })}
+                                className={`w-6 h-6 rounded flex items-center justify-center text-sm transition-colors ${isAdded ? 'bg-amber-800/60 hover:bg-amber-700 text-amber-100' : 'bg-slate-700 hover:bg-slate-600 text-slate-400'}`}>−</button>
+                              <span className="w-6 text-center text-white text-xs font-semibold">{qty}</span>
+                              <button
+                                onClick={() => setManualQtys(prev => ({ ...prev, [p.id]: (prev[p.id] || 0) + 1 }))}
+                                className="w-6 h-6 rounded bg-slate-700 hover:bg-amber-600 text-slate-300 hover:text-white flex items-center justify-center text-sm transition-colors">+</button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Coluna direita — Resumo */}
+              <div className="flex flex-col flex-[2] p-4 min-h-0">
+                <p className="text-xs text-slate-400 font-semibold mb-3 shrink-0">Resumo do Pedido</p>
+
+                {Object.keys(manualQtys).length === 0 ? (
+                  <div className="flex-1 flex flex-col items-center justify-center text-center gap-2">
+                    <ShoppingCart className="w-8 h-8 text-slate-700"/>
+                    <p className="text-xs text-slate-600">Adicione produtos<br/>ao lado para montar<br/>o pedido</p>
+                  </div>
+                ) : (
+                  <div className="flex-1 overflow-y-auto min-h-0 space-y-1 pr-1 mb-3">
+                    {(Object.entries(manualQtys) as [string, number][]).map(([productId, qty]) => {
+                      const p = supplierCatalogs[manualSupplierId]?.products.find(pr => pr.id === productId);
+                      if (!p) return null;
+                      return (
+                        <div key={productId} className="flex items-start gap-2 py-1.5 border-b border-slate-800/60 last:border-0">
+                          <div className="flex-1 min-w-0">
+                            <p className="text-xs text-slate-300 truncate leading-tight">{p.name}</p>
+                            <p className="text-[10px] text-slate-500">× {qty}cx · {fmtCurrency(p.lastPackPrice * qty)}</p>
+                          </div>
+                          <button
+                            onClick={() => setManualQtys(prev => { const n = { ...prev }; delete n[productId]; return n; })}
+                            className="shrink-0 w-5 h-5 rounded hover:bg-red-900/40 text-slate-600 hover:text-red-400 flex items-center justify-center transition-colors mt-0.5">
+                            <X className="w-3 h-3"/>
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {/* Total + Botões */}
+                <div className="shrink-0 mt-auto space-y-3">
+                  {Object.keys(manualQtys).length > 0 && (
+                    <div className="flex justify-between items-center border-t border-slate-700 pt-2">
+                      <span className="text-xs text-slate-400">Total</span>
+                      <span className="text-sm font-bold text-white">
+                        {fmtCurrency((Object.entries(manualQtys) as [string, number][]).reduce((s, [id, qty]) => {
+                          const p = supplierCatalogs[manualSupplierId]?.products.find(pr => pr.id === id);
+                          return s + (p?.lastPackPrice || 0) * qty;
+                        }, 0))}
+                      </span>
+                    </div>
+                  )}
+                  <div className="flex flex-col gap-2">
+                    <button onClick={createManualOrder}
+                      disabled={!manualSupplierId || Object.keys(manualQtys).length === 0}
+                      className="w-full px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 disabled:opacity-40 text-white text-sm font-semibold flex items-center justify-center gap-2 transition-colors">
+                      <Plus className="w-4 h-4"/> Criar Pedido
+                    </button>
+                    <button onClick={() => { setShowManualModal(false); setManualSupplierId(''); setManualSearch(''); setManualQtys({}); setManualSupplierSearch(''); setManualSupplierOpen(false); }}
+                      className="w-full px-4 py-2 rounded-xl text-sm text-slate-500 hover:text-white transition-colors">
+                      Cancelar
+                    </button>
+                  </div>
+                </div>
+              </div>
+
             </div>
           </div>
         </div>

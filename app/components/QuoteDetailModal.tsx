@@ -4,6 +4,7 @@ import {
   Trash2, CheckCircle, Loader2, Ban, Pencil, Save, X, XCircle, RefreshCw,
   Coins, BoxSelect, Sparkles, ChevronLeft, ChevronRight, Wand2, ChevronDown,
   ChevronUp, AlertTriangle, Check, CheckSquare, Square, Search, Bot, Eye, Link2, Unlink,
+  Star, RotateCcw, ShieldAlert,
 } from 'lucide-react';
 import { generateProductVariations, batchSmartIdentify } from '../services/geminiService';
 import { normalizeProductName, normForMapping, findMasterProductMatches } from '../services/supplierCatalogService';
@@ -22,7 +23,7 @@ interface QuoteDetailModalProps {
   onBanItem?: (itemName: string) => void;
   productMappings?: ProductMapping[];
   masterProducts?: MasterProduct[];
-  onAddMapping?: (normalizedName: string, targetSku: string, targetType?: 'master' | 'supplier', targetName?: string) => void;
+  onAddMapping?: (normalizedName: string, targetSku: string, targetType?: 'master' | 'supplier', targetName?: string, supplierSku?: string) => void;
   onRemoveMapping?: (supplierProductName: string) => void;
 }
 
@@ -55,11 +56,16 @@ const QuoteDetailModal: React.FC<QuoteDetailModalProps> = ({
   const [tempBatchDate, setTempBatchDate] = useState('');
 
   // ── Sections collapsed ───────────────────────────────────────────────────────
-  const [collapsedSections, setCollapsedSections] = useState({ yellow: false, blue: true, green: true });
+  const [collapsedSections, setCollapsedSections] = useState({ inspection: false, yellow: false, blue: true, green: true, novelties: true });
 
   // ── Selection & batch magic ──────────────────────────────────────────────────
   const [selectedPendingItems, setSelectedPendingItems] = useState<Set<number>>(new Set());
   const [isBatchProcessing, setIsBatchProcessing] = useState(false);
+
+  // ── Draft values (local only — synced to global on blur or save) ─────────────
+  // Prevents re-render cascade (setSuppliers → Firebase) on every keystroke
+  const [draftQty, setDraftQty] = useState<Record<number, number>>({});
+  const [draftPrice, setDraftPrice] = useState<Record<number, number>>({});
 
   // ── AI Suggestions ───────────────────────────────────────────────────────────
   const [suggestionsMap, setSuggestionsMap] = useState<Record<string, string[]>>({});
@@ -359,22 +365,47 @@ const QuoteDetailModal: React.FC<QuoteDetailModalProps> = ({
     updateGlobalItems(batchId, updatedItems);
   };
 
-  const updateItemPackQuantity = (batchId: string, itemIndex: number, newQty: number) => {
+  // onChange: updates local viewingBatch only (instant display, no global re-render)
+  const updateItemPackQuantityLocal = (itemIndex: number, newQty: number) => {
     const safeQty = Math.max(1, newQty);
-    const updatedItems = viewingBatch.items.map((item, idx) =>
-      idx === itemIndex ? recalculateItem(item, undefined, safeQty) : item
-    );
-    setViewingBatch(prev => ({ ...prev, items: updatedItems }));
-    updateGlobalItems(batchId, updatedItems);
+    setDraftQty(prev => ({ ...prev, [itemIndex]: safeQty }));
+    setViewingBatch(prev => ({
+      ...prev,
+      items: prev.items.map((item, idx) => idx === itemIndex ? recalculateItem(item, undefined, safeQty) : item),
+    }));
   };
 
-  const updateItemPrice = (batchId: string, itemIndex: number, newPrice: number) => {
+  // onBlur: flushes local state to global (triggers parent re-render + eventual Firebase save)
+  const flushItemPackQuantity = (batchId: string, itemIndex: number) => {
+    setDraftQty(prev => { const n = { ...prev }; delete n[itemIndex]; return n; });
+    updateGlobalItems(batchId, viewingBatch.items);
+  };
+
+  // onChange: updates local viewingBatch only
+  const updateItemPriceLocal = (itemIndex: number, newPrice: number) => {
     const safePrice = Math.max(0, newPrice);
-    const updatedItems = viewingBatch.items.map((item, idx) => {
-      if (idx !== itemIndex) return item;
-      const unitPrice = item.priceStrategy === 'unit' ? safePrice : safePrice / Math.max(1, item.packQuantity);
-      return { ...item, price: safePrice, unitPrice };
-    });
+    setDraftPrice(prev => ({ ...prev, [itemIndex]: safePrice }));
+    setViewingBatch(prev => ({
+      ...prev,
+      items: prev.items.map((item, idx) => {
+        if (idx !== itemIndex) return item;
+        const unitPrice = item.priceStrategy === 'unit' ? safePrice : safePrice / Math.max(1, item.packQuantity);
+        return { ...item, price: safePrice, unitPrice };
+      }),
+    }));
+  };
+
+  // onBlur: flushes to global
+  const flushItemPrice = (batchId: string, itemIndex: number) => {
+    setDraftPrice(prev => { const n = { ...prev }; delete n[itemIndex]; return n; });
+    updateGlobalItems(batchId, viewingBatch.items);
+  };
+
+
+  const toggleItemNovelty = (batchId: string, itemIndex: number, value: boolean) => {
+    const updatedItems = viewingBatch.items.map((item, idx) =>
+      idx === itemIndex ? { ...item, isNovelty: value } : item
+    );
     setViewingBatch(prev => ({ ...prev, items: updatedItems }));
     updateGlobalItems(batchId, updatedItems);
   };
@@ -405,7 +436,26 @@ const QuoteDetailModal: React.FC<QuoteDetailModalProps> = ({
     return set;
   }, [supplier.quotes, viewingBatch.id]);
 
-  const getItemCategory = (item: ProductQuote): 'green' | 'blue' | 'yellow' => {
+  const getItemCategory = (item: ProductQuote): 'green' | 'blue' | 'yellow' | 'novelty' | 'inspection' => {
+    if (item.isNovelty) return 'novelty';
+
+    // Primary match: supplier SKU
+    if (item.sku && item.sku !== 'S/N' && productMappings) {
+      const skuMapping = productMappings.find(m => m.supplierSku === item.sku);
+      if (skuMapping) {
+        // Sanity check: if name similarity is too low, flag for human inspection
+        const nameSim = findMasterProductMatches(item.name,
+          masterProducts?.filter(p => p.sku === skuMapping.targetSku) ?? [], 1);
+        const nameScore = nameSim.length > 0 ? nameSim[0].score : 0;
+        if (nameScore < 40) return 'inspection';
+        if (!skuMapping.targetType || skuMapping.targetType === 'master') {
+          if (masterProducts?.some(p => p.sku === skuMapping.targetSku)) return 'green';
+        }
+        if (skuMapping.targetType === 'supplier') return 'blue';
+      }
+    }
+
+    // Fallback: name-based mapping
     const mappingKey = normForMapping(item.name);
     const mapping = productMappings?.find(m => m.supplierProductNameNormalized === mappingKey);
     if (mapping) {
@@ -470,14 +520,30 @@ const QuoteDetailModal: React.FC<QuoteDetailModalProps> = ({
       );
     }
 
+    const category = getItemCategory(item);
+    const suggestion = revealedSuggestions.get(idx);
+    const isDismissed = dismissedSuggestions.has(normForMapping(item.name));
+    const hasSuggestion = !!suggestion && !isDismissed && category !== 'green' && category !== 'novelty';
+    const suggestionScore = hasSuggestion ? suggestion!.score : 0;
+    // high = ≥85, low = 60–84, none = no suggestion or dismissed
+    const suggestionTier: 'high' | 'low' | 'none' = hasSuggestion
+      ? suggestionScore >= 85 ? 'high' : 'low'
+      : 'none';
+
     return (
-      <tr key={idx} onMouseEnter={() => { if (getItemCategory(item) !== 'green') computeSuggestionForItem(idx, item.name); }} className={`group border-b border-slate-800/30 last:border-0 transition-colors ${isSelected ? 'bg-amber-900/20' : 'hover:bg-slate-800/40'}`}>
-        {/* Checkbox + Auto */}
+      <tr key={idx} onMouseEnter={() => { if (category !== 'green' && category !== 'novelty') computeSuggestionForItem(idx, item.name); }} className={`group border-b border-slate-800/30 last:border-0 transition-colors ${isSelected ? 'bg-amber-900/20' : 'hover:bg-slate-800/40'}`}>
+        {/* Checkbox + Auto — only visible when no suggestion (suggestion is the primary action) */}
         <td className="px-2 py-1.5 text-center w-10">
           <div className="flex flex-col items-center gap-1">
-            {!isVerified && (
+            {!isVerified && suggestionTier === 'none' && (
               <input type="checkbox" checked={isSelected} onChange={() => toggleSelection(idx)}
                 className="w-3.5 h-3.5 rounded border-slate-600 bg-slate-800 text-amber-600 cursor-pointer" />
+            )}
+            {!isVerified && suggestionTier === 'high' && (
+              <CheckCircle className="w-3.5 h-3.5 text-emerald-500" title="Alta confiança de correspondência" />
+            )}
+            {!isVerified && suggestionTier === 'low' && (
+              <AlertTriangle className="w-3.5 h-3.5 text-amber-500" title="Sugestão de baixa confiança" />
             )}
             {isReprocessed && (
               <span className="text-blue-400 cursor-help" title="Lote ajustado automaticamente por regra de embalagem">
@@ -487,7 +553,7 @@ const QuoteDetailModal: React.FC<QuoteDetailModalProps> = ({
           </div>
         </td>
 
-        {/* Nome */}
+        {/* Nome + Zona de Status (altura fixa) */}
         <td className="px-2 py-1.5">
           {editingItemId === idx ? (
             <div className="flex items-center gap-1.5">
@@ -499,8 +565,9 @@ const QuoteDetailModal: React.FC<QuoteDetailModalProps> = ({
             </div>
           ) : (
             <div>
+              {/* Nome + edição inline (IA de nome) */}
               {suggestions.length > 0 ? (
-                <div className="flex items-center gap-1.5 bg-amber-900/20 border border-amber-900/50 p-1 rounded">
+                <div className="flex items-center gap-1.5 bg-amber-900/20 border border-amber-900/50 p-1 rounded mb-1">
                   <button onClick={() => cancelSuggestion(batchId, idx)} className="text-red-400 p-0.5"><X className="w-3 h-3" /></button>
                   <button onClick={() => cycleSuggestion(batchId, idx, 'prev')} className="text-amber-500"><ChevronLeft className="w-3.5 h-3.5" /></button>
                   <button onClick={() => applySuggestion(batchId, idx)} className="flex-1 text-center font-bold text-amber-400 hover:text-white text-xs px-1 rounded hover:bg-amber-600">
@@ -510,58 +577,116 @@ const QuoteDetailModal: React.FC<QuoteDetailModalProps> = ({
                   <button onClick={() => fetchSuggestions(batchId, idx, item.name, true)} className="text-blue-400 p-0.5"><RefreshCw className="w-3 h-3" /></button>
                 </div>
               ) : (
-                <div className="flex items-center gap-1.5 group/edit">
+                <div className="flex items-center gap-1.5 group/edit mb-0.5">
                   <span className={`text-sm font-medium leading-tight ${!item.isVerified ? 'text-amber-100' : 'text-white'}`}>{item.name}</span>
                   <div className="opacity-0 group-hover/edit:opacity-100 flex items-center gap-0.5 transition-opacity shrink-0">
                     <button onClick={() => startEditingItem(idx, item.name)} className="text-slate-600 hover:text-blue-400 p-0.5 rounded" title="Editar nome"><Pencil className="w-3 h-3" /></button>
-                    <button onClick={() => fetchSuggestions(batchId, idx, item.name)} className="text-slate-600 hover:text-amber-400 p-0.5 rounded" disabled={isLoadingSuggestions} title="Sugerir com IA">
+                    <button onClick={() => fetchSuggestions(batchId, idx, item.name)} className="text-slate-600 hover:text-amber-400 p-0.5 rounded" disabled={isLoadingSuggestions} title="Sugerir nome com IA">
                       {isLoadingSuggestions ? <Loader2 className="w-3 h-3 animate-spin" /> : <Wand2 className="w-3 h-3" />}
                     </button>
-                    {getItemCategory(item) !== 'green' && (
-                      <button onClick={() => setLinkingItem(item)} className="text-slate-600 hover:text-amber-400 p-0.5 rounded" title="Vincular ao catálogo master">
-                        <Link2 className="w-3 h-3" />
-                      </button>
-                    )}
                   </div>
                 </div>
               )}
-              {item.sku && <span className="text-[10px] text-slate-700 block">{item.sku}</span>}
-              {getItemCategory(item) === 'green' && (() => {
-                const mapping = productMappings?.find(m => m.supplierProductNameNormalized === normForMapping(item.name));
-                const linkedName = masterProducts?.find(p => p.sku === mapping?.targetSku)?.name ?? mapping?.targetName;
-                if (!linkedName) return null;
-                return (
-                  <div className="flex items-center gap-1 mt-0.5 text-[10px] text-emerald-700 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <CheckCircle className="w-2.5 h-2.5 shrink-0" />
-                    <span className="truncate">{linkedName}</span>
-                  </div>
-                );
-              })()}
-              {getItemCategory(item) !== 'green' && (() => {
-                const suggestion = revealedSuggestions.get(idx);
-                if (!suggestion || dismissedSuggestions.has(normForMapping(item.name))) return null;
-                return (
-                  <div className="flex items-stretch mt-1 rounded overflow-hidden border border-amber-800/40 text-[10px]">
+              {item.sku && <span className="text-[10px] text-slate-600 block mb-0.5">{item.sku}</span>}
+
+              {/* ── Zona de Status — altura fixa min-h-[28px] ── */}
+              <div className="min-h-[28px] flex items-center">
+                {/* GREEN: vinculado ao master */}
+                {category === 'green' && (() => {
+                  const mapping = productMappings?.find(m =>
+                    m.supplierSku === item.sku || m.supplierProductNameNormalized === normForMapping(item.name)
+                  );
+                  const linkedName = masterProducts?.find(p => p.sku === mapping?.targetSku)?.name ?? mapping?.targetName;
+                  return (
+                    <div className="flex items-center gap-1 text-[10px] text-emerald-600">
+                      <CheckCircle className="w-2.5 h-2.5 shrink-0" />
+                      <span className="truncate">{linkedName ?? '—'}</span>
+                    </div>
+                  );
+                })()}
+
+                {/* NOVELTY: inédito confirmado */}
+                {category === 'novelty' && (
+                  <div className="flex items-center gap-1.5 text-[10px] text-violet-400">
+                    <Star className="w-2.5 h-2.5 shrink-0" />
+                    <span>Produto inédito</span>
                     <button
-                      onClick={() => onAddMapping?.(item.name, suggestion.sku, 'master', suggestion.name)}
+                      onClick={() => toggleItemNovelty(batchId, idx, false)}
+                      className="opacity-0 group-hover:opacity-100 flex items-center gap-0.5 text-slate-500 hover:text-slate-200 transition-all ml-1"
+                      title="Desfazer — mover de volta para Desconhecidos">
+                      <RotateCcw className="w-2.5 h-2.5" />
+                    </button>
+                  </div>
+                )}
+
+                {/* HIGH confidence suggestion (≥85%) */}
+                {category !== 'green' && category !== 'novelty' && suggestionTier === 'high' && (
+                  <div className="flex items-stretch w-full rounded overflow-hidden border border-emerald-800/50 text-[10px]">
+                    <button
+                      onClick={() => onAddMapping?.(item.name, suggestion!.sku, 'master', suggestion!.name, item.sku && item.sku !== 'S/N' ? item.sku : undefined)}
+                      className="flex items-center gap-1.5 flex-1 px-1.5 py-1 bg-emerald-950/50 hover:bg-emerald-900/40 transition-colors text-left min-w-0"
+                      title="Confirmar vínculo">
+                      <CheckCircle className="w-3 h-3 text-emerald-400 shrink-0" />
+                      <span className="truncate flex-1 text-emerald-300">
+                        <strong>{suggestion!.name}</strong>
+                        <span className="text-emerald-700 ml-1">· {suggestion!.score}%</span>
+                      </span>
+                    </button>
+                    <button onClick={() => setLinkingItem(item)}
+                      className="px-2 py-1 bg-slate-800/60 hover:bg-slate-700 text-slate-400 hover:text-white shrink-0 transition-colors border-l border-emerald-800/30"
+                      title="Ver mais opções"><Search className="w-3 h-3" /></button>
+                    <button
+                      onClick={() => setDismissedSuggestions(prev => new Set(prev).add(normForMapping(item.name)))}
+                      className="px-2 py-1 bg-slate-800/60 hover:bg-slate-700 text-slate-500 hover:text-slate-200 shrink-0 transition-colors border-l border-emerald-800/30"
+                      title="Pular"><X className="w-3 h-3" /></button>
+                  </div>
+                )}
+
+                {/* LOW confidence suggestion (60–84%) */}
+                {category !== 'green' && category !== 'novelty' && suggestionTier === 'low' && (
+                  <div className="flex items-stretch w-full rounded overflow-hidden border border-amber-800/40 text-[10px]">
+                    <button
+                      onClick={() => onAddMapping?.(item.name, suggestion!.sku, 'master', suggestion!.name, item.sku && item.sku !== 'S/N' ? item.sku : undefined)}
                       className="flex items-center gap-1.5 flex-1 px-1.5 py-1 bg-amber-950/40 hover:bg-amber-900/50 transition-colors text-left min-w-0"
-                      title="Clique para vincular ao catálogo master">
+                      title="Aceitar sugestão">
                       <AlertTriangle className="w-3 h-3 text-amber-400 shrink-0" />
                       <span className="truncate flex-1 text-amber-300">
                         <span className="text-slate-400">Sugestão: </span>
-                        <strong className="text-amber-200">{suggestion.name}</strong>
-                        <span className="text-slate-600 ml-1">({suggestion.score}%)</span>
+                        <strong className="text-amber-200">{suggestion!.name}</strong>
+                        <span className="text-slate-600 ml-1">({suggestion!.score}%)</span>
                       </span>
                     </button>
+                    <button onClick={() => setLinkingItem(item)}
+                      className="px-2 py-1 bg-slate-800/60 hover:bg-slate-700 text-slate-400 hover:text-white shrink-0 transition-colors border-l border-amber-800/30"
+                      title="Procurar outro"><Search className="w-3 h-3" /></button>
                     <button
-                      onClick={(e) => { e.stopPropagation(); setDismissedSuggestions(prev => new Set(prev).add(normForMapping(item.name))); }}
+                      onClick={() => setDismissedSuggestions(prev => new Set(prev).add(normForMapping(item.name)))}
                       className="px-2 py-1 bg-slate-800/60 hover:bg-slate-700/80 text-slate-500 hover:text-slate-200 shrink-0 transition-colors border-l border-amber-800/30"
-                      title="Ignorar sugestão">
-                      <X className="w-3 h-3" />
-                    </button>
+                      title="Pular"><X className="w-3 h-3" /></button>
                   </div>
-                );
-              })()}
+                )}
+
+                {/* NO match */}
+                {category !== 'green' && category !== 'novelty' && suggestionTier === 'none' && !isLoadingSuggestions && (
+                  <div className="flex items-center gap-1.5 w-full text-[10px]">
+                    <span className="text-slate-600">— Sem correspondência</span>
+                    <button onClick={() => setLinkingItem(item)}
+                      className="flex items-center gap-0.5 text-slate-500 hover:text-amber-400 transition-colors ml-auto"
+                      title="Procurar manualmente"><Search className="w-3 h-3" /><span>Procurar</span></button>
+                    <button onClick={() => toggleItemNovelty(batchId, idx, true)}
+                      className="flex items-center gap-0.5 text-slate-500 hover:text-violet-400 transition-colors"
+                      title="Marcar como produto inédito deste fornecedor"><Star className="w-3 h-3" /><span>Inédito</span></button>
+                  </div>
+                )}
+
+                {/* Loading state */}
+                {category !== 'green' && category !== 'novelty' && isLoadingSuggestions && (
+                  <div className="flex items-center gap-1 text-[10px] text-slate-600">
+                    <Loader2 className="w-2.5 h-2.5 animate-spin" />
+                    <span>Buscando correspondência...</span>
+                  </div>
+                )}
+              </div>
             </div>
           )}
         </td>
@@ -569,7 +694,8 @@ const QuoteDetailModal: React.FC<QuoteDetailModalProps> = ({
         {/* Lote */}
         <td className="px-2 py-1.5 text-center w-16">
           <input type="number" min="1" value={item.packQuantity}
-            onChange={(e) => updateItemPackQuantity(batchId, idx, parseInt(e.target.value))}
+            onChange={(e) => updateItemPackQuantityLocal(idx, parseInt(e.target.value) || 1)}
+            onBlur={() => flushItemPackQuantity(batchId, idx)}
             className="w-14 bg-slate-800 border border-slate-700 rounded px-1 py-1 text-center text-sm font-bold text-white focus:border-amber-500 focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
         </td>
 
@@ -588,7 +714,8 @@ const QuoteDetailModal: React.FC<QuoteDetailModalProps> = ({
         {/* Preço lote */}
         <td className="px-2 py-1.5 text-right w-24">
           <input type="number" min="0" step="0.01" value={item.price.toFixed(2)}
-            onChange={(e) => updateItemPrice(batchId, idx, parseFloat(e.target.value) || 0)}
+            onChange={(e) => updateItemPriceLocal(idx, parseFloat(e.target.value) || 0)}
+            onBlur={() => flushItemPrice(batchId, idx)}
             className="w-20 bg-slate-800 border border-slate-700 rounded px-1 py-1 text-right text-sm text-slate-300 font-medium focus:border-amber-500 focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
         </td>
 
@@ -636,7 +763,8 @@ const QuoteDetailModal: React.FC<QuoteDetailModalProps> = ({
 
   // ── Link product handler ─────────────────────────────────────────────────────
   const handleLinkProduct = (normalizedName: string, targetSku: string, targetType: 'master' | 'supplier', targetName: string) => {
-    onAddMapping?.(normalizedName, targetSku, targetType, targetName);
+    const supplierSku = linkingItem?.sku && linkingItem.sku !== 'S/N' ? linkingItem.sku : undefined;
+    onAddMapping?.(normalizedName, targetSku, targetType, targetName, supplierSku);
     setLinkingItem(null);
   };
 
@@ -839,14 +967,42 @@ const QuoteDetailModal: React.FC<QuoteDetailModalProps> = ({
                   }
                 });
 
+              const inspectionItems = filteredItems.filter(x => getItemCategory(x.item) === 'inspection');
               const yellowItems = filteredItems.filter(x => getItemCategory(x.item) === 'yellow');
               const blueItems = filteredItems.filter(x => getItemCategory(x.item) === 'blue');
               const greenItems = filteredItems.filter(x => getItemCategory(x.item) === 'green');
+              const noveltyItems = filteredItems.filter(x => getItemCategory(x.item) === 'novelty');
               const allYellowIndices = yellowItems.map(p => p.originalIndex);
               const isAllSelected = allYellowIndices.length > 0 && allYellowIndices.every(i => selectedPendingItems.has(i));
 
+              const sectionTable = (items: typeof filteredItems, dividerColor: string) => (
+                <table className="w-full text-left text-sm text-slate-300">
+                  <tbody className={`divide-y ${dividerColor}`}>
+                    {items.map(x => renderItemRow(x.item, x.originalIndex, viewingBatch.id))}
+                  </tbody>
+                </table>
+              );
+
               return (
                 <>
+                  {/* SECTION 0: INSPEÇÃO HUMANA — SKU match com nome divergente */}
+                  {inspectionItems.length > 0 && (
+                    <div className="border border-orange-800/40 bg-orange-950/10 rounded-lg overflow-hidden">
+                      <div className="p-3 bg-orange-950/20 border-b border-orange-800/40 flex justify-between items-center cursor-pointer hover:bg-orange-950/30 transition-colors"
+                        onClick={() => setCollapsedSections(prev => ({ ...prev, inspection: !prev.inspection }))}>
+                        <h4 className="font-bold text-orange-400 flex items-center gap-2">
+                          <ShieldAlert className="w-5 h-5" />
+                          Inspeção Humana ({inspectionItems.length})
+                          <span className="text-[10px] font-normal text-orange-600 border border-orange-800/50 rounded px-1.5 py-0.5">
+                            SKU vinculado · nome divergente
+                          </span>
+                        </h4>
+                        {collapsedSections.inspection ? <ChevronDown className="w-5 h-5 text-orange-500" /> : <ChevronUp className="w-5 h-5 text-orange-500" />}
+                      </div>
+                      {!collapsedSections.inspection && sectionTable(inspectionItems, 'divide-orange-900/10')}
+                    </div>
+                  )}
+
                   {/* SECTION 1: YELLOW — Novos / Desconhecidos */}
                   <div className="border border-yellow-900/30 bg-yellow-950/5 rounded-lg overflow-hidden">
                     <div className="p-3 bg-yellow-950/20 border-b border-yellow-900/30 flex justify-between items-center cursor-pointer hover:bg-yellow-950/30 transition-colors"
@@ -899,29 +1055,12 @@ const QuoteDetailModal: React.FC<QuoteDetailModalProps> = ({
                       <h4 className="font-bold text-blue-400 flex items-center gap-2">
                         <Eye className="w-5 h-5" /> Reconhecidos / Não-Master ({blueItems.length})
                       </h4>
-                      <div className="flex items-center gap-2">
-                        {collapsedSections.blue ? <ChevronDown className="w-5 h-5 text-blue-500" /> : <ChevronUp className="w-5 h-5 text-blue-500" />}
-                      </div>
+                      {collapsedSections.blue ? <ChevronDown className="w-5 h-5 text-blue-500" /> : <ChevronUp className="w-5 h-5 text-blue-500" />}
                     </div>
                     {!collapsedSections.blue && (
                       blueItems.length === 0
                         ? <div className="p-4 text-center text-slate-500 italic text-xs">Nenhum item reconhecido sem vínculo master.</div>
-                        : <table className="w-full text-left text-sm text-slate-300">
-                          <thead className="bg-blue-950/20 text-blue-400 uppercase tracking-wider text-xs sticky top-0">
-                            <tr>
-                              <th className="p-3 w-10"></th>
-                              <th className="p-3">Produto</th>
-                              <th className="p-3 text-center w-28">Emb. (Qtd)</th>
-                              <th className="p-3 text-center">Interpretação</th>
-                              <th className="p-3 text-right">Total Lote</th>
-                              <th className="p-3 text-right w-32">Unitário</th>
-                              <th className="p-3 text-center w-24">Ações</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-blue-900/10">
-                            {blueItems.map(x => renderItemRow(x.item, x.originalIndex, viewingBatch.id))}
-                          </tbody>
-                        </table>
+                        : sectionTable(blueItems, 'divide-blue-900/10')
                     )}
                   </div>
 
@@ -932,31 +1071,31 @@ const QuoteDetailModal: React.FC<QuoteDetailModalProps> = ({
                       <h4 className="font-bold text-emerald-400 flex items-center gap-2">
                         <CheckCircle className="w-5 h-5" /> Linkados ao Master ({greenItems.length})
                       </h4>
-                      <div className="flex items-center gap-2">
-                        {collapsedSections.green ? <ChevronDown className="w-5 h-5 text-emerald-500" /> : <ChevronUp className="w-5 h-5 text-emerald-500" />}
-                      </div>
+                      {collapsedSections.green ? <ChevronDown className="w-5 h-5 text-emerald-500" /> : <ChevronUp className="w-5 h-5 text-emerald-500" />}
                     </div>
                     {!collapsedSections.green && (
                       greenItems.length === 0
                         ? <div className="p-8 text-center text-slate-500 italic">Nenhum item linkado ao catálogo master ainda.</div>
-                        : <table className="w-full text-left text-sm text-slate-300">
-                          <thead className="bg-emerald-950/20 text-emerald-600 uppercase tracking-wider text-xs">
-                            <tr>
-                              <th className="p-3 w-10"></th>
-                              <th className="p-3">Produto</th>
-                              <th className="p-3 text-center w-28">Emb. (Qtd)</th>
-                              <th className="p-3 text-center">Interpretação</th>
-                              <th className="p-3 text-right">Total Lote</th>
-                              <th className="p-3 text-right w-32">Unitário</th>
-                              <th className="p-3 text-center w-24">Ações</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-emerald-900/10">
-                            {greenItems.map(x => renderItemRow(x.item, x.originalIndex, viewingBatch.id))}
-                          </tbody>
-                        </table>
+                        : sectionTable(greenItems, 'divide-emerald-900/10')
                     )}
                   </div>
+
+                  {/* SECTION 4: NOVELTIES — Produtos Inéditos confirmados */}
+                  {noveltyItems.length > 0 && (
+                    <div className="border border-violet-900/30 bg-violet-950/5 rounded-lg overflow-hidden">
+                      <div className="p-3 bg-violet-950/20 border-b border-violet-900/30 flex justify-between items-center cursor-pointer hover:bg-violet-950/30 transition-colors"
+                        onClick={() => setCollapsedSections(prev => ({ ...prev, novelties: !prev.novelties }))}>
+                        <h4 className="font-bold text-violet-400 flex items-center gap-2">
+                          <Star className="w-5 h-5" /> Novidades / Inéditos ({noveltyItems.length})
+                          <span className="text-[10px] font-normal text-violet-600 border border-violet-800/50 rounded px-1.5 py-0.5">
+                            classificados manualmente
+                          </span>
+                        </h4>
+                        {collapsedSections.novelties ? <ChevronDown className="w-5 h-5 text-violet-500" /> : <ChevronUp className="w-5 h-5 text-violet-500" />}
+                      </div>
+                      {!collapsedSections.novelties && sectionTable(noveltyItems, 'divide-violet-900/10')}
+                    </div>
+                  )}
                 </>
               );
             })()}

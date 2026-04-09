@@ -2,9 +2,10 @@ import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { Supplier, QuoteBatch, ProductQuote, PackRule, BusinessHours, BusinessDayHours, ProductMapping, MasterProduct, PriceValidityConfig } from '../types';
 import { Upload, Trash2, FileText, CheckCircle, AlertCircle, Loader2, Plus, Ban, Eye, Package, Pencil, Save, X, Maximize2, XCircle, RefreshCw, HardDrive, Download, Coins, BoxSelect, Sparkles, ChevronLeft, ChevronRight, Wand2, ChevronDown, ChevronUp, AlertTriangle, Check, CheckSquare, Square, Undo2, Timer, Search, Files, FilePlus, Settings, Bot, FileStack, Scissors, MessageCircle, MapPin, Truck, Calendar, Clock, Phone, ArrowUpDown, SortAsc, SortDesc, Archive } from 'lucide-react';
 import QuoteDetailModal from './QuoteDetailModal';
-import { parseQuoteContent, generateProductVariations, batchSmartIdentify, extractCatalogRawData, RawCatalogItem } from '../services/geminiService';
+import { parseQuoteContent, generateProductVariations, extractCatalogRawData, RawCatalogItem } from '../services/geminiService';
 import { parseQuoteLocal } from '../services/parseQuoteLocal';
 import { isNFeXml, parseNFeFile } from '../services/parseNFe';
+import { useFileProcessor, applyRulesToQuotes, filterBlacklisted, recalculateItem } from '../hooks/useFileProcessor';
 
 // ─── Constantes de padrão ─────────────────────────────────────────────────────
 
@@ -46,7 +47,7 @@ interface SupplierManagerProps {
   onBatchDateChange?: (supplierId: string, batchId: string, newTimestamp: number, items: ProductQuote[]) => void;
   productMappings?: ProductMapping[];
   masterProducts?: MasterProduct[];
-  onAddMapping?: (normalizedName: string, targetSku: string, targetType?: 'master' | 'supplier', targetName?: string) => void;
+  onAddMapping?: (normalizedName: string, targetSku: string, targetType?: 'master' | 'supplier', targetName?: string, supplierSku?: string) => void;
   onRemoveMapping?: (supplierProductName: string) => void;
   priceValidityConfig?: PriceValidityConfig;
   setPriceValidityConfig?: React.Dispatch<React.SetStateAction<PriceValidityConfig>>;
@@ -61,6 +62,8 @@ const SupplierManager: React.FC<SupplierManagerProps> = ({ suppliers, setSupplie
   const [showSupplierEdit, setShowSupplierEdit] = useState(false);
   const [editingSupplier, setEditingSupplier] = useState<Supplier | null>(null);
   const [editingHoursDay, setEditingHoursDay] = useState<keyof BusinessHours | null>(null);
+
+  const { processFile } = useFileProcessor();
 
   // State for viewing details
   const [viewingBatch, setViewingBatch] = useState<QuoteBatch | null>(null);
@@ -96,9 +99,6 @@ const SupplierManager: React.FC<SupplierManagerProps> = ({ suppliers, setSupplie
   const [editingItemId, setEditingItemId] = useState<number | null>(null); 
   const [tempItemName, setTempItemName] = useState('');
 
-  // Batch Magic State
-  const [isBatchProcessing, setIsBatchProcessing] = useState(false);
-  const [collapsedSections, setCollapsedSections] = useState({ pending: false, ready: false, reprocessed: false });
 
   // Selection State
   const [selectedPendingItems, setSelectedPendingItems] = useState<Set<number>>(new Set());
@@ -265,39 +265,7 @@ const SupplierManager: React.FC<SupplierManagerProps> = ({ suppliers, setSupplie
 
   // --- NAMING RULES LOGIC (SEO STANDARDIZATION) ---
   // --- PACK RULES LOGIC ---
-  const applyRulesToQuotes = (quotes: ProductQuote[], supplierExceptions: PackRule[], globalRules: PackRule[]): ProductQuote[] => {
-      return quotes.map(quote => {
-          const lowerName = quote.name.toLowerCase();
-          
-          // 1. Check Supplier Exceptions (Pack Rules) — prioridade sobre global
-          const exception = supplierExceptions?.find(r => lowerName.includes(r.term.toLowerCase()));
-          if (exception) return applyRule(quote, exception);
-
-          // 2. Check Global Rules (Pack Rules)
-          const globalRule = globalRules?.find(r => lowerName.includes(r.term.toLowerCase()));
-          if (globalRule) return applyRule(quote, globalRule);
-
-          return quote;
-      });
-  };
-
-  const applyRule = (quote: ProductQuote, rule: PackRule): ProductQuote => {
-      // Logic constraint: If item already has packQuantity > 1 from the parser (Evident Pack),
-      // we do NOT override it with the rule, unless it's 1.
-      if (quote.packQuantity > 1) {
-          return { ...quote, isReprocessed: true };
-      }
-
-      const newQty = rule.quantity;
-      const unitPrice = quote.priceStrategy === 'unit' ? quote.price : quote.price / newQty;
-      return {
-          ...quote,
-          packQuantity: newQty,
-          unitPrice: unitPrice,
-          isVerified: false, // Keep verified false so it doesn't jump to Green immediately
-          isReprocessed: true // Mark as reprocessed for the Yellow/Blue list
-      };
-  };
+  // (Lógica delegada para o useFileProcessor hook)
 
   // --- QUEUE PROCESSOR ---
   useEffect(() => {
@@ -308,82 +276,38 @@ const SupplierManager: React.FC<SupplierManagerProps> = ({ suppliers, setSupplie
           const currentTask = uploadQueue[0];
           const { file, supplierId } = currentTask;
 
-          // Find current supplier rules (exceptions)
           const currentSupplier = suppliers.find(s => s.id === supplierId);
-          const supplierExceptions = currentSupplier?.packRules || [];
 
-          try {
-              const reader = new FileReader();
-              reader.onload = async () => {
-                  const base64 = (reader.result as string).split(',')[1];
-                  const mimeType = file.type;
-                  
-                  const _uploadedAt = Date.now();
-                  const newBatch: QuoteBatch = {
-                      id: crypto.randomUUID(),
-                      timestamp: _uploadedAt,
-                      uploadedAt: _uploadedAt,
-                      sourceType: 'file',
-                      fileName: file.name,
-                      status: 'analyzing',
-                      items: []
-                  };
+          const _uploadedAt = Date.now();
+          const newBatch: QuoteBatch = {
+              id: crypto.randomUUID(),
+              timestamp: _uploadedAt,
+              uploadedAt: _uploadedAt,
+              sourceType: 'file',
+              fileName: file.name,
+              status: 'analyzing',
+              items: []
+          };
 
-                  updateSupplierQuotes(supplierId, newBatch);
+          updateSupplierQuotes(supplierId, newBatch);
 
-                  try {
-                      let quotes: ProductQuote[] = [];
-                      let detectedDate: number | undefined = undefined;
+          const result = await processFile(file, currentSupplier, globalPackRules);
 
-                      // ── XML NF-e: parser local, sem IA ──────────────────
-                      if (isNFeXml(file)) {
-                          const nfeResult = await parseNFeFile(file);
-                          if (nfeResult.errorMessage && nfeResult.items.length === 0) {
-                              updateSupplierQuotes(supplierId, {
-                                  ...newBatch,
-                                  status: 'error',
-                                  errorMessage: nfeResult.errorMessage
-                              });
-                              setUploadQueue(prev => prev.slice(1));
-                              setIsQueueProcessing(false);
-                              return;
-                          }
-                          quotes = nfeResult.items;
-                          detectedDate = nfeResult.detectedDate;
-                          // NF-e já vem com isVerified=true — não precisa de pack rules
-                      } else {
-                          // ── Outros formatos: IA Gemini ───────────────────
-                          const geminiResult = await parseQuoteContent(base64, mimeType, true);
-                          quotes = geminiResult.items;
-                          if (geminiResult.detectedDate) detectedDate = geminiResult.detectedDate;
-                          quotes = filterBlacklisted(quotes, supplierId);
-                          quotes = applyRulesToQuotes(quotes, supplierExceptions, globalPackRules);
-                      }
-
-                      const initializedQuotes = quotes.map(q => recalculateItem({...q, priceStrategy: q.priceStrategy ?? 'pack'}, q.priceStrategy ?? 'pack'));
-                      const completedBatch: QuoteBatch = {
-                          ...newBatch,
-                          status: 'completed',
-                          items: initializedQuotes,
-                          ...(detectedDate ? { detectedDate, timestamp: detectedDate } : {}),
-                      };
-                      updateSupplierQuotes(supplierId, completedBatch);
-                      onBatchCompleted?.(completedBatch, supplierId);
-                  } catch (error) {
-                      console.error(error);
-                      updateSupplierQuotes(supplierId, { ...newBatch, status: 'error', errorMessage: 'Falha na análise IA.' });
-                  }
-                  
-                  // Finished processing this file, remove from queue
-                  setUploadQueue(prev => prev.slice(1));
-                  setIsQueueProcessing(false);
+          if (result.errorMessage) {
+              updateSupplierQuotes(supplierId, { ...newBatch, status: 'error', errorMessage: result.errorMessage });
+          } else {
+              const completedBatch: QuoteBatch = {
+                  ...newBatch,
+                  status: 'completed',
+                  items: result.quotes,
+                  ...(result.detectedDate ? { detectedDate: result.detectedDate, timestamp: result.detectedDate } : {}),
               };
-              reader.readAsDataURL(file);
-          } catch (e) {
-              console.error("Queue Error", e);
-              setUploadQueue(prev => prev.slice(1));
-              setIsQueueProcessing(false);
+              updateSupplierQuotes(supplierId, completedBatch);
+              onBatchCompleted?.(completedBatch, supplierId);
           }
+          
+          setUploadQueue(prev => prev.slice(1));
+          setIsQueueProcessing(false);
       };
 
       processNext();
@@ -850,84 +774,6 @@ const SupplierManager: React.FC<SupplierManagerProps> = ({ suppliers, setSupplie
       }
   };
 
-  const handleBatchMagic = async (batchId: string, pendingItems: {item: ProductQuote, originalIndex: number}[]) => {
-      if (!activeTab || !viewingBatch) return;
-
-      const itemsToProcess = pendingItems.filter(pi => selectedPendingItems.has(pi.originalIndex));
-
-      if (itemsToProcess.length === 0) {
-          alert("Selecione pelo menos um item da lista para identificar.");
-          return;
-      }
-
-      setIsBatchProcessing(true);
-      const payload = itemsToProcess.map(pi => ({ index: pi.originalIndex, name: pi.item.name, price: pi.item.price }));
-
-      try {
-          const results = await batchSmartIdentify(payload);
-          
-          const newItems = [...viewingBatch.items];
-
-          results.forEach(res => {
-              if (newItems[res.index]) {
-                  const oldItem = newItems[res.index];
-                  const newQty = res.suggestedPackQty || oldItem.packQuantity;
-                  
-                  newItems[res.index] = {
-                      ...oldItem,
-                      name: res.suggestedName || oldItem.name,
-                      packQuantity: newQty,
-                      isVerified: newQty > 1,
-                      isReprocessed: false, // AI verification clears reprocessed status
-                      unitPrice: oldItem.priceStrategy === 'unit' 
-                          ? oldItem.price 
-                          : oldItem.price / newQty
-                  };
-              }
-          });
-
-          setViewingBatch(prev => prev ? { ...prev, items: newItems } : null);
-          setSuppliers(prev => prev.map(s => {
-              if (s.id !== activeTab) return s;
-              return {
-                  ...s,
-                  quotes: s.quotes.map(q => {
-                      if (q.id !== batchId) return q;
-                      return { ...q, items: newItems };
-                  })
-              };
-          }));
-
-          setSelectedPendingItems(new Set());
-
-      } catch (e) {
-          console.error(e);
-          alert("Erro na identificação em massa.");
-      } finally {
-          setIsBatchProcessing(false);
-      }
-  };
-
-  const recalculateItem = (item: ProductQuote, newStrategy?: 'pack' | 'unit', newPackQty?: number): ProductQuote => {
-      const strategy = newStrategy || item.priceStrategy || 'pack';
-      const qty = newPackQty !== undefined ? newPackQty : item.packQuantity;
-
-      let unitPrice = 0;
-      if (strategy === 'unit') {
-          unitPrice = item.price;
-      } else {
-          unitPrice = item.price / (qty || 1);
-      }
-
-      return {
-          ...item,
-          priceStrategy: strategy,
-          packQuantity: qty,
-          unitPrice: unitPrice,
-          isVerified: qty > 1 ? true : item.isVerified
-      };
-  };
-
   const updateItemStrategy = (batchId: string, itemIndex: number, newStrategy: 'pack' | 'unit') => {
       if (!activeTab || !viewingBatch) return;
 
@@ -1011,12 +857,6 @@ const SupplierManager: React.FC<SupplierManagerProps> = ({ suppliers, setSupplie
       }));
   }
 
-  const filterBlacklisted = (quotes: ProductQuote[], supplierId: string): ProductQuote[] => {
-      const supplier = suppliers.find(s => s.id === supplierId);
-      if (!supplier || !supplier.blacklist) return quotes;
-      return quotes.filter(q => !supplier.blacklist!.includes(q.name));
-  };
-
   // --- UPLOAD HANDLERS ---
   const handleFilesSelected = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && activeTab) {
@@ -1074,7 +914,7 @@ const SupplierManager: React.FC<SupplierManagerProps> = ({ suppliers, setSupplie
     try {
       // Usa parser local — sem Gemini, offline, gratuito
       const localResult = parseQuoteLocal(textInput, globalPackRules, supplierExceptions);
-      let quotes = filterBlacklisted(localResult.items, supplierId);
+      let quotes = filterBlacklisted(localResult.items, currentSupplier?.blacklist || []);
 
       // Aplica regras de nomenclatura (naming rules continuam funcionando)
       quotes = applyRulesToQuotes(quotes, supplierExceptions, globalPackRules);
@@ -1161,7 +1001,7 @@ const SupplierManager: React.FC<SupplierManagerProps> = ({ suppliers, setSupplie
     setActiveTab(supplierId);
     try {
       const localResult = parseQuoteLocal(content, globalPackRules, supplierExceptions);
-      let quotes = filterBlacklisted(localResult.items, supplierId);
+      let quotes = filterBlacklisted(localResult.items, currentSupplier?.blacklist || []);
       quotes = applyRulesToQuotes(quotes, supplierExceptions, globalPackRules);
       const initializedQuotes = quotes.map(q => recalculateItem({...q, priceStrategy: 'pack'}, 'pack'));
       const detectedDate = localResult.detectedDate;
