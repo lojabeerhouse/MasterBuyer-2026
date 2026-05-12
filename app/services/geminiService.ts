@@ -25,6 +25,7 @@ export const parseQuoteContent = async (
     4. If unsure or if it looks like a single unit, default 'packQuantity' to 1.
     5. READ THE ENTIRE DOCUMENT. Do not stop after the first few pages.
     6. Extract 'documentDate': the emission/issue date of the document (NOT a delivery/forecast date). Format: YYYY-MM-DD. Leave empty string if not found.
+    7. CRITICAL: 'quantityBought' is the total AMOUNT OF PACKAGES OR UNITS bought/ordered on the invoice. Example: If they bought 2 boxes, 'quantityBought' = 2. If it's just a price list with no quantities bought, default to 1.
 
     OUTPUT SCHEMA (Object):
     - documentDate: string (ISO date YYYY-MM-DD of document emission, or "" if not found)
@@ -35,6 +36,7 @@ export const parseQuoteContent = async (
       - unit: string (Unit type: un, cx, kg)
       - packQuantity: number (Items per pack. Default 1)
       - unitPrice: number (Calculated price per single unit. If price is for pack, unitPrice = price / packQuantity)
+      - quantityBought: number (How many packs/units were purchased. Default 1 if missing)
 
     Return RAW JSON only.
   `;
@@ -81,7 +83,8 @@ export const parseQuoteContent = async (
                   price: { type: Type.NUMBER, description: "Price" },
                   unit: { type: Type.STRING, description: "Unit" },
                   packQuantity: { type: Type.NUMBER, description: "Qty" },
-                  unitPrice: { type: Type.NUMBER, description: "Unit Price" }
+                  unitPrice: { type: Type.NUMBER, description: "Unit Price" },
+                  quantityBought: { type: Type.NUMBER, description: "Qty Bought" }
                 },
                 required: ["name", "price", "packQuantity", "unitPrice"]
               }
@@ -102,6 +105,7 @@ export const parseQuoteContent = async (
       rawItems.map(item => ({
         ...item,
         sku: item.sku || 'S/N',
+        quantityBought: item.quantityBought ?? 1,
         isVerified: item.packQuantity > 1
       }));
 
@@ -232,7 +236,7 @@ export const extractCatalogRawData = async (
 
 export const batchSmartIdentify = async (
   items: { index: number, name: string, price: number }[]
-): Promise<{ index: number, suggestedName: string, suggestedPackQty: number }[]> => {
+): Promise<{ index: number, suggestedPackQty: number }[]> => {
   const ai = getAI();
 
   // Safety limit to avoid huge payload
@@ -240,11 +244,9 @@ export const batchSmartIdentify = async (
 
   const prompt = `
         You are a product identification expert for Brazilian supermarkets/wholesalers.
-        
-        I will provide a list of UNIDENTIFIED items (names and prices).
-        Your job is to:
-        1. Clean and complete the product name (e.g., "Spaten" -> "Cerveja Spaten 350ml").
-        2. Infer the 'packQuantity' (Lote/Embalagem) based on standard wholesale practices and price.
+
+        I will provide a list of items (names and prices).
+        Your ONLY job is to infer the 'packQuantity' (Lote/Embalagem) for each item.
            - If the name implies a pack (e.g. "cx", "fardo"), extract it.
            - DO NOT confuse 'ml' or 'kg' with quantity. '350ml' is NOT quantity 350.
            - If implied by context (e.g. a beer can usually comes in packs of 12 or 15 or 18), guess it.
@@ -253,33 +255,40 @@ export const batchSmartIdentify = async (
         INPUT JSON:
         ${JSON.stringify(chunk)}
 
-        OUTPUT format: JSON Array of objects: { "index": number, "suggestedName": string, "suggestedPackQty": number }
+        OUTPUT format: JSON Array of objects: { "index": number, "suggestedPackQty": number }
     `;
 
-  try {
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: prompt,
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.ARRAY,
-          items: {
-            type: Type.OBJECT,
-            properties: {
-              index: { type: Type.INTEGER },
-              suggestedName: { type: Type.STRING },
-              suggestedPackQty: { type: Type.INTEGER }
-            }
-          }
+  const schema = {
+    responseMimeType: "application/json",
+    responseSchema: {
+      type: Type.ARRAY,
+      items: {
+        type: Type.OBJECT,
+        properties: {
+          index: { type: Type.INTEGER },
+          suggestedPackQty: { type: Type.INTEGER }
         }
       }
-    });
-    return JSON.parse(response.text || "[]");
-  } catch (e) {
-    console.error("Batch ID Error:", e);
-    return [];
+    }
+  };
+
+  const models = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
+
+  for (const model of models) {
+    try {
+      const response = await ai.models.generateContent({ model, contents: prompt, config: schema });
+      return JSON.parse(response.text || "[]");
+    } catch (e: any) {
+      const is503 = e?.status === 503 || String(e?.message).includes('503') || String(e?.message).includes('high demand');
+      if (is503 && model !== models[models.length - 1]) {
+        console.warn(`batchSmartIdentify: ${model} indisponível, tentando próximo modelo...`);
+        continue;
+      }
+      console.error("Batch ID Error:", e);
+      return [];
+    }
   }
+  return [];
 };
 
 export const generatePurchaseStrategy = async (
@@ -457,6 +466,9 @@ export const batchSuggestNCM = async (
   }
 };
 
+// Função de varinha mágica que busca variação de nomes.
+// Atualmente aguardando um novo local na interface para ser aplicada, 
+// pois foi removida do QuoteDetailModal para focar em lote.
 export const generateProductVariations = async (productName: string): Promise<string[]> => {
   const ai = getAI();
   const prompt = `
@@ -496,3 +508,56 @@ export const generateProductVariations = async (productName: string): Promise<st
     return [];
   }
 }
+
+export const batchSuggestPackQuantity = async (
+  names: string[]
+): Promise<{ name: string, suggestedPackQty: number }[]> => {
+  const ai = getAI();
+
+  // Process in chunks of 50 to avoid token limits and rate limits
+  const chunk = names.slice(0, 50);
+
+  const prompt = `
+    TASK: Atue como um assistente de busca na web focado em supermercados e atacados brasileiros.
+    
+    Para a lista de produtos fornecida abaixo, identifique a QUANTIDADE PADRÃO de itens que costumam vir em uma embalagem fechada (caixa, fardo, lote, etc).
+    Imagine que você está pesquisando no Google: "[Nome do produto] quantidade caixa lote fardo".
+    
+    INSTRUÇÕES:
+    1. Retorne APENAS um número para cada produto.
+    2. Se não identificar indícios de ser um fardo/caixa e parecer ser um produto vendido unitariamente (Ex: uma televisão, um pacote único de salgadinho de 100g sem especificar fardo), retorne 1.
+    3. Se houver variação, retorne a quantidade mais comum do mercado.
+    
+    INPUT LIST (JSON Array of strings):
+    ${JSON.stringify(chunk)}
+    
+    OUTPUT: JSON Array de objetos no formato: { "name": string, "suggestedPackQty": number }.
+    O "name" deve ser exatamente igual ao que foi enviado.
+  `;
+
+  try {
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: prompt,
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.ARRAY,
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              name: { type: Type.STRING },
+              suggestedPackQty: { type: Type.INTEGER }
+            }
+          }
+        }
+      }
+    });
+
+    let text = response.text || "[]";
+    return JSON.parse(text);
+  } catch (e) {
+    console.error("Batch Pack Suggestion Error:", e);
+    return [];
+  }
+};

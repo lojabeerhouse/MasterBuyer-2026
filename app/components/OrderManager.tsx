@@ -1,14 +1,16 @@
-import React, { useState, useMemo, useRef, useEffect } from 'react';
+import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import {
-  PurchaseOrder, PurchaseOrderStatus, CartItem, Supplier, SupplierCatalog, UserProfile
+  PurchaseOrder, PurchaseOrderStatus, CartItem, Supplier, SupplierCatalog, UserProfile, PackRule
 } from '../types';
 import {
   Plus, Trash2, ChevronDown, ChevronUp, ChevronRight,
   CheckCircle, XCircle, Truck, Package, ClipboardList,
   MessageCircle, Clock, Calendar, AlertTriangle, Check,
   Send, RotateCcw, Archive, Eye, Edit3, X, Save,
-  ShoppingCart, MapPin, Phone, Search
+  ShoppingCart, MapPin, Phone, Search, UploadCloud, FileText, LayoutGrid
 } from 'lucide-react';
+import { useFileProcessor } from '../hooks/useFileProcessor';
+import EditOrderModal from './EditOrderModal';
 
 interface OrderManagerProps {
   suppliers: Supplier[];
@@ -18,6 +20,7 @@ interface OrderManagerProps {
   setCart: React.Dispatch<React.SetStateAction<CartItem[]>>;
   supplierCatalogs?: Record<string, SupplierCatalog>;
   userProfile?: UserProfile;
+  globalPackRules?: PackRule[];
   getNextSeqNumber?: () => number;
 }
 
@@ -28,10 +31,10 @@ const STATUS_LABEL: Record<PurchaseOrderStatus, string> = {
   sent: 'Enviado',
   confirmed: 'Confirmado',
   in_transit: 'Em Trânsito',
-  awaiting: 'Aguardando Retirada',
+  awaiting: 'Retirada',
   received: 'Recebido',
-  received_unchecked: 'Recebido (conferir)',
-  entered_system: 'Lançado no Sistema',
+  received_unchecked: 'Conferir',
+  entered_system: 'Lançado',
   fully_checked: 'Concluído ✓',
   cancelled: 'Cancelado',
 };
@@ -52,41 +55,42 @@ const STATUS_COLOR: Record<PurchaseOrderStatus, string> = {
 // Transições permitidas por status
 const NEXT_ACTIONS: Record<PurchaseOrderStatus, { to: PurchaseOrderStatus; label: string; icon: React.ReactNode }[]> = {
   draft: [
-    { to: 'sent', label: 'Marcar como Enviado', icon: <Send className="w-3.5 h-3.5"/> },
+    { to: 'sent', label: 'Enviar', icon: <Send className="w-3.5 h-3.5"/> },
   ],
   sent: [
-    { to: 'confirmed', label: 'Confirmado pelo fornecedor', icon: <CheckCircle className="w-3.5 h-3.5"/> },
-    { to: 'in_transit', label: 'Saiu para entrega', icon: <Truck className="w-3.5 h-3.5"/> },
-    { to: 'awaiting', label: 'Pronto para retirada', icon: <Package className="w-3.5 h-3.5"/> },
+    { to: 'confirmed', label: 'Confirmar', icon: <CheckCircle className="w-3.5 h-3.5"/> },
+    { to: 'in_transit', label: 'Trânsito', icon: <Truck className="w-3.5 h-3.5"/> },
+    { to: 'awaiting', label: 'Retirada', icon: <Package className="w-3.5 h-3.5"/> },
   ],
   confirmed: [
-    { to: 'in_transit', label: 'Saiu para entrega', icon: <Truck className="w-3.5 h-3.5"/> },
-    { to: 'awaiting', label: 'Pronto para retirada', icon: <Package className="w-3.5 h-3.5"/> },
+    { to: 'in_transit', label: 'Trânsito', icon: <Truck className="w-3.5 h-3.5"/> },
+    { to: 'awaiting', label: 'Retirada', icon: <Package className="w-3.5 h-3.5"/> },
   ],
   in_transit: [
-    { to: 'received', label: 'Entregue e conferido', icon: <CheckCircle className="w-3.5 h-3.5"/> },
-    { to: 'received_unchecked', label: 'Entregue (conferir depois)', icon: <Clock className="w-3.5 h-3.5"/> },
+    { to: 'received', label: 'Conferido', icon: <CheckCircle className="w-3.5 h-3.5"/> },
+    { to: 'received_unchecked', label: 'Entregue (Conferir)', icon: <Clock className="w-3.5 h-3.5"/> },
   ],
   awaiting: [
-    { to: 'received', label: 'Retirado e conferido', icon: <CheckCircle className="w-3.5 h-3.5"/> },
-    { to: 'received_unchecked', label: 'Retirado (conferir depois)', icon: <Clock className="w-3.5 h-3.5"/> },
+    { to: 'received', label: 'Conferido', icon: <CheckCircle className="w-3.5 h-3.5"/> },
+    { to: 'received_unchecked', label: 'Retirado (Conferir)', icon: <Clock className="w-3.5 h-3.5"/> },
   ],
   received: [
-    { to: 'entered_system', label: 'Lançado no sistema', icon: <Archive className="w-3.5 h-3.5"/> },
+    { to: 'entered_system', label: 'Lançar Sistema', icon: <Archive className="w-3.5 h-3.5"/> },
   ],
   received_unchecked: [
-    { to: 'received', label: 'Conferência concluída', icon: <Check className="w-3.5 h-3.5"/> },
-    { to: 'entered_system', label: 'Lançar no sistema', icon: <Archive className="w-3.5 h-3.5"/> },
+    { to: 'received', label: 'Conferido', icon: <Check className="w-3.5 h-3.5"/> },
+    { to: 'entered_system', label: 'Lançar Sistema', icon: <Archive className="w-3.5 h-3.5"/> },
   ],
   entered_system: [
-    { to: 'fully_checked', label: 'Marcar como Concluído', icon: <CheckCircle className="w-3.5 h-3.5"/> },
+    { to: 'fully_checked', label: 'Concluir', icon: <CheckCircle className="w-3.5 h-3.5"/> },
   ],
   fully_checked: [],
   cancelled: [],
 };
 
-const OPEN_STATUSES: PurchaseOrderStatus[] = ['draft','sent','confirmed','in_transit','awaiting','received','received_unchecked','entered_system'];
-const CLOSED_STATUSES: PurchaseOrderStatus[] = ['fully_checked'];
+const OPEN_STATUSES: PurchaseOrderStatus[] = ['draft','sent','confirmed','in_transit','awaiting'];
+const CHECK_STATUSES: PurchaseOrderStatus[] = ['received_unchecked'];
+const DONE_STATUSES: PurchaseOrderStatus[] = ['received','entered_system','fully_checked'];
 
 function fmtCurrency(v: number) { return `R$ ${v.toFixed(2).replace('.', ',')}`; }
 function fmtDate(ts?: number) {
@@ -97,38 +101,45 @@ function fmtDatetime(ts?: number) {
   if (!ts) return '—';
   return new Date(ts).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' });
 }
-function getWeekLabel(ts: number) {
-  const d = new Date(ts);
-  const day = d.getDay();
-  const mon = new Date(d); mon.setDate(d.getDate() - (day === 0 ? 6 : day - 1));
-  const sun = new Date(mon); sun.setDate(mon.getDate() + 6);
-  return `Semana de ${mon.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })} – ${sun.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}`;
-}
 
 // ── componente principal ───────────────────────────────────────────────────
 
 const OrderManager: React.FC<OrderManagerProps> = ({
   suppliers, purchaseOrders, setPurchaseOrders, cart, setCart,
-  supplierCatalogs = {}, userProfile, getNextSeqNumber,
+  supplierCatalogs = {}, userProfile, globalPackRules = [], getNextSeqNumber,
 }) => {
-  const [viewMode, setViewMode] = useState<'technical' | 'objective'>('technical');
-  const [sortBy, setSortBy] = useState<'date' | 'supplier' | 'value'>('date');
-  const [collapsedWeeks, setCollapsedWeeks] = useState<Set<string>>(new Set());
-  const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>({});
-  const [selectedOrder, setSelectedOrder] = useState<PurchaseOrder | null>(null);
+
+  // FILTROS & CHECKBOXES
+  const [filterAll, setFilterAll] = useState(false);
+  const [filterOpen, setFilterOpen] = useState(true);
+  const [filterCheck, setFilterCheck] = useState(true);
+  const [filterDone, setFilterDone] = useState(false);
+  
+  const [checkingOrder, setCheckingOrder] = useState<PurchaseOrder | null>(null);
+
+  const [timeFilter, setTimeFilter] = useState<'30d' | 'current_month' | 'current_year' | 'all' | 'custom'>('30d');
+  const [customDateStart, setCustomDateStart] = useState('');
+  const [customDateEnd, setCustomDateEnd] = useState('');
+
+  // Fluxo de Inteligência (NF <-> Pedido)
+  const [linkInvoiceData, setLinkInvoiceData] = useState<{
+    file: File;
+    supplierId: string;
+    items: CartItem[];
+    detectedDate: number | null;
+    pendingOrders: PurchaseOrder[];
+  } | null>(null);
+
+  // SELEÇÃO & BULK ACTIONS
+  const [selectedOrderIds, setSelectedOrderIds] = useState<Set<string>>(new Set());
+  const [expandedOrderId, setExpandedOrderId] = useState<string | null>(null);
+
+  // MODAIS PADRÕES
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
   const [cancelNote, setCancelNote] = useState('');
-  const [showCreateModal, setShowCreateModal] = useState(false);
-  const [newOrderSupplierId, setNewOrderSupplierId] = useState('');
-  const [newOrderType, setNewOrderType] = useState<'delivery' | 'pickup'>('delivery');
-  const [newOrderExpectedDate, setNewOrderExpectedDate] = useState('');
-  const [newOrderExpectedTime, setNewOrderExpectedTime] = useState('');
-  const [editingExpected, setEditingExpected] = useState(false);
-  const [tempExpectedDate, setTempExpectedDate] = useState('');
-  const [tempExpectedTime, setTempExpectedTime] = useState('');
-
-  // Estado do modal de pedido manual
+  
+  // MODAL MANUAL
   const [showManualModal, setShowManualModal] = useState(false);
   const [manualSupplierId, setManualSupplierId] = useState('');
   const [manualSearch, setManualSearch] = useState('');
@@ -137,17 +148,100 @@ const OrderManager: React.FC<OrderManagerProps> = ({
   const [manualSupplierOpen, setManualSupplierOpen] = useState(false);
   const manualSupplierRef = useRef<HTMLDivElement>(null);
 
+  // MODAL UPLOAD
+  const [showUploadModal, setShowUploadModal] = useState(false);
+  const [uploadSupplierId, setUploadSupplierId] = useState('');
+  const [uploadSupplierSearch, setUploadSupplierSearch] = useState('');
+  const [uploadSupplierOpen, setUploadSupplierOpen] = useState(false);
+  const uploadSupplierRef = useRef<HTMLDivElement>(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const { isProcessing, processFile } = useFileProcessor();
+
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
       if (manualSupplierRef.current && !manualSupplierRef.current.contains(e.target as Node)) {
         setManualSupplierOpen(false);
+      }
+      if (uploadSupplierRef.current && !uploadSupplierRef.current.contains(e.target as Node)) {
+        setUploadSupplierOpen(false);
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // Transição de status
+  // ── FILTERING LOGIC ──────────────────────────────────────────────────────
+
+  const filteredOrders = useMemo(() => {
+    let list = purchaseOrders.filter(o => o.status !== 'cancelled');
+
+    // 1. Time Filter
+    const now = new Date();
+    list = list.filter(o => {
+      const d = new Date(o.createdAt);
+      if (timeFilter === '30d') {
+        return (now.getTime() - d.getTime()) <= 30 * 24 * 60 * 60 * 1000;
+      }
+      if (timeFilter === 'current_month') {
+        return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+      }
+      if (timeFilter === 'current_year') {
+        return d.getFullYear() === now.getFullYear();
+      }
+      if (timeFilter === 'custom' && customDateStart && customDateEnd) {
+        // Compensar fuso e englobar dia inteiro
+        const start = new Date(customDateStart + 'T00:00:00').getTime();
+        const end = new Date(customDateEnd + 'T23:59:59').getTime();
+        return o.createdAt >= start && o.createdAt <= end;
+      }
+      return true; // "all" ou fallback
+    });
+
+    // 2. Status Filter
+    if (!filterAll) {
+      list = list.filter(o => {
+        const isOpen = OPEN_STATUSES.includes(o.status);
+        const isCheck = CHECK_STATUSES.includes(o.status);
+        const isDone = DONE_STATUSES.includes(o.status);
+        if (filterOpen && isOpen) return true;
+        if (filterCheck && isCheck) return true;
+        if (filterDone && isDone) return true;
+        return false;
+      });
+    }
+
+    return list.sort((a, b) => b.createdAt - a.createdAt);
+  }, [purchaseOrders, timeFilter, customDateStart, customDateEnd, filterAll, filterOpen, filterCheck, filterDone]);
+
+  // ── DYNAMIC GRID COLUMNS ─────────────────────────────────────────────────
+
+  const gridColumns = useMemo(() => {
+    if (filterAll) return [{ title: 'Todos os Pedidos', items: filteredOrders, id: 'all' }];
+    
+    const cols = [];
+    if (filterOpen) {
+      cols.push({
+        title: 'Em Aberto', id: 'open',
+        items: filteredOrders.filter(o => OPEN_STATUSES.includes(o.status))
+      });
+    }
+    if (filterCheck) {
+      cols.push({
+        title: 'A Conferir', id: 'check',
+        items: filteredOrders.filter(o => CHECK_STATUSES.includes(o.status))
+      });
+    }
+    if (filterDone) {
+      cols.push({
+        title: 'Lançados / Concluídos', id: 'done',
+        items: filteredOrders.filter(o => DONE_STATUSES.includes(o.status))
+      });
+    }
+    return cols;
+  }, [filteredOrders, filterAll, filterOpen, filterCheck, filterDone]);
+
+  // ── ACTIONS ──────────────────────────────────────────────────────────────
+
   const transition = (orderId: string, to: PurchaseOrderStatus, extra?: Partial<PurchaseOrder>) => {
     const now = Date.now();
     setPurchaseOrders(prev => prev.map(o => {
@@ -160,7 +254,6 @@ const OrderManager: React.FC<OrderManagerProps> = ({
         ...extra,
       };
     }));
-    if (selectedOrder?.id === orderId) setSelectedOrder(prev => prev ? { ...prev, status: to, ...extra } : null);
   };
 
   const handleCancel = (orderId: string) => {
@@ -171,96 +264,155 @@ const OrderManager: React.FC<OrderManagerProps> = ({
     setCancelNote('');
   };
 
-  // Criar pedido a partir do carrinho
-  const createFromCart = () => {
-    if (!newOrderSupplierId || cart.length === 0) return;
-    const supplier = suppliers.find(s => s.id === newOrderSupplierId);
-    const items = cart.filter(i => i.supplierId === newOrderSupplierId);
-    if (items.length === 0) return;
+  const toggleSelection = (orderId: string) => {
+    setSelectedOrderIds(prev => {
+      const n = new Set(prev);
+      if (n.has(orderId)) n.delete(orderId); else n.add(orderId);
+      return n;
+    });
+  };
+
+  const handleBulkAction = (action: 'enter_system' | 'check' | 'delete') => {
+    if (action === 'delete') {
+       if (confirm('Tem certeza que deseja deletar os pedidos selecionados? Essa ação não pode ser desfeita.')) {
+         setPurchaseOrders(prev => prev.filter(o => !selectedOrderIds.has(o.id)));
+         setSelectedOrderIds(new Set());
+       }
+       return;
+    }
+    
+    const targetStatus: PurchaseOrderStatus = action === 'enter_system' ? 'entered_system' : 'received';
     const now = Date.now();
+    
+    setPurchaseOrders(prev => prev.map(o => {
+      if (!selectedOrderIds.has(o.id)) return o;
+      return {
+        ...o,
+        status: targetStatus,
+        updatedAt: now,
+        transitions: [...(o.transitions || []), { from: o.status, to: targetStatus, timestamp: now, note: 'Bulk action' }],
+      };
+    }));
+    setSelectedOrderIds(new Set());
+  };
+
+  // ── UPLOAD / OCR LOGIC ───────────────────────────────────────────────────
+
+  const handleDrop = async (e: React.DragEvent) => {
+    e.preventDefault(); e.stopPropagation(); setIsDragging(false);
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      await handleFileUpload(e.dataTransfer.files[0]);
+    }
+  };
+
+  const handleFileUpload = async (file: File) => {
+    if (!uploadSupplierId) {
+      alert("Selecione um fornecedor antes de importar a nota.");
+      return;
+    }
+    const supplier = suppliers.find(s => s.id === uploadSupplierId);
+    if (!supplier) return;
+
+    const { quotes, detectedDate, errorMessage } = await processFile(file, supplier, globalPackRules);
+    
+    if (errorMessage) {
+      alert(`Erro no OCR: ${errorMessage}`);
+      return;
+    }
+    if (!quotes || quotes.length === 0) {
+      alert("Nenhum item encontrado no arquivo.");
+      return;
+    }
+
+    // Convert ProductQuote[] to CartItem[]
+    const items: CartItem[] = quotes.map((q, i) => {
+       const qty = q.packQuantity > 0 ? q.packQuantity : 1;
+       const unitPrice = q.priceStrategy === 'unit' ? q.unitPrice : (q.price / qty);
+       const packPrice = q.priceStrategy === 'pack' ? q.price : (unitPrice * qty);
+       
+       return {
+         id: `ext-${Date.now()}-${i}`,
+         sku: q.sku || q.name.substring(0,10),
+         productName: q.name,
+         supplierId: supplier.id,
+         supplierName: supplier.name,
+         packQuantity: qty,
+         packPrice: packPrice,
+         quantityToBuy: 1, // Assume 1 lote por padrão para conferência
+         totalCost: packPrice * 1
+       };
+    });
+
+    const totalValue = items.reduce((s, i) => s + i.totalCost, 0);
+    const now = Date.now();
+    
+    // Check if there are pending orders for this supplier
+    const pendingOrders = purchaseOrders.filter(o => o.supplierId === supplier.id && (o.status === 'draft' || o.status === 'sent'));
+    
+    if (pendingOrders.length > 0) {
+       setLinkInvoiceData({
+         file,
+         supplierId: supplier.id,
+         items,
+         detectedDate: detectedDate || null,
+         pendingOrders
+       });
+       setShowUploadModal(false);
+       setUploadSupplierId('');
+       setUploadSupplierSearch('');
+       return;
+    }
+    
+    // Fallback: create standalone external order
+    createStandaloneInvoice(file, supplier, items, detectedDate || now, totalValue);
+  };
+
+  const createStandaloneInvoice = (file: File, supplier: Supplier, items: CartItem[], createdAt: number, totalValue: number) => {
     const newOrder: PurchaseOrder = {
       id: crypto.randomUUID(),
-      supplierId: newOrderSupplierId,
-      supplierName: supplier?.name || newOrderSupplierId,
+      seqNumber: getNextSeqNumber?.(),
+      supplierId: supplier.id,
+      supplierName: supplier.name,
       items,
-      totalValue: items.reduce((s, i) => s + i.packPrice * i.quantityToBuy, 0),
-      status: 'draft',
-      createdAt: now,
-      updatedAt: now,
-      deliveryOrPickup: newOrderType,
-      expectedDate: newOrderExpectedDate ? new Date(newOrderExpectedDate).getTime() : undefined,
-      expectedTime: newOrderExpectedTime || undefined,
+      totalValue,
+      status: 'received_unchecked', // Status inicial para notas importadas
+      createdAt,
+      updatedAt: Date.now(),
+      deliveryOrPickup: 'delivery',
+      origin: 'external',
       transitions: [],
+      documentUrl: URL.createObjectURL(file) 
     };
+
     setPurchaseOrders(prev => [newOrder, ...prev]);
-    setCart(prev => prev.filter(i => i.supplierId !== newOrderSupplierId));
-    setShowCreateModal(false);
-    setNewOrderSupplierId('');
-    setNewOrderExpectedDate('');
-    setNewOrderExpectedTime('');
+    setShowUploadModal(false);
+    setUploadSupplierId('');
+    setUploadSupplierSearch('');
   };
 
-  // WhatsApp
-  const buildWhatsAppMessage = (order: PurchaseOrder) => {
-    const supplier = suppliers.find(s => s.id === order.supplierId);
-    const template = supplier?.orderTemplate;
-    const itemsText = order.items.map(i => `• ${i.productName} × ${i.quantityToBuy} = ${fmtCurrency(i.packPrice * i.quantityToBuy)}`).join('\n');
-    const total = fmtCurrency(order.totalValue);
-    const date = fmtDate(order.createdAt);
-    const time = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-    const tipo = order.deliveryOrPickup === 'pickup' ? 'RETIRADA' : 'ENTREGA';
-    const previsao = order.expectedDate ? fmtDate(order.expectedDate) + (order.expectedTime ? ` às ${order.expectedTime}` : '') : 'a confirmar';
-
-    if (template) {
-      return template
-        .replace('[DATA]', date).replace('[HORA]', time)
-        .replace('[ITENS]', itemsText).replace('[TOTAL]', total)
-        .replace('[TIPO]', tipo).replace('[PREVISAO]', previsao);
-    }
-    return `Olá! Segue pedido ${date} ${time}:\n\n${itemsText}\n\nTotal: ${total}\n${tipo}: ${previsao}`;
+  const handleLinkInvoice = (orderId: string) => {
+    if (!linkInvoiceData) return;
+    const { items, file } = linkInvoiceData;
+    const now = Date.now();
+    
+    setPurchaseOrders(prev => prev.map(o => {
+      if (o.id !== orderId) return o;
+      return {
+        ...o,
+        status: 'received_unchecked',
+        updatedAt: now,
+        originalSnapshot: o.originalSnapshot || o.items, // Keep original intact
+        invoicedSnapshot: items, // Save XML truth
+        items: items, // The current reality is now the invoice (until physical check)
+        documentUrl: URL.createObjectURL(file),
+        totalValue: items.reduce((s, i) => s + i.totalCost, 0),
+        transitions: [...(o.transitions || []), { from: o.status, to: 'received_unchecked', timestamp: now, note: 'NF importada e vinculada' }],
+      };
+    }));
+    setLinkInvoiceData(null);
   };
 
-  const openWhatsApp = (order: PurchaseOrder) => {
-    const supplier = suppliers.find(s => s.id === order.supplierId);
-    const phone = supplier?.whatsapp;
-    const msg = encodeURIComponent(buildWhatsAppMessage(order));
-    if (phone) {
-      window.open(`https://wa.me/55${phone}?text=${msg}`, '_blank');
-    } else {
-      window.open(`https://wa.me/?text=${msg}`, '_blank');
-    }
-  };
-
-  // Agrupamento por semana (modo técnico)
-  const openOrders = useMemo(() => purchaseOrders.filter(o => OPEN_STATUSES.includes(o.status)), [purchaseOrders]);
-  const closedOrders = useMemo(() => purchaseOrders.filter(o => CLOSED_STATUSES.includes(o.status)), [purchaseOrders]);
-  const cancelledOrders = useMemo(() => purchaseOrders.filter(o => o.status === 'cancelled'), [purchaseOrders]);
-
-  const weekGroups = useMemo(() => {
-    const map: Record<string, PurchaseOrder[]> = {};
-    openOrders.forEach(o => {
-      const k = getWeekLabel(o.createdAt);
-      if (!map[k]) map[k] = [];
-      map[k].push(o);
-    });
-    return Object.entries(map).sort((a, b) => {
-      const ta = a[1][0]?.createdAt || 0;
-      const tb = b[1][0]?.createdAt || 0;
-      return tb - ta;
-    });
-  }, [openOrders]);
-
-  const sortedOrders = useMemo(() => {
-    const all = purchaseOrders.filter(o => o.status !== 'cancelled');
-    return [...all].sort((a, b) => {
-      if (sortBy === 'supplier') return a.supplierName.localeCompare(b.supplierName);
-      if (sortBy === 'value') return b.totalValue - a.totalValue;
-      return b.createdAt - a.createdAt;
-    });
-  }, [purchaseOrders, sortBy]);
-
-  const cartSupplierIds = useMemo(() => [...new Set(cart.map(i => i.supplierId))], [cart]);
-
+  // ── MANUAL ORDER LOGIC ───────────────────────────────────────────────────
   const manualFilteredProducts = useMemo(() => {
     const catalog = supplierCatalogs[manualSupplierId];
     if (!catalog) return [];
@@ -309,155 +461,152 @@ const OrderManager: React.FC<OrderManagerProps> = ({
     setPurchaseOrders(prev => [newOrder, ...prev]);
     setShowManualModal(false);
     setManualSupplierId('');
-    setManualSearch('');
     setManualQtys({});
   };
 
-  // ── render helpers ───────────────────────────────────────────────────────
+  const handleSaveCheck = (updatedItems: CartItem[], note: string) => {
+    if (!checkingOrder) return;
+    const now = Date.now();
+    const newTotal = updatedItems.reduce((s, i) => s + i.totalCost, 0);
+    
+    setPurchaseOrders(prev => prev.map(o => {
+      if (o.id !== checkingOrder.id) return o;
+      return {
+        ...o,
+        status: 'fully_checked',
+        updatedAt: now,
+        items: updatedItems, // Nova realidade (físico)
+        totalValue: newTotal,
+        notes: (o.notes ? o.notes + '\n' : '') + (note ? `[Divergência/Conferência]: ${note}` : ''),
+        transitions: [...(o.transitions || []), { from: o.status, to: 'fully_checked', timestamp: now, note: 'Conferência Física Salva. ' + (note ? 'Com divergência' : 'Sem divergência') }],
+      };
+    }));
+    setCheckingOrder(null);
+  };
+
+  // ── RENDERERS ────────────────────────────────────────────────────────────
 
   const renderStatusBadge = (status: PurchaseOrderStatus) => (
-    <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${STATUS_COLOR[status]}`}>
+    <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border truncate max-w-full inline-block text-center ${STATUS_COLOR[status]}`}>
       {STATUS_LABEL[status]}
     </span>
   );
 
-  const renderOrderCard = (order: PurchaseOrder) => {
-    const isSelected = selectedOrder?.id === order.id;
+  const renderOrderRow = (order: PurchaseOrder) => {
+    const isExpanded = expandedOrderId === order.id;
+    const isChecked = selectedOrderIds.has(order.id);
     const supplier = suppliers.find(s => s.id === order.supplierId);
-    const actions = NEXT_ACTIONS[order.status];
+    const actions = NEXT_ACTIONS[order.status] || [];
+
+    // Verificação de divergência de preço ⚠️ (com validade)
+    let hasPriceAlert = false;
+    if (order.origin === 'external' && supplierCatalogs[order.supplierId]) {
+      const catalog = supplierCatalogs[order.supplierId];
+      // Exemplo: consideramos um histórico fresco como < 14 dias
+      order.items.forEach(item => {
+         const p = catalog.products.find(cp => cp.name === item.productName || cp.supplierSku === item.sku);
+         if (p && p.lastPackPrice > 0) {
+           const diff = (item.packPrice - p.lastPackPrice) / p.lastPackPrice;
+           const age = Date.now() - p.lastSeenDate;
+           if (diff > 0.05 && age < 14 * 86400000) {
+             hasPriceAlert = true;
+           }
+         }
+      });
+    }
+
     return (
-      <div
-        key={order.id}
-        onClick={() => setSelectedOrder(isSelected ? null : order)}
-        className={`border rounded-xl p-3 cursor-pointer transition-all ${isSelected ? 'border-amber-600/60 bg-amber-950/10' : 'border-slate-700/50 bg-slate-900 hover:border-slate-600'}`}
-      >
-        {/* Cabeçalho */}
-        <div className="flex items-start justify-between gap-2">
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="font-bold text-white text-sm">{order.supplierName}</span>
-              {renderStatusBadge(order.status)}
-              <span className="text-[10px] text-slate-500">{order.deliveryOrPickup === 'pickup' ? '🏪 Retirada' : '🚚 Entrega'}</span>
+      <div key={order.id} className={`flex flex-col border-b border-slate-800/60 transition-colors bg-slate-900 ${isExpanded ? 'bg-slate-800/30' : 'hover:bg-slate-800/50'} ${isChecked ? 'bg-amber-900/10' : ''}`}>
+        {/* ROW PRINCIPAL (Alta Densidade - 2 Linhas para suportar 3 colunas sem scroll horizontal) */}
+        <div className="flex flex-col px-3 py-2.5 cursor-pointer gap-2 min-h-[56px]" onClick={() => setExpandedOrderId(isExpanded ? null : order.id)}>
+          {/* Linha 1: Checkbox + Fornecedor + Chevron */}
+          <div className="flex items-start justify-between gap-2">
+            <div className="flex items-center gap-2.5 flex-1 min-w-0">
+              <div onClick={e => e.stopPropagation()} className="shrink-0 flex items-center justify-center pt-0.5">
+                <button onClick={() => toggleSelection(order.id)} className={`w-4 h-4 rounded flex items-center justify-center border transition-colors ${isChecked ? 'bg-amber-600 border-amber-600 text-white' : 'border-slate-600 hover:border-amber-500'}`}>
+                  {isChecked && <Check className="w-3 h-3 stroke-[3]"/>}
+                </button>
+              </div>
+              <span className="font-bold text-slate-200 text-[13px] truncate leading-tight">{order.supplierName}</span>
+              {order.origin === 'external' && (
+                <span className="bg-purple-900/40 text-purple-400 border border-purple-800 px-1 py-0.5 rounded text-[9px] uppercase font-bold tracking-wider shrink-0" title="Importado via arquivo (XML/PDF)">Ext</span>
+              )}
             </div>
-            <div className="flex items-center gap-3 mt-1 text-xs text-slate-500 flex-wrap">
-              <span>Criado: {fmtDatetime(order.createdAt)}</span>
-              {order.expectedDate && <span className="text-amber-400/80">Previsão: {fmtDate(order.expectedDate)}{order.expectedTime ? ` às ${order.expectedTime}` : ''}</span>}
-              <span className="font-semibold text-slate-300">{fmtCurrency(order.totalValue)}</span>
-              <span className="text-slate-600">{order.items.length} itens</span>
+            <div className="shrink-0 text-slate-500 pt-0.5">
+              <ChevronDown className={`w-4 h-4 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
             </div>
           </div>
-          <ChevronRight className={`w-4 h-4 text-slate-600 transition-transform shrink-0 mt-1 ${isSelected ? 'rotate-90' : ''}`} />
+
+          {/* Linha 2: Badge + Ícones + Dados (Data, Vol, Total) */}
+          <div className="flex items-center justify-between gap-2 pl-[26px]">
+            <div className="flex items-center gap-1.5 overflow-hidden">
+              {renderStatusBadge(order.status)}
+              {order.documentUrl && (
+                <a href={order.documentUrl} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()} className="text-slate-500 hover:text-amber-400 shrink-0" title="Ver Documento Original">
+                  <FileText className="w-3.5 h-3.5"/>
+                </a>
+              )}
+              {hasPriceAlert && (
+                <AlertTriangle className="w-3.5 h-3.5 text-red-400 shrink-0" title="Divergência de preço >5% em relação à cotação recente!"/>
+              )}
+            </div>
+            
+            <div className="flex items-center gap-2.5 shrink-0 text-right text-[11px] text-slate-400">
+              <span className="hidden xl:inline-block">{fmtDate(order.createdAt)}</span>
+              <span className="hidden sm:inline-block">{order.items.length} vol.</span>
+              <span className="font-bold text-slate-200 text-[12px]">{fmtCurrency(order.totalValue)}</span>
+            </div>
+          </div>
         </div>
 
-        {/* Expandido */}
-        {isSelected && (
-          <div className="mt-3 space-y-3" onClick={e => e.stopPropagation()}>
-            {/* Itens */}
-            <div className="bg-slate-950/50 rounded-lg overflow-hidden">
+        {/* EXPANDED ÁREA */}
+        {isExpanded && (
+          <div className="pl-12 pr-4 pb-4 pt-2 space-y-3 cursor-default border-t border-slate-800/40" onClick={e => e.stopPropagation()}>
+            <div className="bg-slate-950/50 rounded-lg overflow-hidden border border-slate-800">
               <table className="w-full text-xs">
                 <thead>
-                  <tr className="border-b border-slate-800">
+                  <tr className="border-b border-slate-800 bg-slate-900/50">
                     <th className="text-left p-2 text-slate-500 font-medium">Produto</th>
-                    <th className="text-center p-2 text-slate-500 font-medium w-12">Qtd</th>
-                    <th className="text-right p-2 text-slate-500 font-medium w-20">Unit.</th>
-                    <th className="text-right p-2 text-slate-500 font-medium w-20">Total</th>
+                    <th className="text-center p-2 text-slate-500 font-medium w-16">Qtd Lotes</th>
+                    <th className="text-right p-2 text-slate-500 font-medium w-20">Valor Lote</th>
+                    <th className="text-right p-2 text-slate-500 font-medium w-24">Total</th>
                   </tr>
                 </thead>
                 <tbody>
                   {order.items.map((item, i) => (
-                    <tr key={i} className="border-b border-slate-800/50 last:border-0">
-                      <td className="p-2 text-slate-300">{item.productName}</td>
+                    <tr key={i} className="border-b border-slate-800/50 last:border-0 hover:bg-slate-800/20">
+                      <td className="p-2 text-slate-300">
+                         {item.productName} 
+                         <span className="text-[10px] text-slate-600 ml-2">(cx {item.packQuantity})</span>
+                      </td>
                       <td className="p-2 text-center text-white font-bold">{item.quantityToBuy}</td>
                       <td className="p-2 text-right text-slate-400">{fmtCurrency(item.packPrice)}</td>
-                      <td className="p-2 text-right text-amber-400 font-semibold">{fmtCurrency(item.packPrice * item.quantityToBuy)}</td>
+                      <td className="p-2 text-right text-amber-400 font-semibold">{fmtCurrency(item.totalCost)}</td>
                     </tr>
                   ))}
                 </tbody>
-                <tfoot>
-                  <tr className="border-t border-slate-700">
-                    <td colSpan={3} className="p-2 text-right text-slate-400 font-medium">Total</td>
-                    <td className="p-2 text-right text-white font-bold">{fmtCurrency(order.totalValue)}</td>
-                  </tr>
-                </tfoot>
               </table>
             </div>
 
-            {/* Previsão editável */}
-            <div className="flex items-center gap-2 text-xs">
-              <Calendar className="w-3.5 h-3.5 text-slate-500"/>
-              {editingExpected && isSelected ? (
-                <div className="flex items-center gap-2">
-                  <input type="date" value={tempExpectedDate} onChange={e => setTempExpectedDate(e.target.value)}
-                    className="bg-slate-800 border border-amber-500 rounded px-2 py-0.5 text-white focus:outline-none text-xs"/>
-                  <input type="time" value={tempExpectedTime} onChange={e => setTempExpectedTime(e.target.value)}
-                    className="bg-slate-800 border border-amber-500 rounded px-2 py-0.5 text-white focus:outline-none text-xs w-24"/>
-                  <button onClick={() => {
-                    setPurchaseOrders(prev => prev.map(o => o.id === order.id ? {
-                      ...o,
-                      expectedDate: tempExpectedDate ? new Date(tempExpectedDate).getTime() : undefined,
-                      expectedTime: tempExpectedTime || undefined,
-                      updatedAt: Date.now(),
-                    } : o));
-                    setEditingExpected(false);
-                  }} className="text-green-400 p-0.5"><Check className="w-3.5 h-3.5"/></button>
-                  <button onClick={() => setEditingExpected(false)} className="text-red-400 p-0.5"><X className="w-3.5 h-3.5"/></button>
-                </div>
-              ) : (
-                <button className="text-slate-400 hover:text-amber-400 flex items-center gap-1 group/ed" onClick={() => {
-                  setTempExpectedDate(order.expectedDate ? new Date(order.expectedDate).toISOString().split('T')[0] : '');
-                  setTempExpectedTime(order.expectedTime || '');
-                  setEditingExpected(true);
-                }}>
-                  <span>{order.expectedDate ? `Previsão: ${fmtDate(order.expectedDate)}${order.expectedTime ? ` às ${order.expectedTime}` : ''}` : 'Definir previsão...'}</span>
-                  <Edit3 className="w-3 h-3 opacity-0 group-hover/ed:opacity-100 transition-opacity"/>
-                </button>
-              )}
-            </div>
-
-            {/* Histórico de transições */}
-            {order.transitions?.length > 0 && (
-              <div className="space-y-1">
-                <p className="text-[10px] text-slate-600 uppercase font-bold">Histórico</p>
-                {order.transitions.map((t, i) => (
-                  <div key={i} className="flex items-center gap-2 text-[11px] text-slate-500">
-                    <span className="w-32 shrink-0">{new Date(t.timestamp).toLocaleString('pt-BR', {day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})}</span>
-                    <span className={STATUS_COLOR[t.from].split(' ')[0]}>{STATUS_LABEL[t.from]}</span>
-                    <ChevronRight className="w-3 h-3 text-slate-700 shrink-0"/>
-                    <span className={STATUS_COLOR[t.to].split(' ')[0]}>{STATUS_LABEL[t.to]}</span>
-                    {t.note && <span className="text-slate-600 italic truncate">— {t.note}</span>}
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {/* Ações */}
-            <div className="flex items-center gap-2 flex-wrap pt-1 border-t border-slate-800">
-              {/* WhatsApp */}
-              {(supplier?.whatsapp || order.status === 'draft') && (
-                <button onClick={() => openWhatsApp(order)}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-green-900/30 border border-green-900/50 text-green-400 text-xs hover:bg-green-900/50 transition-colors">
-                  <MessageCircle className="w-3.5 h-3.5"/>
-                  {supplier?.whatsapp ? 'Enviar WhatsApp' : 'Copiar mensagem'}
-                </button>
-              )}
-              {/* Endereço */}
-              {supplier?.address && (
-                <button onClick={() => window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(supplier.address!)}`, '_blank')}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-900/30 border border-blue-900/50 text-blue-400 text-xs hover:bg-blue-900/50 transition-colors">
-                  <MapPin className="w-3.5 h-3.5"/> Maps
-                </button>
-              )}
-              {/* Próximas transições */}
+            {/* Ações Locais */}
+            <div className="flex items-center gap-2 flex-wrap pt-2">
               {actions.map(action => (
                 <button key={action.to} onClick={() => transition(order.id, action.to)}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 border border-slate-700 text-slate-300 text-xs hover:border-amber-600 hover:text-white transition-colors">
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 border border-slate-700 text-slate-300 text-xs font-semibold hover:border-amber-600 hover:text-white transition-colors">
                   {action.icon} {action.label}
                 </button>
               ))}
-              {/* Cancelar */}
-              {!['fully_checked','cancelled'].includes(order.status) && (
-                <button onClick={() => { setSelectedOrder(order); setShowCancelModal(true); }}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-950/30 border border-red-900/50 text-red-400 text-xs hover:bg-red-950/60 transition-colors ml-auto">
+
+              {!['cancelled', 'fully_checked'].includes(order.status) && (
+                 <button onClick={() => setCheckingOrder(order)}
+                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-900/30 border border-blue-800/50 text-blue-400 text-xs hover:bg-blue-900/60 transition-colors font-semibold ml-auto">
+                   📝 Conferir Carga
+                 </button>
+              )}
+
+              {(!['fully_checked','cancelled'].includes(order.status) && order.origin !== 'external') && (
+                <button onClick={() => { setExpandedOrderId(order.id); setShowCancelModal(true); }}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-950/30 border border-red-900/50 text-red-400 text-xs hover:bg-red-950/60 transition-colors ml-2">
                   <XCircle className="w-3.5 h-3.5"/> Cancelar pedido
                 </button>
               )}
@@ -468,280 +617,239 @@ const OrderManager: React.FC<OrderManagerProps> = ({
     );
   };
 
-  // ── render principal ─────────────────────────────────────────────────────
+  // ── MAIN RETURN ──────────────────────────────────────────────────────────
 
   return (
-    <div className="h-full overflow-y-auto space-y-5">
-
-      {/* Toolbar */}
-      <div className="flex items-center justify-between gap-3 flex-wrap">
-        <div className="flex items-center gap-2">
-          <ClipboardList className="w-5 h-5 text-amber-400"/>
-          <h2 className="text-white font-bold text-lg">Pedidos de Compra</h2>
-          {openOrders.length > 0 && (
-            <span className="bg-amber-600 text-white text-xs px-2 py-0.5 rounded-full font-bold">{openOrders.length} em aberto</span>
-          )}
-        </div>
-        <div className="flex items-center gap-2 flex-wrap">
-          {/* Modo */}
-          <div className="flex items-center bg-slate-800/60 border border-slate-700 rounded-lg p-0.5">
-            <button onClick={() => setViewMode('technical')}
-              className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all ${viewMode === 'technical' ? 'bg-slate-700 text-white' : 'text-slate-400 hover:text-white'}`}>
-              🗂 Técnico
-            </button>
-            <button onClick={() => setViewMode('objective')}
-              className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all ${viewMode === 'objective' ? 'bg-slate-700 text-white' : 'text-slate-400 hover:text-white'}`}>
-              📋 Objetivo
-            </button>
+    <div className="h-full flex flex-col relative overflow-hidden bg-slate-950">
+      
+      {/* ── UNIFIED COMPACT HEADER ── */}
+      <div className="shrink-0 px-6 py-3 border-b border-slate-800 bg-slate-900/80 flex flex-col xl:flex-row xl:items-center justify-between gap-4 relative z-20 shadow-sm">
+        
+        {/* Left side: Title + Status Filters */}
+        <div className="flex items-center gap-4 flex-wrap">
+          <div className="flex items-center gap-2 shrink-0">
+            <ClipboardList className="w-5 h-5 text-amber-500"/>
+            <h2 className="text-white font-bold text-lg tracking-tight">Pedidos & Entradas</h2>
           </div>
-          {viewMode === 'objective' && (
-            <select value={sortBy} onChange={e => setSortBy(e.target.value as any)}
-              className="bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-slate-300 focus:outline-none">
-              <option value="date">Mais recente</option>
-              <option value="supplier">Fornecedor</option>
-              <option value="value">Maior valor</option>
+          
+          <div className="w-px h-5 bg-slate-700 hidden sm:block"></div>
+
+          {/* Status Checkboxes */}
+          <div className="flex items-center gap-3 shrink-0">
+            <label className={`flex items-center gap-1.5 text-xs font-semibold cursor-pointer transition-colors ${filterAll ? 'text-amber-400' : 'text-slate-400 hover:text-slate-300'}`}>
+              <input type="checkbox" checked={filterAll} onChange={e => { setFilterAll(e.target.checked); if(e.target.checked){ setFilterOpen(true); setFilterCheck(true); setFilterDone(false); } }} className="hidden" />
+              <div className={`w-3.5 h-3.5 rounded border flex items-center justify-center transition-colors ${filterAll ? 'bg-amber-600 border-amber-600' : 'border-slate-600'}`}>
+                {filterAll && <Check className="w-2.5 h-2.5 text-white stroke-[3]"/>}
+              </div>
+              Todos
+            </label>
+            <div className="w-px h-3 bg-slate-800 mx-1"></div>
+            
+            <label className={`flex items-center gap-1.5 text-xs font-semibold cursor-pointer transition-colors ${(!filterAll && filterOpen) ? 'text-blue-400' : 'text-slate-500 hover:text-slate-300'}`}>
+              <input type="checkbox" checked={filterOpen} onChange={e => { setFilterOpen(e.target.checked); setFilterAll(false); }} className="hidden" />
+              <div className={`w-3.5 h-3.5 rounded border flex items-center justify-center transition-colors ${(!filterAll && filterOpen) ? 'bg-blue-600 border-blue-600' : 'border-slate-600'}`}>
+                {(!filterAll && filterOpen) && <Check className="w-2.5 h-2.5 text-white stroke-[3]"/>}
+              </div>
+              Em Aberto
+            </label>
+            
+            <label className={`flex items-center gap-1.5 text-xs font-semibold cursor-pointer transition-colors ${(!filterAll && filterCheck) ? 'text-yellow-400' : 'text-slate-500 hover:text-slate-300'}`}>
+              <input type="checkbox" checked={filterCheck} onChange={e => { setFilterCheck(e.target.checked); setFilterAll(false); }} className="hidden" />
+              <div className={`w-3.5 h-3.5 rounded border flex items-center justify-center transition-colors ${(!filterAll && filterCheck) ? 'bg-yellow-600 border-yellow-600' : 'border-slate-600'}`}>
+                {(!filterAll && filterCheck) && <Check className="w-2.5 h-2.5 text-white stroke-[3]"/>}
+              </div>
+              A Conferir
+            </label>
+
+            <label className={`flex items-center gap-1.5 text-xs font-semibold cursor-pointer transition-colors ${(!filterAll && filterDone) ? 'text-green-400' : 'text-slate-500 hover:text-slate-300'}`}>
+              <input type="checkbox" checked={filterDone} onChange={e => { setFilterDone(e.target.checked); setFilterAll(false); }} className="hidden" />
+              <div className={`w-3.5 h-3.5 rounded border flex items-center justify-center transition-colors ${(!filterAll && filterDone) ? 'bg-green-600 border-green-600' : 'border-slate-600'}`}>
+                {(!filterAll && filterDone) && <Check className="w-2.5 h-2.5 text-white stroke-[3]"/>}
+              </div>
+              Lançados
+            </label>
+          </div>
+        </div>
+
+        {/* Right side: Time Filters + Actions */}
+        <div className="flex items-center gap-3 flex-wrap">
+          <div className="flex items-center gap-2">
+            <Calendar className="w-3.5 h-3.5 text-slate-500"/>
+            <select value={timeFilter} onChange={e => setTimeFilter(e.target.value as any)}
+              className="bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-xs text-slate-300 focus:outline-none focus:border-amber-500">
+              <option value="30d">Últimos 30 dias</option>
+              <option value="current_month">Mês Atual</option>
+              <option value="current_year">Neste Ano</option>
+              <option value="all">Todo o período</option>
+              <option value="custom">Personalizado</option>
             </select>
-          )}
-          {/* Novo pedido manual */}
-          <button onClick={() => setShowManualModal(true)}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-200 text-xs font-semibold transition-colors border border-slate-600">
-            <Plus className="w-3.5 h-3.5"/>
-            Novo Pedido
+            {timeFilter === 'custom' && (
+               <div className="flex items-center gap-1">
+                 <input type="date" value={customDateStart} onChange={e => setCustomDateStart(e.target.value)} className="bg-slate-900 border border-slate-700 rounded text-[10px] px-1 py-1 text-slate-300 focus:outline-none"/>
+                 <span className="text-slate-500 text-[10px]">até</span>
+                 <input type="date" value={customDateEnd} onChange={e => setCustomDateEnd(e.target.value)} className="bg-slate-900 border border-slate-700 rounded text-[10px] px-1 py-1 text-slate-300 focus:outline-none"/>
+               </div>
+            )}
+          </div>
+
+          <div className="w-px h-5 bg-slate-700 hidden sm:block"></div>
+
+          <button onClick={() => setShowUploadModal(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-purple-600 hover:bg-purple-500 text-white text-[13px] font-semibold transition-all shadow-lg shadow-purple-900/20 shrink-0">
+            <UploadCloud className="w-4 h-4"/> Importar NF
           </button>
-          {/* Criar pedido do carrinho */}
-          {cartSupplierIds.length > 0 && (
-            <button onClick={() => setShowCreateModal(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold transition-colors">
-              <ShoppingCart className="w-3.5 h-3.5"/>
-              Carrinho ({cart.length})
-            </button>
-          )}
+          <button onClick={() => setShowManualModal(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 border border-slate-700 hover:border-slate-600 text-slate-200 text-[13px] font-semibold transition-colors shrink-0">
+            <Plus className="w-4 h-4"/> Novo
+          </button>
         </div>
       </div>
 
-      {/* MODO TÉCNICO — agrupado por semana */}
-      {viewMode === 'technical' && (
-        <div className="space-y-3">
-          {/* Em Aberto — por semana */}
-          {weekGroups.length === 0 && (
-            <div className="text-center py-12 text-slate-600">
-              <ClipboardList className="w-10 h-10 mx-auto mb-3 opacity-30"/>
-              <p className="text-sm">Nenhum pedido em aberto.</p>
-              {cartSupplierIds.length > 0 && <p className="text-xs mt-1 text-amber-600/70">Você tem {cart.length} itens no carrinho — crie um pedido!</p>}
+      {/* ── BULK ACTIONS FLOATING BAR ── */}
+      {selectedOrderIds.size > 0 && (
+        <div className="absolute top-28 left-1/2 -translate-x-1/2 z-30 bg-slate-800 border border-slate-600 rounded-full shadow-2xl px-4 py-2 flex items-center gap-4 animate-in slide-in-from-top-10">
+           <span className="text-amber-400 font-bold text-sm">{selectedOrderIds.size} selecionados</span>
+           <div className="w-px h-4 bg-slate-600"></div>
+           <button onClick={() => handleBulkAction('check')} className="text-xs text-slate-200 font-semibold hover:text-white px-2 transition-colors">Marcar Conferido</button>
+           <button onClick={() => handleBulkAction('enter_system')} className="text-xs text-slate-200 font-semibold hover:text-white px-2 transition-colors">Lançar Sistema</button>
+           <button onClick={() => handleBulkAction('delete')} className="text-xs text-red-400 font-semibold hover:text-red-300 px-2 flex items-center gap-1 transition-colors"><Trash2 className="w-3.5 h-3.5"/> Deletar</button>
+           <button onClick={() => setSelectedOrderIds(new Set())} className="text-slate-500 hover:text-white ml-2 p-1 transition-colors"><X className="w-4 h-4"/></button>
+        </div>
+      )}
+
+      {/* ── DYNAMIC GRID CONTENT ── */}
+      <div className="flex-1 overflow-hidden px-6 py-4 z-10">
+        <div className="h-full flex gap-4 items-start w-full">
+           {gridColumns.length === 0 && (
+             <div className="w-full h-full flex flex-col items-center justify-center text-slate-500 pb-20">
+               <LayoutGrid className="w-12 h-12 mb-3 opacity-20"/>
+               <p className="text-sm">Selecione pelo menos um status acima para visualizar.</p>
+             </div>
+           )}
+
+           {gridColumns.map(col => (
+             <div key={col.id} className="flex flex-col h-full bg-slate-900/30 border border-slate-800/60 rounded-xl overflow-hidden" style={{ flex: 1, minWidth: 0 }}>
+               <div className="shrink-0 px-4 py-2.5 bg-slate-800/40 border-b border-slate-800 flex items-center justify-between shadow-sm">
+                 <h3 className="font-bold text-slate-300 text-sm tracking-wide uppercase">{col.title}</h3>
+                 <span className="bg-slate-800 text-slate-400 text-[10px] px-2 py-0.5 rounded-full font-bold">{col.items.length}</span>
+               </div>
+               
+               <div className="flex-1 overflow-y-auto overflow-x-hidden custom-scrollbar p-2 space-y-1.5">
+                 {col.items.length === 0 ? (
+                    <div className="text-center py-10 text-slate-600 text-xs">Nenhum pedido nesta visão.</div>
+                 ) : (
+                    col.items.map(renderOrderRow)
+                 )}
+               </div>
+             </div>
+           ))}
+        </div>
+      </div>
+
+      {/* ── MODALS (Upload) ── */}
+      {showUploadModal && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-purple-900/40 rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden">
+            <div className="p-4 border-b border-slate-800 flex items-center justify-between bg-purple-900/10">
+              <h3 className="font-bold text-white flex items-center gap-2"><UploadCloud className="w-5 h-5 text-purple-400"/> Importar Nota Externa</h3>
+              <button onClick={() => setShowUploadModal(false)}><X className="w-5 h-5 text-slate-500 hover:text-white"/></button>
             </div>
-          )}
-          {weekGroups.map(([week, orders]) => {
-            const isCollapsed = collapsedWeeks.has(week);
-            return (
-              <div key={week} className="border border-slate-800 rounded-xl overflow-hidden">
-                <button
-                  onClick={() => setCollapsedWeeks(prev => { const n = new Set(prev); n.has(week) ? n.delete(week) : n.add(week); return n; })}
-                  className="w-full flex items-center justify-between px-4 py-2.5 bg-slate-800/60 hover:bg-slate-800 transition-colors"
-                >
-                  <div className="flex items-center gap-2">
-                    <Calendar className="w-3.5 h-3.5 text-slate-500"/>
-                    <span className="text-sm font-semibold text-slate-300">{week}</span>
-                    <span className="text-xs text-slate-500">({orders.length} pedido{orders.length > 1 ? 's' : ''})</span>
-                    <span className="text-xs text-amber-400/70">{fmtCurrency(orders.reduce((s,o) => s + o.totalValue, 0))}</span>
-                  </div>
-                  {isCollapsed ? <ChevronDown className="w-4 h-4 text-slate-500"/> : <ChevronUp className="w-4 h-4 text-slate-500"/>}
+            <div className="p-5 space-y-5">
+              
+              {/* Seleção de Fornecedor */}
+              <div className="relative" ref={uploadSupplierRef}>
+                <label className="text-xs text-slate-400 block mb-1">Selecione o Fornecedor Origem *</label>
+                <button type="button" onClick={() => setUploadSupplierOpen(o => !o)}
+                  className={`w-full flex items-center justify-between px-3 py-2 border rounded-lg text-sm transition-colors ${!uploadSupplierId ? 'bg-slate-800/60 border-slate-700 text-slate-400' : 'bg-slate-800 border-purple-500/50 text-white'}`}>
+                  <span className="truncate">{uploadSupplierId ? suppliers.find(s => s.id === uploadSupplierId)?.name : 'Selecionar fornecedor...'}</span>
+                  <ChevronDown className={`w-4 h-4 text-slate-400 shrink-0 transition-transform ${uploadSupplierOpen ? 'rotate-180' : ''}`}/>
                 </button>
-                {!isCollapsed && (
-                  <div className="p-3 space-y-2">
-                    {orders.map(renderOrderCard)}
+                {uploadSupplierOpen && (
+                  <div className="absolute top-full left-0 z-50 w-full mt-1 bg-slate-800 border border-slate-600 rounded-lg shadow-xl overflow-hidden">
+                    <div className="p-2 border-b border-slate-700 relative">
+                      <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400"/>
+                      <input type="text" autoFocus placeholder="Buscar..." value={uploadSupplierSearch} onChange={e => setUploadSupplierSearch(e.target.value)} className="w-full pl-8 pr-3 py-1.5 bg-slate-900 border border-slate-700 rounded text-sm text-white focus:outline-none"/>
+                    </div>
+                    <div className="max-h-40 overflow-y-auto">
+                      {suppliers.filter(s => s.name.toLowerCase().includes(uploadSupplierSearch.toLowerCase())).map(s => (
+                        <button key={s.id} type="button" onClick={() => { setUploadSupplierId(s.id); setUploadSupplierOpen(false); }} className={`w-full text-left px-3 py-2 text-sm transition-colors flex items-center gap-2 ${uploadSupplierId === s.id ? 'bg-purple-600 text-white' : 'text-slate-200 hover:bg-slate-700'}`}>
+                          {s.name}
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 )}
               </div>
-            );
-          })}
 
-          {/* Concluídos */}
-          {closedOrders.length > 0 && (
-            <div className="border border-slate-800 rounded-xl overflow-hidden">
-              <button
-                onClick={() => setCollapsedSections(p => ({ ...p, closed: !p.closed }))}
-                className="w-full flex items-center justify-between px-4 py-2.5 bg-slate-800/40 hover:bg-slate-800/60 transition-colors"
+              {/* Dropzone */}
+              <div 
+                className={`border-2 border-dashed rounded-xl p-8 flex flex-col items-center justify-center text-center transition-all ${!uploadSupplierId ? 'opacity-50 pointer-events-none border-slate-800 bg-slate-900/50' : isDragging ? 'border-purple-500 bg-purple-900/20' : 'border-slate-700 hover:border-purple-500/50 hover:bg-slate-800/50'}`}
+                onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
+                onDragLeave={() => setIsDragging(false)}
+                onDrop={handleDrop}
               >
-                <div className="flex items-center gap-2">
-                  <CheckCircle className="w-3.5 h-3.5 text-green-500"/>
-                  <span className="text-sm font-semibold text-slate-400">Concluídos</span>
-                  <span className="text-xs text-slate-600">({closedOrders.length})</span>
-                </div>
-                {collapsedSections.closed ? <ChevronDown className="w-4 h-4 text-slate-600"/> : <ChevronUp className="w-4 h-4 text-slate-600"/>}
-              </button>
-              {!collapsedSections.closed && (
-                <div className="p-3 space-y-2">{closedOrders.map(renderOrderCard)}</div>
-              )}
-            </div>
-          )}
-
-          {/* Cancelados */}
-          {cancelledOrders.length > 0 && (
-            <div className="border border-red-900/20 rounded-xl overflow-hidden">
-              <button
-                onClick={() => setCollapsedSections(p => ({ ...p, cancelled: !p.cancelled }))}
-                className="w-full flex items-center justify-between px-4 py-2.5 bg-red-950/10 hover:bg-red-950/20 transition-colors"
-              >
-                <div className="flex items-center gap-2">
-                  <XCircle className="w-3.5 h-3.5 text-red-500"/>
-                  <span className="text-sm font-semibold text-slate-500">Cancelados</span>
-                  <span className="text-xs text-slate-600">({cancelledOrders.length})</span>
-                </div>
-                {collapsedSections.cancelled ? <ChevronDown className="w-4 h-4 text-slate-600"/> : <ChevronUp className="w-4 h-4 text-slate-600"/>}
-              </button>
-              {!collapsedSections.cancelled && (
-                <div className="p-3 space-y-2">{cancelledOrders.map(renderOrderCard)}</div>
-              )}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* MODO OBJETIVO — lista flat */}
-      {viewMode === 'objective' && (
-        <div className="space-y-2">
-          {sortedOrders.length === 0 ? (
-            <div className="text-center py-12 text-slate-600">
-              <ClipboardList className="w-10 h-10 mx-auto mb-3 opacity-30"/>
-              <p className="text-sm">Nenhum pedido ainda.</p>
-            </div>
-          ) : sortedOrders.map(renderOrderCard)}
-        </div>
-      )}
-
-      {/* ── MODAL: Criar pedido ── */}
-      {showCreateModal && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-md shadow-2xl">
-            <div className="p-4 border-b border-slate-800 flex items-center justify-between">
-              <h3 className="font-bold text-white flex items-center gap-2"><ShoppingCart className="w-4 h-4 text-amber-400"/> Criar Pedido de Compra</h3>
-              <button onClick={() => setShowCreateModal(false)}><X className="w-5 h-5 text-slate-500 hover:text-white"/></button>
-            </div>
-            <div className="p-4 space-y-4">
-              <div>
-                <label className="text-xs text-slate-400 block mb-1">Fornecedor</label>
-                <select value={newOrderSupplierId} onChange={e => setNewOrderSupplierId(e.target.value)}
-                  className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-amber-500">
-                  <option value="">Selecionar...</option>
-                  {cartSupplierIds.map(id => {
-                    const s = suppliers.find(s => s.id === id);
-                    const count = cart.filter(i => i.supplierId === id).length;
-                    return <option key={id} value={id}>{s?.name || id} ({count} itens)</option>;
-                  })}
-                </select>
+                 {isProcessing ? (
+                   <div className="flex flex-col items-center gap-3 py-2">
+                     <div className="w-10 h-10 border-4 border-purple-500/30 border-t-purple-500 rounded-full animate-spin"></div>
+                     <p className="text-sm font-semibold text-purple-400">Processando documento via IA...</p>
+                   </div>
+                 ) : (
+                   <>
+                     <div className="w-12 h-12 rounded-full bg-slate-800 flex items-center justify-center mb-3">
+                       <UploadCloud className="w-6 h-6 text-purple-400"/>
+                     </div>
+                     <p className="text-sm font-bold text-white mb-1">Arraste a nota fiscal (PDF/XML/Img)</p>
+                     <p className="text-xs text-slate-500 mb-4">A inteligência extrairá os itens, quantidades e valores.</p>
+                     <label className="cursor-pointer bg-slate-800 border border-slate-700 hover:bg-slate-700 text-white px-4 py-2 rounded-lg text-xs font-semibold transition-colors">
+                       Procurar arquivo
+                       <input type="file" className="hidden" accept=".pdf,.xml,image/*" onChange={e => { if(e.target.files?.length) handleFileUpload(e.target.files[0]); }}/>
+                     </label>
+                   </>
+                 )}
               </div>
-              {newOrderSupplierId && (
-                <div className="bg-slate-800/50 rounded-lg p-3 text-xs space-y-1">
-                  {cart.filter(i => i.supplierId === newOrderSupplierId).map((item, i) => (
-                    <div key={i} className="flex justify-between text-slate-400">
-                      <span>{item.productName} × {item.quantityToBuy}</span>
-                      <span>{fmtCurrency(item.packPrice * item.quantityToBuy)}</span>
-                    </div>
-                  ))}
-                  <div className="border-t border-slate-700 pt-1 flex justify-between font-semibold text-white">
-                    <span>Total</span>
-                    <span>{fmtCurrency(cart.filter(i => i.supplierId === newOrderSupplierId).reduce((s,i) => s + i.packPrice * i.quantityToBuy, 0))}</span>
-                  </div>
-                </div>
-              )}
-              <div>
-                <label className="text-xs text-slate-400 block mb-1">Tipo</label>
-                <div className="flex gap-2">
-                  {(['delivery', 'pickup'] as const).map(t => (
-                    <button key={t} onClick={() => setNewOrderType(t)}
-                      className={`flex-1 py-2 rounded-lg text-xs font-medium border transition-all ${newOrderType === t ? 'bg-amber-600 border-amber-500 text-white' : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-white'}`}>
-                      {t === 'delivery' ? '🚚 Entrega' : '🏪 Retirada'}
-                    </button>
-                  ))}
-                </div>
+              
+              <div className="text-xs text-slate-500 flex items-start gap-2 bg-slate-800/30 p-3 rounded-lg border border-slate-800/60">
+                <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0 mt-0.5"/>
+                <p>O pedido será criado como <strong>A Conferir</strong>. Verifique se as unidades por caixa lidas pelo OCR bateram corretamente com sua forma de compra padrão.</p>
               </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs text-slate-400 block mb-1">Data prevista</label>
-                  <input type="date" value={newOrderExpectedDate} onChange={e => setNewOrderExpectedDate(e.target.value)}
-                    className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-amber-500"/>
-                </div>
-                <div>
-                  <label className="text-xs text-slate-400 block mb-1">Hora prevista</label>
-                  <input type="time" value={newOrderExpectedTime} onChange={e => setNewOrderExpectedTime(e.target.value)}
-                    className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-amber-500"/>
-                </div>
-              </div>
-            </div>
-            <div className="p-4 border-t border-slate-800 flex justify-end gap-2">
-              <button onClick={() => setShowCreateModal(false)} className="px-4 py-2 rounded-xl text-sm text-slate-400 hover:text-white">Cancelar</button>
-              <button onClick={createFromCart} disabled={!newOrderSupplierId}
-                className="px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white text-sm font-semibold flex items-center gap-2">
-                <Plus className="w-4 h-4"/> Criar Pedido
-              </button>
+
             </div>
           </div>
         </div>
       )}
 
-      {/* ── MODAL: Novo Pedido Manual ── */}
+      {/* ── MODALS (Novo Pedido Manual Simplificado) ── */}
       {showManualModal && (
         <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-3xl shadow-2xl flex flex-col max-h-[90vh]">
-
-            {/* Header */}
             <div className="p-4 border-b border-slate-800 flex items-center justify-between shrink-0">
               <div className="flex items-center gap-2">
                 <Plus className="w-4 h-4 text-amber-400"/>
                 <h3 className="font-bold text-white">Novo Pedido Manual</h3>
-                {Object.keys(manualQtys).length > 0 && (
-                  <span className="bg-amber-600 text-white text-[10px] font-bold px-2 py-0.5 rounded-full">
-                    {Object.keys(manualQtys).length} {Object.keys(manualQtys).length === 1 ? 'item' : 'itens'}
-                  </span>
-                )}
               </div>
               <button onClick={() => { setShowManualModal(false); setManualSupplierId(''); setManualSearch(''); setManualQtys({}); setManualSupplierSearch(''); setManualSupplierOpen(false); }}>
                 <X className="w-5 h-5 text-slate-500 hover:text-white"/>
               </button>
             </div>
-
-            {/* Body: 2 colunas */}
+            
             <div className="flex flex-1 min-h-0">
-
-              {/* Coluna esquerda — Catálogo */}
               <div className="flex flex-col flex-[3] p-4 gap-3 border-r border-slate-800 min-h-0">
-
-                {/* Combobox de fornecedor */}
                 <div className="relative shrink-0" ref={manualSupplierRef}>
                   <label className="text-xs text-slate-400 block mb-1">Fornecedor</label>
-                  <button
-                    type="button"
-                    onClick={() => setManualSupplierOpen(o => !o)}
-                    className={`w-full flex items-center justify-between px-3 py-2 border rounded-lg text-sm transition-colors ${
-                      !manualSupplierId ? 'bg-slate-800/60 border-slate-700 text-slate-400' : 'bg-slate-800 border-amber-600/50 text-white'
-                    }`}
-                  >
-                    <span className="truncate">{manualSupplierId ? suppliers.find(s => s.id === manualSupplierId)?.name : 'Selecionar fornecedor...'}</span>
+                  <button type="button" onClick={() => setManualSupplierOpen(o => !o)}
+                    className={`w-full flex items-center justify-between px-3 py-2 border rounded-lg text-sm transition-colors ${!manualSupplierId ? 'bg-slate-800/60 border-slate-700 text-slate-400' : 'bg-slate-800 border-amber-600/50 text-white'}`}>
+                    <span className="truncate">{manualSupplierId ? suppliers.find(s => s.id === manualSupplierId)?.name : 'Selecionar...'}</span>
                     <ChevronDown className={`w-4 h-4 text-slate-400 shrink-0 transition-transform ${manualSupplierOpen ? 'rotate-180' : ''}`}/>
                   </button>
                   {manualSupplierOpen && (
                     <div className="absolute top-full left-0 z-50 w-full mt-1 bg-slate-800 border border-slate-600 rounded-lg shadow-xl overflow-hidden">
                       <div className="p-2 border-b border-slate-700 relative">
                         <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400"/>
-                        <input
-                          type="text"
-                          autoFocus
-                          placeholder="Buscar..."
-                          value={manualSupplierSearch}
-                          onChange={e => setManualSupplierSearch(e.target.value)}
-                          className="w-full pl-8 pr-3 py-1.5 bg-slate-900 border border-slate-700 rounded text-sm text-white focus:outline-none focus:border-amber-500"
-                        />
+                        <input type="text" autoFocus placeholder="Buscar..." value={manualSupplierSearch} onChange={e => setManualSupplierSearch(e.target.value)} className="w-full pl-8 pr-3 py-1.5 bg-slate-900 border border-slate-700 rounded text-sm text-white focus:outline-none"/>
                       </div>
                       <div className="max-h-40 overflow-y-auto">
-                        {suppliers.filter(s => s.name.toLowerCase().includes(manualSupplierSearch.toLowerCase())).length === 0 ? (
-                          <div className="p-3 text-xs text-slate-500 text-center">Nenhum encontrado</div>
-                        ) : suppliers.filter(s => s.name.toLowerCase().includes(manualSupplierSearch.toLowerCase())).map(s => (
-                          <button
-                            key={s.id}
-                            type="button"
-                            onClick={() => { setManualSupplierId(s.id); setManualSearch(''); setManualQtys({}); setManualSupplierOpen(false); setManualSupplierSearch(''); }}
-                            className={`w-full text-left px-3 py-2 text-sm transition-colors flex items-center gap-2 ${manualSupplierId === s.id ? 'bg-amber-600 text-white' : 'text-slate-200 hover:bg-slate-700'}`}
-                          >
+                        {suppliers.filter(s => s.name.toLowerCase().includes(manualSupplierSearch.toLowerCase())).map(s => (
+                          <button key={s.id} type="button" onClick={() => { setManualSupplierId(s.id); setManualSearch(''); setManualQtys({}); setManualSupplierOpen(false); setManualSupplierSearch(''); }} className={`w-full text-left px-3 py-2 text-sm transition-colors flex items-center gap-2 ${manualSupplierId === s.id ? 'bg-amber-600 text-white' : 'text-slate-200 hover:bg-slate-700'}`}>
                             {manualSupplierId === s.id && <Check className="w-3.5 h-3.5 shrink-0"/>}
                             {s.name}
                           </button>
@@ -751,127 +859,121 @@ const OrderManager: React.FC<OrderManagerProps> = ({
                   )}
                 </div>
 
-                {/* Busca de produto */}
                 {manualSupplierId && (
                   <div className="relative shrink-0">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-500"/>
-                    <input
-                      type="text"
-                      placeholder="Buscar produto no catálogo..."
-                      value={manualSearch}
-                      onChange={e => setManualSearch(e.target.value)}
-                      className="w-full bg-slate-800 border border-slate-700 rounded-lg pl-8 pr-3 py-2 text-white text-sm focus:outline-none focus:border-amber-500 placeholder-slate-600"
-                    />
+                    <input type="text" placeholder="Buscar produto..." value={manualSearch} onChange={e => setManualSearch(e.target.value)} className="w-full bg-slate-800 border border-slate-700 rounded-lg pl-8 pr-3 py-2 text-white text-sm focus:outline-none focus:border-amber-500"/>
                   </div>
                 )}
 
-                {/* Lista de produtos */}
                 <div className="flex-1 overflow-y-auto min-h-0">
-                  {!manualSupplierId ? (
-                    <div className="flex items-center justify-center h-full text-slate-600 text-xs">Selecione um fornecedor para ver os produtos</div>
-                  ) : !supplierCatalogs[manualSupplierId] || supplierCatalogs[manualSupplierId].products.length === 0 ? (
-                    <div className="flex items-center justify-center h-full text-slate-600 text-xs">Este fornecedor não tem produtos no catálogo ainda</div>
-                  ) : manualFilteredProducts.length === 0 ? (
-                    <div className="flex items-center justify-center h-full text-slate-600 text-xs">Nenhum produto encontrado</div>
-                  ) : (
-                    <div className="space-y-1 pr-1">
-                      {manualFilteredProducts.map(p => {
-                        const qty = manualQtys[p.id] || 0;
-                        const isAdded = qty > 0;
-                        return (
-                          <div key={p.id}
-                            className={`flex items-center justify-between gap-2 px-3 py-2 rounded-lg transition-all ${
-                              isAdded
-                                ? 'bg-amber-950/40 border border-amber-600/50'
-                                : 'bg-slate-800/50 border border-transparent hover:border-slate-700'
-                            }`}>
-                            <div className="flex-1 min-w-0">
-                              <p className={`text-xs truncate ${isAdded ? 'text-amber-100' : 'text-slate-200'}`}>{p.name}</p>
-                              <p className="text-slate-500 text-[10px]">Cx {p.packQuantity} · {fmtCurrency(p.lastPackPrice)}/cx</p>
-                            </div>
-                            <div className="flex items-center gap-1 shrink-0">
-                              {isAdded && <Check className="w-3 h-3 text-amber-400"/>}
-                              <button
-                                onClick={() => setManualQtys(prev => { const n = { ...prev }; if ((n[p.id] || 0) <= 1) delete n[p.id]; else n[p.id]--; return n; })}
-                                className={`w-6 h-6 rounded flex items-center justify-center text-sm transition-colors ${isAdded ? 'bg-amber-800/60 hover:bg-amber-700 text-amber-100' : 'bg-slate-700 hover:bg-slate-600 text-slate-400'}`}>−</button>
-                              <span className="w-6 text-center text-white text-xs font-semibold">{qty}</span>
-                              <button
-                                onClick={() => setManualQtys(prev => ({ ...prev, [p.id]: (prev[p.id] || 0) + 1 }))}
-                                className="w-6 h-6 rounded bg-slate-700 hover:bg-amber-600 text-slate-300 hover:text-white flex items-center justify-center text-sm transition-colors">+</button>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
+                  {manualFilteredProducts.map(p => {
+                    const qty = manualQtys[p.id] || 0;
+                    return (
+                      <div key={p.id} className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg transition-all hover:bg-slate-800/50">
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs truncate text-slate-200">{p.name}</p>
+                          <p className="text-slate-500 text-[10px]">Cx {p.packQuantity} · {fmtCurrency(p.lastPackPrice)}/cx</p>
+                        </div>
+                        <div className="flex items-center gap-1 shrink-0">
+                          <button onClick={() => setManualQtys(prev => { const n = { ...prev }; if ((n[p.id] || 0) <= 1) delete n[p.id]; else n[p.id]--; return n; })} className="w-6 h-6 rounded bg-slate-700 hover:bg-slate-600 text-slate-400">−</button>
+                          <span className="w-6 text-center text-white text-xs font-semibold">{qty}</span>
+                          <button onClick={() => setManualQtys(prev => ({ ...prev, [p.id]: (prev[p.id] || 0) + 1 }))} className="w-6 h-6 rounded bg-slate-700 hover:bg-amber-600 text-slate-300 hover:text-white flex items-center justify-center text-sm">+</button>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
 
-              {/* Coluna direita — Resumo */}
               <div className="flex flex-col flex-[2] p-4 min-h-0">
                 <p className="text-xs text-slate-400 font-semibold mb-3 shrink-0">Resumo do Pedido</p>
-
-                {Object.keys(manualQtys).length === 0 ? (
-                  <div className="flex-1 flex flex-col items-center justify-center text-center gap-2">
-                    <ShoppingCart className="w-8 h-8 text-slate-700"/>
-                    <p className="text-xs text-slate-600">Adicione produtos<br/>ao lado para montar<br/>o pedido</p>
-                  </div>
-                ) : (
-                  <div className="flex-1 overflow-y-auto min-h-0 space-y-1 pr-1 mb-3">
-                    {(Object.entries(manualQtys) as [string, number][]).map(([productId, qty]) => {
-                      const p = supplierCatalogs[manualSupplierId]?.products.find(pr => pr.id === productId);
-                      if (!p) return null;
-                      return (
-                        <div key={productId} className="flex items-start gap-2 py-1.5 border-b border-slate-800/60 last:border-0">
-                          <div className="flex-1 min-w-0">
-                            <p className="text-xs text-slate-300 truncate leading-tight">{p.name}</p>
-                            <p className="text-[10px] text-slate-500">× {qty}cx · {fmtCurrency(p.lastPackPrice * qty)}</p>
-                          </div>
-                          <button
-                            onClick={() => setManualQtys(prev => { const n = { ...prev }; delete n[productId]; return n; })}
-                            className="shrink-0 w-5 h-5 rounded hover:bg-red-900/40 text-slate-600 hover:text-red-400 flex items-center justify-center transition-colors mt-0.5">
-                            <X className="w-3 h-3"/>
-                          </button>
+                <div className="flex-1 overflow-y-auto min-h-0 space-y-1 mb-3">
+                  {(Object.entries(manualQtys) as [string, number][]).map(([productId, qty]) => {
+                    const p = supplierCatalogs[manualSupplierId]?.products.find(pr => pr.id === productId);
+                    if (!p) return null;
+                    return (
+                      <div key={productId} className="flex items-start gap-2 py-1.5 border-b border-slate-800/60 last:border-0">
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs text-slate-300 truncate">{p.name}</p>
+                          <p className="text-[10px] text-slate-500">{qty}cx · {fmtCurrency(p.lastPackPrice * qty)}</p>
                         </div>
-                      );
-                    })}
-                  </div>
-                )}
-
-                {/* Total + Botões */}
+                      </div>
+                    );
+                  })}
+                </div>
                 <div className="shrink-0 mt-auto space-y-3">
-                  {Object.keys(manualQtys).length > 0 && (
-                    <div className="flex justify-between items-center border-t border-slate-700 pt-2">
-                      <span className="text-xs text-slate-400">Total</span>
-                      <span className="text-sm font-bold text-white">
-                        {fmtCurrency((Object.entries(manualQtys) as [string, number][]).reduce((s, [id, qty]) => {
-                          const p = supplierCatalogs[manualSupplierId]?.products.find(pr => pr.id === id);
-                          return s + (p?.lastPackPrice || 0) * qty;
-                        }, 0))}
-                      </span>
-                    </div>
-                  )}
-                  <div className="flex flex-col gap-2">
-                    <button onClick={createManualOrder}
-                      disabled={!manualSupplierId || Object.keys(manualQtys).length === 0}
-                      className="w-full px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 disabled:opacity-40 text-white text-sm font-semibold flex items-center justify-center gap-2 transition-colors">
-                      <Plus className="w-4 h-4"/> Criar Pedido
-                    </button>
-                    <button onClick={() => { setShowManualModal(false); setManualSupplierId(''); setManualSearch(''); setManualQtys({}); setManualSupplierSearch(''); setManualSupplierOpen(false); }}
-                      className="w-full px-4 py-2 rounded-xl text-sm text-slate-500 hover:text-white transition-colors">
-                      Cancelar
-                    </button>
+                  <div className="flex justify-between items-center border-t border-slate-700 pt-2">
+                    <span className="text-xs text-slate-400">Total</span>
+                    <span className="text-sm font-bold text-white">
+                      {fmtCurrency((Object.entries(manualQtys) as [string, number][]).reduce((s, [id, qty]) => {
+                        const p = supplierCatalogs[manualSupplierId]?.products.find(pr => pr.id === id);
+                        return s + (p?.lastPackPrice || 0) * qty;
+                      }, 0))}
+                    </span>
                   </div>
+                  <button onClick={createManualOrder} disabled={!manualSupplierId || Object.keys(manualQtys).length === 0}
+                    className="w-full px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 disabled:opacity-40 text-white text-sm font-semibold transition-colors">
+                    Criar Pedido
+                  </button>
                 </div>
               </div>
-
             </div>
           </div>
         </div>
       )}
 
-      {/* ── MODAL: Cancelar pedido ── */}
-      {showCancelModal && selectedOrder && (
+      {/* ── MODALS (Vincular Nota Fiscal a Pedido) ── */}
+      {linkInvoiceData && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-purple-600/30 rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+            <div className="p-4 border-b border-slate-800 flex justify-between items-center bg-purple-900/10">
+              <div className="flex items-center gap-2">
+                <UploadCloud className="w-5 h-5 text-purple-400"/>
+                <h3 className="font-bold text-white text-lg">Vincular Nota Fiscal</h3>
+              </div>
+              <button onClick={() => setLinkInvoiceData(null)} className="text-slate-500 hover:text-white"><X className="w-5 h-5"/></button>
+            </div>
+            
+            <div className="p-5 flex-1 overflow-y-auto custom-scrollbar bg-slate-950/30">
+              <p className="text-sm text-slate-300 mb-4 leading-relaxed">
+                Encontramos pedidos em aberto para o fornecedor <strong className="text-white">{suppliers.find(s=>s.id === linkInvoiceData.supplierId)?.name}</strong>. 
+                Deseja vincular os itens desta nota a um pedido existente (realizando o cruzamento automático) ou lançar como nota avulsa?
+              </p>
+              
+              <div className="space-y-3">
+                {linkInvoiceData.pendingOrders.map(po => (
+                  <button key={po.id} onClick={() => handleLinkInvoice(po.id)} 
+                    className="w-full text-left p-3 rounded-xl border border-slate-700 bg-slate-800/50 hover:bg-slate-800 hover:border-amber-500/50 transition-colors flex justify-between items-center group">
+                    <div>
+                      <div className="text-slate-200 font-bold text-sm group-hover:text-amber-400 transition-colors">Pedido de {fmtDate(po.createdAt)}</div>
+                      <div className="text-slate-400 text-xs mt-1">{po.items.length} itens • {fmtCurrency(po.totalValue)}</div>
+                      <div className="text-[10px] text-slate-500 mt-1 uppercase font-semibold">{STATUS_LABEL[po.status]}</div>
+                    </div>
+                    <span className="text-amber-500 text-xs font-bold px-3 py-1.5 bg-amber-500/10 rounded-lg group-hover:bg-amber-500/20 transition-colors">Vincular</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+            
+            <div className="p-4 border-t border-slate-800 bg-slate-900 flex items-center justify-between">
+              <button onClick={() => setLinkInvoiceData(null)} className="px-4 py-2 text-slate-400 hover:text-white text-sm font-semibold transition-colors">
+                Cancelar
+              </button>
+              <button onClick={() => {
+                  createStandaloneInvoice(linkInvoiceData.file, suppliers.find(s=>s.id === linkInvoiceData.supplierId)!, linkInvoiceData.items, linkInvoiceData.detectedDate || Date.now(), linkInvoiceData.items.reduce((s,i)=>s+i.totalCost,0));
+                  setLinkInvoiceData(null);
+                }} 
+                className="px-5 py-2.5 bg-purple-600 hover:bg-purple-500 text-white rounded-xl text-sm font-bold shadow-lg shadow-purple-900/20 transition-all">
+                Criar Nota Avulsa
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── MODALS (Cancelar Pedido) ── */}
+      {showCancelModal && expandedOrderId && (
         <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-slate-900 border border-red-900/40 rounded-2xl w-full max-w-sm shadow-2xl">
             <div className="p-4 border-b border-slate-800 flex items-center justify-between">
@@ -879,36 +981,40 @@ const OrderManager: React.FC<OrderManagerProps> = ({
               <button onClick={() => setShowCancelModal(false)}><X className="w-5 h-5 text-slate-500 hover:text-white"/></button>
             </div>
             <div className="p-4 space-y-3">
-              <p className="text-sm text-slate-400">Pedido <strong className="text-white">{selectedOrder.supplierName}</strong> — {fmtCurrency(selectedOrder.totalValue)}</p>
               <div>
-                <label className="text-xs text-slate-400 block mb-1">Motivo *</label>
-                <select value={cancelReason} onChange={e => setCancelReason(e.target.value)}
-                  className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-red-500">
-                  <option value="">Selecionar...</option>
-                  <option value="sem_estoque">Sem estoque no fornecedor</option>
-                  <option value="preco">Preço fora do esperado</option>
-                  <option value="erro">Pedido criado por engano</option>
-                  <option value="outro">Outro</option>
+                <label className="text-xs text-slate-400 mb-1 block">Motivo do cancelamento (Curto)</label>
+                <select value={cancelReason} onChange={e => setCancelReason(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-red-500">
+                  <option value="">Selecione...</option>
+                  <option value="supplier_out_of_stock">Fornecedor sem estoque</option>
+                  <option value="price_divergence">Divergência grave de preço</option>
+                  <option value="delay">Atraso inaceitável</option>
+                  <option value="wrong_order">Pedido feito errado</option>
+                  <option value="other">Outro</option>
                 </select>
-              </div>
-              <div>
-                <label className="text-xs text-slate-400 block mb-1">Observação (opcional)</label>
-                <textarea value={cancelNote} onChange={e => setCancelNote(e.target.value)} rows={2} placeholder="Detalhes adicionais..."
-                  className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-red-500 resize-none"/>
               </div>
             </div>
             <div className="p-4 border-t border-slate-800 flex justify-end gap-2">
               <button onClick={() => setShowCancelModal(false)} className="px-4 py-2 rounded-xl text-sm text-slate-400 hover:text-white">Voltar</button>
-              <button onClick={() => handleCancel(selectedOrder.id)} disabled={!cancelReason}
-                className="px-4 py-2 rounded-xl bg-red-700 hover:bg-red-600 disabled:opacity-50 text-white text-sm font-semibold flex items-center gap-2">
-                <XCircle className="w-4 h-4"/> Confirmar Cancelamento
+              <button onClick={() => handleCancel(expandedOrderId)} disabled={!cancelReason}
+                className="px-4 py-2 rounded-xl bg-red-700 hover:bg-red-600 disabled:opacity-50 text-white text-sm font-semibold">
+                Confirmar
               </button>
             </div>
           </div>
         </div>
       )}
+      
+      {/* ── MODALS (Conferir Carga) ── */}
+      {checkingOrder && (
+        <EditOrderModal 
+          order={checkingOrder}
+          onClose={() => setCheckingOrder(null)}
+          onSave={handleSaveCheck}
+        />
+      )}
+
     </div>
   );
-};
+}
 
 export default OrderManager;

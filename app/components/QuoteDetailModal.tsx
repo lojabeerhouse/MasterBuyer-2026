@@ -2,13 +2,15 @@ import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react'
 import { Supplier, QuoteBatch, ProductQuote, ProductMapping, MasterProduct } from '../types';
 import {
   Trash2, CheckCircle, Loader2, Ban, Pencil, Save, X, XCircle, RefreshCw,
-  Coins, BoxSelect, Sparkles, ChevronLeft, ChevronRight, Wand2, ChevronDown,
+  Coins, BoxSelect, Sparkles, ChevronLeft, ChevronRight, ChevronDown,
   ChevronUp, AlertTriangle, Check, CheckSquare, Square, Search, Bot, Eye, Link2, Unlink,
-  Star, RotateCcw, ShieldAlert,
+  Star, RotateCcw, ShieldAlert, Calendar,
 } from 'lucide-react';
-import { generateProductVariations, batchSmartIdentify } from '../services/geminiService';
+import { batchSmartIdentify } from '../services/geminiService';
 import { normalizeProductName, normForMapping, findMasterProductMatches } from '../services/supplierCatalogService';
 import LinkProductModal from './LinkProductModal';
+import { useSidebar } from '../contexts/RightSidebarContext';
+import QuoteActionsPanel from './QuoteActionsPanel';
 
 // ─── Props ────────────────────────────────────────────────────────────────────
 
@@ -61,16 +63,9 @@ const QuoteDetailModal: React.FC<QuoteDetailModalProps> = ({
   // ── Selection & batch magic ──────────────────────────────────────────────────
   const [selectedPendingItems, setSelectedPendingItems] = useState<Set<number>>(new Set());
   const [isBatchProcessing, setIsBatchProcessing] = useState(false);
-
   // ── Draft values (local only — synced to global on blur or save) ─────────────
-  // Prevents re-render cascade (setSuppliers → Firebase) on every keystroke
   const [draftQty, setDraftQty] = useState<Record<number, number>>({});
   const [draftPrice, setDraftPrice] = useState<Record<number, number>>({});
-
-  // ── AI Suggestions ───────────────────────────────────────────────────────────
-  const [suggestionsMap, setSuggestionsMap] = useState<Record<string, string[]>>({});
-  const [suggestionIndexMap, setSuggestionIndexMap] = useState<Record<string, number>>({});
-  const [loadingSuggestions, setLoadingSuggestions] = useState<Set<string>>(new Set());
 
   // ── Item name editing ────────────────────────────────────────────────────────
   const [editingItemId, setEditingItemId] = useState<number | null>(null);
@@ -97,6 +92,9 @@ const QuoteDetailModal: React.FC<QuoteDetailModalProps> = ({
   const [revealedSuggestions, setRevealedSuggestions] = useState<Map<number, { sku: string; name: string; score: number }>>(new Map());
   const computedSuggestionIdxs = useRef<Set<number>>(new Set());
 
+  // ── Sidebar Context ───────────────────────────────────────────────────
+  const { setSidebarContent, clearSidebar } = useSidebar();
+
   // Reset selection and lazy suggestions when batch id changes
   useEffect(() => {
     setSelectedPendingItems(new Set());
@@ -106,13 +104,6 @@ const QuoteDetailModal: React.FC<QuoteDetailModalProps> = ({
   }, [viewingBatch.id]);
 
   // ── Helper: sync items to parent suppliers state ─────────────────────────────
-  const updateGlobalItems = (batchId: string, newItems: ProductQuote[]) => {
-    setSuppliers(prev => prev.map(s => {
-      if (s.id !== supplierId) return s;
-      return { ...s, quotes: s.quotes.map(q => q.id !== batchId ? q : { ...q, items: newItems }) };
-    }));
-  };
-
   // ── Batch date editing ───────────────────────────────────────────────────────
   const startEditingBatchDate = (batch: QuoteBatch) => {
     const d = new Date(batch.timestamp);
@@ -139,9 +130,10 @@ const QuoteDetailModal: React.FC<QuoteDetailModalProps> = ({
     const now = Date.now();
     const saved = { ...viewingBatch, isSaved: true, savedAt: now };
     batchSnapshot.current = JSON.parse(JSON.stringify(saved));
+    // Única escrita no estado global (dispara Firebase via useEffect no App.tsx)
     setSuppliers(prev => prev.map(s => {
       if (s.id !== supplierId) return s;
-      return { ...s, quotes: s.quotes.map(q => q.id === viewingBatch.id ? { ...q, isSaved: true, savedAt: now } : q) };
+      return { ...s, quotes: s.quotes.map(q => q.id === viewingBatch.id ? saved : q) };
     }));
     setViewingBatch(saved);
     onBatchCompleted?.(saved, supplierId);
@@ -166,26 +158,12 @@ const QuoteDetailModal: React.FC<QuoteDetailModalProps> = ({
   };
 
   const handleDiscardAndClose = () => {
-    const snap = batchSnapshot.current;
-    setSuppliers(prev => prev.map(s => {
-      if (s.id !== supplierId) return s;
-      return { ...s, quotes: s.quotes.map(q => q.id === snap.id ? snap : q) };
-    }));
+    // Estado global nunca foi alterado durante edição — só fecha
     onClose();
   };
 
   // ── Item deletion ────────────────────────────────────────────────────────────
   const deleteItemFromBatch = (batchId: string, itemIndex: number) => {
-    setSuppliers(prev => prev.map(s => {
-      if (s.id !== supplierId) return s;
-      return {
-        ...s,
-        quotes: s.quotes.map(q => {
-          if (q.id !== batchId) return q;
-          return { ...q, items: q.items.filter((_, idx) => idx !== itemIndex) };
-        })
-      };
-    }));
     setViewingBatch(prev => {
       if (prev.id !== batchId) return prev;
       return { ...prev, items: prev.items.filter((_, idx) => idx !== itemIndex) };
@@ -228,70 +206,16 @@ const QuoteDetailModal: React.FC<QuoteDetailModalProps> = ({
     setEditingItemId(index);
     setTempItemName(currentName);
     const key = `${viewingBatch.id}-${index}`;
-    if (suggestionsMap[key]) cancelSuggestion(viewingBatch.id, index);
   };
 
-  const saveItemName = (batchId: string, itemIndex: number, newName: string) => {
-    const updatedItems = viewingBatch.items.map((item, idx) =>
-      idx === itemIndex ? { ...item, name: newName } : item
-    );
-    setViewingBatch(prev => ({ ...prev, items: updatedItems }));
-    updateGlobalItems(batchId, updatedItems);
+  const saveItemName = (_batchId: string, itemIndex: number, newName: string) => {
+    setViewingBatch(prev => ({
+      ...prev,
+      items: prev.items.map((item, idx) =>
+        idx === itemIndex ? { ...item, name: newName, isAiSuggested: false } : item
+      ),
+    }));
     setEditingItemId(null);
-  };
-
-  // ── AI Suggestions ───────────────────────────────────────────────────────────
-  const fetchSuggestions = async (batchId: string, itemIndex: number, currentName: string, forceRefresh = false) => {
-    const key = `${batchId}-${itemIndex}`;
-    if (suggestionsMap[key] && !forceRefresh) return;
-    setLoadingSuggestions(prev => new Set(prev).add(key));
-    try {
-      const variations = await generateProductVariations(currentName);
-      if (variations.length > 0) {
-        setSuggestionsMap(prev => ({ ...prev, [key]: variations }));
-        setSuggestionIndexMap(prev => ({ ...prev, [key]: 0 }));
-      } else {
-        if (!forceRefresh) alert('Não encontrei sugestões para este produto.');
-      }
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setLoadingSuggestions(prev => {
-        const next = new Set(prev);
-        next.delete(key);
-        return next;
-      });
-    }
-  };
-
-  const cycleSuggestion = (batchId: string, itemIndex: number, direction: 'prev' | 'next') => {
-    const key = `${batchId}-${itemIndex}`;
-    const list = suggestionsMap[key] || [];
-    if (list.length === 0) return;
-    setSuggestionIndexMap(prev => {
-      const current = prev[key] || 0;
-      let next = direction === 'next' ? current + 1 : current - 1;
-      if (next >= list.length) next = 0;
-      if (next < 0) next = list.length - 1;
-      return { ...prev, [key]: next };
-    });
-  };
-
-  const applySuggestion = (batchId: string, itemIndex: number) => {
-    const key = `${batchId}-${itemIndex}`;
-    const list = suggestionsMap[key];
-    const idx = suggestionIndexMap[key] || 0;
-    if (list && list[idx]) {
-      saveItemName(batchId, itemIndex, list[idx]);
-      cancelSuggestion(batchId, itemIndex);
-    }
-  };
-
-  const cancelSuggestion = (batchId: string, itemIndex: number) => {
-    const key = `${batchId}-${itemIndex}`;
-    const next = { ...suggestionsMap };
-    delete next[key];
-    setSuggestionsMap(next);
   };
 
   // ── Selection ────────────────────────────────────────────────────────────────
@@ -304,65 +228,125 @@ const QuoteDetailModal: React.FC<QuoteDetailModalProps> = ({
     });
   };
 
-  const toggleSelectAll = (allIndices: number[]) => {
-    if (allIndices.every(i => selectedPendingItems.has(i))) {
-      setSelectedPendingItems(new Set());
-    } else {
-      setSelectedPendingItems(new Set(allIndices));
-    }
+  const toggleSelectAllForCategory = (indices: number[]) => {
+    const isAllSelected = indices.every(idx => selectedPendingItems.has(idx));
+    setSelectedPendingItems(prev => {
+      const next = new Set(prev);
+      if (isAllSelected) {
+        indices.forEach(idx => next.delete(idx));
+      } else {
+        indices.forEach(idx => next.add(idx));
+      }
+      return next;
+    });
   };
 
-  // ── Batch Magic (AI identify) ─────────────────────────────────────────────────
-  const handleBatchMagic = async (batchId: string, pendingItems: { item: ProductQuote; originalIndex: number }[]) => {
-    const itemsToProcess = pendingItems.filter(pi => selectedPendingItems.has(pi.originalIndex));
-    if (itemsToProcess.length === 0) {
-      alert('Selecione pelo menos um item da lista para identificar.');
-      return;
-    }
+  // ── Batch Actions ────────────────────────────────────────────────────────────
+  const handleBatchSuggestPacks = async () => {
+    if (selectedPendingItems.size === 0 || isBatchProcessing) return;
     setIsBatchProcessing(true);
-    const payload = itemsToProcess.map(pi => ({ index: pi.originalIndex, name: pi.item.name, price: pi.item.price }));
+
     try {
-      const results = await batchSmartIdentify(payload);
-      const newItems = [...viewingBatch.items];
-      results.forEach(res => {
-        if (newItems[res.index]) {
-          const oldItem = newItems[res.index];
-          const newQty = res.suggestedPackQty || oldItem.packQuantity;
-          newItems[res.index] = {
-            ...oldItem,
-            name: res.suggestedName || oldItem.name,
-            packQuantity: newQty,
-            isVerified: newQty > 1,
-            isReprocessed: false,
-            unitPrice: oldItem.priceStrategy === 'unit' ? oldItem.price : oldItem.price / newQty,
-          };
-        }
+      const itemsToProcess = Array.from(selectedPendingItems).map((idx) => {
+        const index = idx as number;
+        return {
+          index,
+          name: viewingBatch.items[index].name,
+          price: viewingBatch.items[index].price
+        };
       });
-      setViewingBatch(prev => ({ ...prev, items: newItems }));
-      updateGlobalItems(batchId, newItems);
-      setSelectedPendingItems(new Set());
+
+      const results = await batchSmartIdentify(itemsToProcess);
+
+      const nextItems = [...viewingBatch.items];
+      results.forEach((res: { index: number; suggestedPackQty: number }) => {
+        const item = nextItems[res.index];
+        const packQty = Number(res.suggestedPackQty) || 1;
+        nextItems[res.index] = {
+          ...item,
+          packQuantity: packQty,
+          unitPrice: item.priceStrategy === 'pack' ? (item.price / packQty) : item.price,
+          isAiSuggested: true
+        };
+      });
+
+      setViewingBatch({ ...viewingBatch, items: nextItems });
     } catch (e) {
       console.error(e);
-      alert('Erro na identificação em massa.');
+      alert("Erro ao sugerir lotes por IA.");
     } finally {
       setIsBatchProcessing(false);
     }
   };
 
-  // ── Item recalculation ───────────────────────────────────────────────────────
+  const handleBatchDelete = async () => {
+    if (selectedPendingItems.size === 0) return;
+    if (!confirm(`Tem certeza que deseja excluir ${selectedPendingItems.size} itens selecionados?`)) return;
+
+    const indices = Array.from(selectedPendingItems).map(i => i as number).sort((a, b) => b - a);
+    let nextItems = [...viewingBatch.items];
+    
+    indices.forEach(idx => {
+      nextItems.splice(idx, 1);
+    });
+
+    setViewingBatch({ ...viewingBatch, items: nextItems });
+    setSelectedPendingItems(new Set());
+  };
+
+  const handleBatchVerify = () => {
+    if (selectedPendingItems.size === 0) return;
+    const nextItems = viewingBatch.items.map((item, idx) => {
+      if (selectedPendingItems.has(idx)) {
+        return { ...item, isVerified: true };
+      }
+      return item;
+    });
+    setViewingBatch({ ...viewingBatch, items: nextItems });
+    setSelectedPendingItems(new Set());
+  };
+
+  const clearSelection = () => setSelectedPendingItems(new Set());
+
+  // ── Injetar / sincronizar painel na sidebar global ───────────────────────────
+  // Atualiza o conteúdo da sidebar sempre que o estado relevante muda.
+  // O cleanup do useEffect garante que a sidebar é limpa ao desmontar o modal.
+  useEffect(() => {
+    setSidebarContent(
+      <QuoteActionsPanel
+        selectedCount={selectedPendingItems.size}
+        isBatchProcessing={isBatchProcessing}
+        onIdentifyWithAI={handleBatchSuggestPacks}
+        onVerifySelected={handleBatchVerify}
+        onDeleteSelected={handleBatchDelete}
+        onClearSelection={clearSelection}
+        onSetStrategyPack={() => updateBatchStrategy(viewingBatch.id, 'pack')}
+        onSetStrategyUnit={() => updateBatchStrategy(viewingBatch.id, 'unit')}
+      />
+    );
+    return () => { clearSidebar(); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedPendingItems.size, isBatchProcessing, viewingBatch.id]);
+
   const recalculateItem = (item: ProductQuote, newStrategy?: 'pack' | 'unit', newPackQty?: number): ProductQuote => {
     const strategy = newStrategy || item.priceStrategy || 'pack';
     const qty = newPackQty !== undefined ? newPackQty : item.packQuantity;
     const unitPrice = strategy === 'unit' ? item.price : item.price / (qty || 1);
-    return { ...item, priceStrategy: strategy, packQuantity: qty, unitPrice, isVerified: qty > 1 ? true : item.isVerified };
+    return { 
+      ...item, 
+      priceStrategy: strategy, 
+      packQuantity: qty, 
+      unitPrice, 
+      isVerified: qty > 1 ? true : item.isVerified,
+      isAiSuggested: newPackQty !== undefined ? false : item.isAiSuggested
+    };
   };
 
-  const updateItemStrategy = (batchId: string, itemIndex: number, newStrategy: 'pack' | 'unit') => {
-    const updatedItems = viewingBatch.items.map((item, idx) =>
-      idx === itemIndex ? recalculateItem(item, newStrategy) : item
-    );
-    setViewingBatch(prev => ({ ...prev, items: updatedItems }));
-    updateGlobalItems(batchId, updatedItems);
+  const updateItemStrategy = (_batchId: string, itemIndex: number, newStrategy: 'pack' | 'unit') => {
+    setViewingBatch(prev => ({
+      ...prev,
+      items: prev.items.map((item, idx) => idx === itemIndex ? recalculateItem(item, newStrategy) : item),
+    }));
   };
 
   // onChange: updates local viewingBatch only (instant display, no global re-render)
@@ -375,10 +359,9 @@ const QuoteDetailModal: React.FC<QuoteDetailModalProps> = ({
     }));
   };
 
-  // onBlur: flushes local state to global (triggers parent re-render + eventual Firebase save)
-  const flushItemPackQuantity = (batchId: string, itemIndex: number) => {
+  // onBlur: apenas limpa o draft (estado local já está atualizado via onChange)
+  const flushItemPackQuantity = (itemIndex: number) => {
     setDraftQty(prev => { const n = { ...prev }; delete n[itemIndex]; return n; });
-    updateGlobalItems(batchId, viewingBatch.items);
   };
 
   // onChange: updates local viewingBatch only
@@ -390,39 +373,39 @@ const QuoteDetailModal: React.FC<QuoteDetailModalProps> = ({
       items: prev.items.map((item, idx) => {
         if (idx !== itemIndex) return item;
         const unitPrice = item.priceStrategy === 'unit' ? safePrice : safePrice / Math.max(1, item.packQuantity);
-        return { ...item, price: safePrice, unitPrice };
+        return { ...item, price: safePrice, unitPrice, isAiSuggested: false };
       }),
     }));
   };
 
-  // onBlur: flushes to global
-  const flushItemPrice = (batchId: string, itemIndex: number) => {
+  // onBlur: apenas limpa o draft
+  const flushItemPrice = (itemIndex: number) => {
     setDraftPrice(prev => { const n = { ...prev }; delete n[itemIndex]; return n; });
-    updateGlobalItems(batchId, viewingBatch.items);
   };
 
 
-  const toggleItemNovelty = (batchId: string, itemIndex: number, value: boolean) => {
-    const updatedItems = viewingBatch.items.map((item, idx) =>
-      idx === itemIndex ? { ...item, isNovelty: value } : item
-    );
-    setViewingBatch(prev => ({ ...prev, items: updatedItems }));
-    updateGlobalItems(batchId, updatedItems);
+  const toggleItemNovelty = (_batchId: string, itemIndex: number, value: boolean) => {
+    setViewingBatch(prev => ({
+      ...prev,
+      items: prev.items.map((item, idx) => idx === itemIndex ? { ...item, isNovelty: value } : item),
+    }));
   };
 
-  const toggleItemVerification = (batchId: string, itemIndex: number) => {
-    const updatedItems = viewingBatch.items.map((item, idx) => {
-      if (idx !== itemIndex) return item;
-      return { ...item, isVerified: !item.isVerified, isReprocessed: !item.isVerified ? false : item.isReprocessed };
-    });
-    setViewingBatch(prev => ({ ...prev, items: updatedItems }));
-    updateGlobalItems(batchId, updatedItems);
+  const toggleItemVerification = (_batchId: string, itemIndex: number) => {
+    setViewingBatch(prev => ({
+      ...prev,
+      items: prev.items.map((item, idx) => {
+        if (idx !== itemIndex) return item;
+        return { ...item, isVerified: !item.isVerified, isReprocessed: !item.isVerified ? false : item.isReprocessed };
+      }),
+    }));
   };
 
-  const updateBatchStrategy = (batchId: string, newStrategy: 'pack' | 'unit') => {
-    const updatedItems = viewingBatch.items.map(item => recalculateItem(item, newStrategy));
-    setViewingBatch(prev => ({ ...prev, items: updatedItems }));
-    updateGlobalItems(batchId, updatedItems);
+  const updateBatchStrategy = (_batchId: string, newStrategy: 'pack' | 'unit') => {
+    setViewingBatch(prev => ({
+      ...prev,
+      items: prev.items.map(item => recalculateItem(item, newStrategy)),
+    }));
   };
 
   // ── Item classification ──────────────────────────────────────────────────────
@@ -494,10 +477,6 @@ const QuoteDetailModal: React.FC<QuoteDetailModalProps> = ({
 
   // ── renderItemRow ─────────────────────────────────────────────────────────────
   const renderItemRow = (item: ProductQuote, idx: number, batchId: string) => {
-    const suggestKey = `${batchId}-${idx}`;
-    const suggestions = suggestionsMap[suggestKey] || [];
-    const currentSuggestIdx = suggestionIndexMap[suggestKey] || 0;
-    const isLoadingSuggestions = loadingSuggestions.has(suggestKey);
     const isVerified = item.isVerified;
     const isReprocessed = item.isReprocessed;
     const isSelected = selectedPendingItems.has(idx);
@@ -535,19 +514,17 @@ const QuoteDetailModal: React.FC<QuoteDetailModalProps> = ({
         {/* Checkbox + Auto — only visible when no suggestion (suggestion is the primary action) */}
         <td className="px-2 py-1.5 text-center w-10">
           <div className="flex flex-col items-center gap-1">
-            {!isVerified && suggestionTier === 'none' && (
-              <input type="checkbox" checked={isSelected} onChange={() => toggleSelection(idx)}
-                className="w-3.5 h-3.5 rounded border-slate-600 bg-slate-800 text-amber-600 cursor-pointer" />
-            )}
+            <input type="checkbox" checked={isSelected} onChange={() => toggleSelection(idx)}
+              className="w-3.5 h-3.5 rounded border-slate-600 bg-slate-800 text-amber-600 cursor-pointer" />
             {!isVerified && suggestionTier === 'high' && (
-              <CheckCircle className="w-3.5 h-3.5 text-emerald-500" title="Alta confiança de correspondência" />
+              <CheckCircle className="w-2.5 h-2.5 text-emerald-500/50" title="Alta confiança de correspondência" />
             )}
             {!isVerified && suggestionTier === 'low' && (
-              <AlertTriangle className="w-3.5 h-3.5 text-amber-500" title="Sugestão de baixa confiança" />
+              <AlertTriangle className="w-2.5 h-2.5 text-amber-500/50" title="Sugestão de baixa confiança" />
             )}
             {isReprocessed && (
               <span className="text-blue-400 cursor-help" title="Lote ajustado automaticamente por regra de embalagem">
-                <Bot className="w-3.5 h-3.5" />
+                <Bot className="w-3 h-3" />
               </span>
             )}
           </div>
@@ -566,27 +543,12 @@ const QuoteDetailModal: React.FC<QuoteDetailModalProps> = ({
           ) : (
             <div>
               {/* Nome + edição inline (IA de nome) */}
-              {suggestions.length > 0 ? (
-                <div className="flex items-center gap-1.5 bg-amber-900/20 border border-amber-900/50 p-1 rounded mb-1">
-                  <button onClick={() => cancelSuggestion(batchId, idx)} className="text-red-400 p-0.5"><X className="w-3 h-3" /></button>
-                  <button onClick={() => cycleSuggestion(batchId, idx, 'prev')} className="text-amber-500"><ChevronLeft className="w-3.5 h-3.5" /></button>
-                  <button onClick={() => applySuggestion(batchId, idx)} className="flex-1 text-center font-bold text-amber-400 hover:text-white text-xs px-1 rounded hover:bg-amber-600">
-                    {suggestions[currentSuggestIdx]}
-                  </button>
-                  <button onClick={() => cycleSuggestion(batchId, idx, 'next')} className="text-amber-500"><ChevronRight className="w-3.5 h-3.5" /></button>
-                  <button onClick={() => fetchSuggestions(batchId, idx, item.name, true)} className="text-blue-400 p-0.5"><RefreshCw className="w-3 h-3" /></button>
-                </div>
-              ) : (
                 <div className="flex items-center gap-1.5 group/edit mb-0.5">
                   <span className={`text-sm font-medium leading-tight ${!item.isVerified ? 'text-amber-100' : 'text-white'}`}>{item.name}</span>
                   <div className="opacity-0 group-hover/edit:opacity-100 flex items-center gap-0.5 transition-opacity shrink-0">
                     <button onClick={() => startEditingItem(idx, item.name)} className="text-slate-600 hover:text-blue-400 p-0.5 rounded" title="Editar nome"><Pencil className="w-3 h-3" /></button>
-                    <button onClick={() => fetchSuggestions(batchId, idx, item.name)} className="text-slate-600 hover:text-amber-400 p-0.5 rounded" disabled={isLoadingSuggestions} title="Sugerir nome com IA">
-                      {isLoadingSuggestions ? <Loader2 className="w-3 h-3 animate-spin" /> : <Wand2 className="w-3 h-3" />}
-                    </button>
                   </div>
                 </div>
-              )}
               {item.sku && <span className="text-[10px] text-slate-600 block mb-0.5">{item.sku}</span>}
 
               {/* ── Zona de Status — altura fixa min-h-[28px] ── */}
@@ -666,8 +628,7 @@ const QuoteDetailModal: React.FC<QuoteDetailModalProps> = ({
                   </div>
                 )}
 
-                {/* NO match */}
-                {category !== 'green' && category !== 'novelty' && suggestionTier === 'none' && !isLoadingSuggestions && (
+                {category !== 'green' && category !== 'novelty' && suggestionTier === 'none' && (
                   <div className="flex items-center gap-1.5 w-full text-[10px]">
                     <span className="text-slate-600">— Sem correspondência</span>
                     <button onClick={() => setLinkingItem(item)}
@@ -676,14 +637,6 @@ const QuoteDetailModal: React.FC<QuoteDetailModalProps> = ({
                     <button onClick={() => toggleItemNovelty(batchId, idx, true)}
                       className="flex items-center gap-0.5 text-slate-500 hover:text-violet-400 transition-colors"
                       title="Marcar como produto inédito deste fornecedor"><Star className="w-3 h-3" /><span>Inédito</span></button>
-                  </div>
-                )}
-
-                {/* Loading state */}
-                {category !== 'green' && category !== 'novelty' && isLoadingSuggestions && (
-                  <div className="flex items-center gap-1 text-[10px] text-slate-600">
-                    <Loader2 className="w-2.5 h-2.5 animate-spin" />
-                    <span>Buscando correspondência...</span>
                   </div>
                 )}
               </div>
@@ -695,8 +648,9 @@ const QuoteDetailModal: React.FC<QuoteDetailModalProps> = ({
         <td className="px-2 py-1.5 text-center w-16">
           <input type="number" min="1" value={item.packQuantity}
             onChange={(e) => updateItemPackQuantityLocal(idx, parseInt(e.target.value) || 1)}
-            onBlur={() => flushItemPackQuantity(batchId, idx)}
-            className="w-14 bg-slate-800 border border-slate-700 rounded px-1 py-1 text-center text-sm font-bold text-white focus:border-amber-500 focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
+            onBlur={() => flushItemPackQuantity(idx)}
+            className={`w-14 bg-slate-800 border rounded px-1 py-1 text-center text-sm font-bold focus:border-amber-500 focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none transition-colors ${item.isAiSuggested ? 'border-indigo-500/50 text-indigo-300 ring-1 ring-indigo-500/20' : 'border-slate-700 text-white'}`}
+            title={item.isAiSuggested ? 'Sugerido pela IA' : ''} />
         </td>
 
         {/* Estratégia */}
@@ -715,7 +669,7 @@ const QuoteDetailModal: React.FC<QuoteDetailModalProps> = ({
         <td className="px-2 py-1.5 text-right w-24">
           <input type="number" min="0" step="0.01" value={item.price.toFixed(2)}
             onChange={(e) => updateItemPriceLocal(idx, parseFloat(e.target.value) || 0)}
-            onBlur={() => flushItemPrice(batchId, idx)}
+            onBlur={() => flushItemPrice(idx)}
             className="w-20 bg-slate-800 border border-slate-700 rounded px-1 py-1 text-right text-sm text-slate-300 font-medium focus:border-amber-500 focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
         </td>
 
@@ -843,271 +797,234 @@ const QuoteDetailModal: React.FC<QuoteDetailModalProps> = ({
         </div>
       )}
 
-      {/* ── Detail Modal ──────────────────────────────────────────────────────── */}
+      {/* ── Detail Modal ──────────────────────────────────────────────────────────────── */}
       <div className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-        <div className="bg-slate-900 w-full max-w-6xl max-h-[90vh] rounded-xl border border-slate-700 flex flex-col shadow-2xl">
+        <div className="bg-slate-900 w-full max-w-5xl h-[92vh] rounded-none md:rounded-2xl border border-slate-700 flex flex-col overflow-hidden shadow-2xl transition-all duration-300">
 
           {/* Header */}
-          <div className="p-3 border-b border-slate-700 flex flex-col md:flex-row justify-between items-start bg-slate-800 rounded-t-xl shrink-0 gap-3">
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2 flex-wrap">
-                <h3 className="text-base font-bold text-white">Detalhes da Cotação</h3>
-                <span className="text-xs bg-slate-700 text-slate-300 px-2 py-0.5 rounded-full">
-                  ✓ {viewingBatch.items.filter(i => i.isVerified).length}/{viewingBatch.items.length}
-                </span>
-                {batchStatus === 'draft' && (
-                  <span className="text-xs bg-red-950/50 text-red-400 border border-red-900/50 px-2 py-0.5 rounded-full font-bold tracking-wide">
-                    ● RASCUNHO — NÃO INSERIDO NO HISTÓRICO
-                  </span>
-                )}
-                {batchStatus === 'saved' && (
-                  <span className="text-xs bg-emerald-900/30 text-emerald-400 border border-emerald-900/40 px-2 py-0.5 rounded-full">
-                    ✓ INSERIDO NO HISTÓRICO
-                  </span>
-                )}
-                {batchStatus === 'dirty' && (
-                  <span className="text-xs bg-amber-950/50 text-amber-400 border border-amber-900/50 px-2 py-0.5 rounded-full font-bold">
-                    ⚠ ALTERAÇÕES PENDENTES
-                  </span>
-                )}
-              </div>
-              {/* Data editável */}
-              <div className="flex items-center gap-1.5 mt-1">
-                <p className="text-xs text-slate-500 truncate">
-                  {viewingBatch.sourceType === 'file' ? viewingBatch.fileName : 'Texto Importado'}
-                </p>
-                <span className="text-slate-700">·</span>
-                {editingBatchDate ? (
-                  <div className="flex items-center gap-1">
-                    <input type="datetime-local" value={tempBatchDate} onChange={e => setTempBatchDate(e.target.value)}
-                      className="bg-slate-700 border border-amber-500 rounded px-1.5 py-0.5 text-white text-xs focus:outline-none" />
-                    <button onClick={() => saveBatchDate(viewingBatch.id)} className="text-green-400 p-0.5"><Check className="w-3 h-3" /></button>
-                    <button onClick={() => setEditingBatchDate(false)} className="text-red-400 p-0.5"><X className="w-3 h-3" /></button>
+          <div className="px-6 py-4 border-b border-slate-800/80 flex flex-col md:flex-row justify-between items-center bg-slate-800/40 backdrop-blur-md shrink-0 gap-4">
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-3 flex-wrap">
+                  <h3 className="text-lg font-bold text-white tracking-tight">Detalhes da Cotação</h3>
+                  <div className="flex items-center gap-1.5 bg-slate-700/50 px-2.5 py-1 rounded-full border border-slate-600/50">
+                    <CheckCircle className="w-3.5 h-3.5 text-emerald-400" />
+                    <span className="text-xs font-semibold text-slate-200">
+                       {viewingBatch.items.filter(i => i.isVerified).length}/{viewingBatch.items.length} verificados
+                    </span>
                   </div>
-                ) : (
-                  <>
-                    <button onClick={() => startEditingBatchDate(viewingBatch)} className="flex items-center gap-1 text-slate-400 hover:text-amber-400 transition-colors group/date">
-                      <span className="text-xs">{new Date(viewingBatch.timestamp).toLocaleString('pt-BR')}</span>
+                  {batchStatus === 'draft' && (
+                    <span className="text-[10px] bg-red-950/40 text-red-400 border border-red-900/40 px-2 py-0.5 rounded uppercase font-black tracking-tighter">
+                      Rascunho
+                    </span>
+                  )}
+                </div>
+                
+                <div className="flex items-center gap-2 mt-1.5">
+                  <p className="text-xs text-slate-500 font-medium truncate max-w-[200px]">
+                    {viewingBatch.sourceType === 'file' ? viewingBatch.fileName : 'Texto Importado'}
+                  </p>
+                  <span className="text-slate-700">·</span>
+                  {editingBatchDate ? (
+                    <div className="flex items-center gap-1">
+                      <input type="datetime-local" value={tempBatchDate} onChange={e => setTempBatchDate(e.target.value)}
+                        className="bg-slate-700 border border-amber-500 rounded px-1.5 py-0.5 text-white text-xs focus:outline-none" />
+                      <button onClick={() => saveBatchDate(viewingBatch.id)} className="text-green-400 p-0.5"><Check className="w-3 h-3" /></button>
+                      <button onClick={() => setEditingBatchDate(false)} className="text-red-400 p-0.5"><X className="w-3 h-3" /></button>
+                    </div>
+                  ) : (
+                    <button onClick={() => startEditingBatchDate(viewingBatch)} className="flex items-center gap-1.5 text-slate-400 hover:text-amber-400 transition-all group/date">
+                      <Calendar className="w-3 h-3" />
+                      <span className="text-xs">{new Date(viewingBatch.timestamp).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
                       <Pencil className="w-2.5 h-2.5 opacity-0 group-hover/date:opacity-100 transition-opacity" />
                     </button>
-                    {viewingBatch.uploadedAt && viewingBatch.uploadedAt !== viewingBatch.timestamp && (
-                      <span className="text-[9px] text-slate-700 ml-1">
-                        · upload: {new Date(viewingBatch.uploadedAt).toLocaleString('pt-BR')}
-                      </span>
-                    )}
-                  </>
-                )}
+                  )}
+                </div>
               </div>
-            </div>
 
-            <div className="flex items-center gap-2 flex-wrap justify-end">
-              {/* Ordenação */}
-              <select value={detailsSortBy} onChange={e => setDetailsSortBy(e.target.value as typeof detailsSortBy)}
-                className="bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-xs text-slate-300 focus:outline-none focus:border-amber-500">
-                <option value="default">Ordem original</option>
-                <option value="name">Nome A→Z</option>
-                <option value="price_asc">Preço ↑</option>
-                <option value="price_desc">Preço ↓</option>
-                <option value="pack">Lote ↓</option>
-              </select>
-              {/* Estratégia em lote */}
-              <div className="flex items-center gap-1 bg-slate-900 p-0.5 rounded border border-slate-700">
-                <button onClick={() => updateBatchStrategy(viewingBatch.id, 'pack')} className="flex items-center gap-1 px-2 py-1 rounded text-xs hover:bg-slate-700 text-blue-400 font-medium"><BoxSelect className="w-3 h-3" /> Lote</button>
-                <div className="w-px h-3 bg-slate-700" />
-                <button onClick={() => updateBatchStrategy(viewingBatch.id, 'unit')} className="flex items-center gap-1 px-2 py-1 rounded text-xs hover:bg-slate-700 text-amber-400 font-medium"><Coins className="w-3 h-3" /> Unit.</button>
-              </div>
-              {/* Busca */}
-              <div className="relative">
-                <Search className="absolute left-2 top-1.5 w-3.5 h-3.5 text-slate-500" />
-                <input type="text" placeholder="Filtrar..." value={detailsSearchTerm} onChange={e => setDetailsSearchTerm(e.target.value)}
-                  className="bg-slate-900 border border-slate-600 rounded py-1.5 pl-7 pr-3 text-xs text-white w-36 focus:border-amber-500 focus:outline-none focus:w-48 transition-all" />
-              </div>
-              {/* Botão Salvar — reativo ao status */}
-              <div className="flex flex-col items-center">
-                <button onClick={saveBatch}
-                  disabled={batchStatus === 'saved'}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                    batchStatus === 'saved'
-                      ? 'bg-emerald-900/30 text-emerald-400 border border-emerald-900/40 cursor-default'
-                      : 'bg-amber-600 hover:bg-amber-500 text-white shadow-lg shadow-amber-900/30'
-                  }`}>
-                  <Save className="w-3.5 h-3.5" />
-                  {batchStatus === 'saved' ? 'Salvo' : 'Salvar cotação'}
+              <div className="flex items-center gap-2.5 flex-wrap">
+                <select value={detailsSortBy} onChange={e => setDetailsSortBy(e.target.value as typeof detailsSortBy)}
+                  className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-slate-300 focus:outline-none focus:border-amber-500/50 hover:border-slate-600 transition-colors">
+                  <option value="default">Ordem original</option>
+                  <option value="name">Nome A→Z</option>
+                  <option value="price_asc">Preço ↑</option>
+                  <option value="price_desc">Preço ↓</option>
+                  <option value="pack">Lote ↓</option>
+                </select>
+
+                <div className="relative">
+                  <Search className="absolute left-2.5 top-2 w-3.5 h-3.5 text-slate-500" />
+                  <input type="text" placeholder="Filtrar itens..." value={detailsSearchTerm} onChange={e => setDetailsSearchTerm(e.target.value)}
+                    className="bg-slate-900 border border-slate-700 rounded-lg py-1.5 pl-8 pr-3 text-xs text-white w-40 focus:border-amber-500/50 focus:outline-none focus:w-56 transition-all" />
+                </div>
+
+                <div className="w-px h-6 bg-slate-700/50 mx-1" />
+
+                <button onClick={handleClose} className="text-slate-500 hover:text-white transition-colors">
+                  <XCircle className="w-7 h-7" />
                 </button>
-                {batchStatus === 'saved' && viewingBatch.savedAt && (
-                  <span className="text-[10px] text-slate-600 mt-0.5">
-                    {new Date(viewingBatch.savedAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
-                  </span>
-                )}
               </div>
-              {/* Fechar */}
-              <button onClick={handleClose} className="text-slate-400 hover:text-white p-1.5">
-                <XCircle className="w-6 h-6" />
-              </button>
             </div>
-          </div>
 
-          {/* Body */}
-          <div className="overflow-auto p-4 flex-1 space-y-6 bg-slate-900">
-            {(() => {
-              const filteredItems = viewingBatch.items
-                .map((it, idx) => ({ item: it, originalIndex: idx }))
-                .filter(x => {
-                  if (!detailsSearchTerm) return true;
-                  const term = detailsSearchTerm.toLowerCase();
-                  return x.item.name.toLowerCase().includes(term) || x.item.sku.toLowerCase().includes(term);
-                })
-                .sort((a, b) => {
-                  switch (detailsSortBy) {
-                    case 'name': return a.item.name.localeCompare(b.item.name);
-                    case 'price_asc': return a.item.unitPrice - b.item.unitPrice;
-                    case 'price_desc': return b.item.unitPrice - a.item.unitPrice;
-                    case 'pack': return b.item.packQuantity - a.item.packQuantity;
-                    default: return 0;
-                  }
-                });
+            {/* Body */}
+            <div className="overflow-auto flex-1 bg-[#0b0e14] custom-scrollbar">
+              <div className="p-6 space-y-8">
+                {(() => {
+                  const filteredItems = viewingBatch.items
+                    .map((it, idx) => ({ item: it, originalIndex: idx }))
+                    .filter(x => {
+                      if (!detailsSearchTerm) return true;
+                      const term = detailsSearchTerm.toLowerCase();
+                      return x.item.name.toLowerCase().includes(term) || x.item.sku.toLowerCase().includes(term);
+                    })
+                    .sort((a, b) => {
+                      switch (detailsSortBy) {
+                        case 'name': return a.item.name.localeCompare(b.item.name);
+                        case 'price_asc': return a.item.unitPrice - b.item.unitPrice;
+                        case 'price_desc': return b.item.unitPrice - a.item.unitPrice;
+                        case 'pack': return b.item.packQuantity - a.item.packQuantity;
+                        default: return 0;
+                      }
+                    });
 
-              const inspectionItems = filteredItems.filter(x => getItemCategory(x.item) === 'inspection');
-              const yellowItems = filteredItems.filter(x => getItemCategory(x.item) === 'yellow');
-              const blueItems = filteredItems.filter(x => getItemCategory(x.item) === 'blue');
-              const greenItems = filteredItems.filter(x => getItemCategory(x.item) === 'green');
-              const noveltyItems = filteredItems.filter(x => getItemCategory(x.item) === 'novelty');
-              const allYellowIndices = yellowItems.map(p => p.originalIndex);
-              const isAllSelected = allYellowIndices.length > 0 && allYellowIndices.every(i => selectedPendingItems.has(i));
+                  const inspectionItems = filteredItems.filter(x => getItemCategory(x.item) === 'inspection');
+                  const yellowItems = filteredItems.filter(x => getItemCategory(x.item) === 'yellow');
+                  const blueItems = filteredItems.filter(x => getItemCategory(x.item) === 'blue');
+                  const greenItems = filteredItems.filter(x => getItemCategory(x.item) === 'green');
+                  const noveltyItems = filteredItems.filter(x => getItemCategory(x.item) === 'novelty');
+                  
+                  const sectionTable = (items: typeof filteredItems, dividerColor: string, category: string) => {
+                    const indices = items.map(p => p.originalIndex);
+                    const isAllSelected = indices.length > 0 && indices.every(i => selectedPendingItems.has(i));
+                    
+                    return (
+                      <table className="w-full text-left text-sm text-slate-300">
+                        <thead className={`${dividerColor.replace('divide-', 'bg-')}/5 text-[10px] uppercase font-bold tracking-widest text-slate-500 border-b ${dividerColor}`}>
+                          <tr>
+                            <th className="p-2 text-center w-10">
+                              <button onClick={() => toggleSelectAllForCategory(indices)} className="hover:text-amber-400 transition-colors">
+                                {isAllSelected ? <CheckSquare className="w-4 h-4" /> : <Square className="w-4 h-4" />}
+                              </button>
+                            </th>
+                            <th className="p-2">Produto</th>
+                            <th className="p-2 text-center w-20">Emb.</th>
+                            <th className="p-2 text-center w-14">Modo</th>
+                            <th className="p-2 text-right w-24">Lote (R$)</th>
+                            <th className="p-2 text-right w-24">Unit. (R$)</th>
+                            <th className="p-2 text-center w-28">Ações</th>
+                          </tr>
+                        </thead>
+                        <tbody className={`divide-y ${dividerColor}`}>
+                          {items.map(x => renderItemRow(x.item, x.originalIndex, viewingBatch.id))}
+                        </tbody>
+                      </table>
+                    );
+                  };
 
-              const sectionTable = (items: typeof filteredItems, dividerColor: string) => (
-                <table className="w-full text-left text-sm text-slate-300">
-                  <tbody className={`divide-y ${dividerColor}`}>
-                    {items.map(x => renderItemRow(x.item, x.originalIndex, viewingBatch.id))}
-                  </tbody>
-                </table>
-              );
+                  return (
+                    <>
+                      {/* SECTION: INSPEÇÃO */}
+                      {inspectionItems.length > 0 && (
+                        <div className="rounded-xl overflow-hidden border border-orange-900/30 bg-orange-950/5">
+                          <div className="p-3.5 bg-orange-950/20 flex justify-between items-center cursor-pointer" onClick={() => setCollapsedSections(prev => ({ ...prev, inspection: !prev.inspection }))}>
+                            <h4 className="font-bold text-orange-400 flex items-center gap-2.5 text-sm uppercase tracking-tight">
+                              <ShieldAlert className="w-4 h-4" /> Inspeção Humana ({inspectionItems.length})
+                            </h4>
+                            <ChevronDown className={`w-4 h-4 text-orange-700 transition-transform ${collapsedSections.inspection ? '-rotate-90' : ''}`} />
+                          </div>
+                          {!collapsedSections.inspection && sectionTable(inspectionItems, 'divide-orange-900/20', 'inspection')}
+                        </div>
+                      )}
 
-              return (
-                <>
-                  {/* SECTION 0: INSPEÇÃO HUMANA — SKU match com nome divergente */}
-                  {inspectionItems.length > 0 && (
-                    <div className="border border-orange-800/40 bg-orange-950/10 rounded-lg overflow-hidden">
-                      <div className="p-3 bg-orange-950/20 border-b border-orange-800/40 flex justify-between items-center cursor-pointer hover:bg-orange-950/30 transition-colors"
-                        onClick={() => setCollapsedSections(prev => ({ ...prev, inspection: !prev.inspection }))}>
-                        <h4 className="font-bold text-orange-400 flex items-center gap-2">
-                          <ShieldAlert className="w-5 h-5" />
-                          Inspeção Humana ({inspectionItems.length})
-                          <span className="text-[10px] font-normal text-orange-600 border border-orange-800/50 rounded px-1.5 py-0.5">
-                            SKU vinculado · nome divergente
-                          </span>
-                        </h4>
-                        {collapsedSections.inspection ? <ChevronDown className="w-5 h-5 text-orange-500" /> : <ChevronUp className="w-5 h-5 text-orange-500" />}
-                      </div>
-                      {!collapsedSections.inspection && sectionTable(inspectionItems, 'divide-orange-900/10')}
-                    </div>
-                  )}
-
-                  {/* SECTION 1: YELLOW — Novos / Desconhecidos */}
-                  <div className="border border-yellow-900/30 bg-yellow-950/5 rounded-lg overflow-hidden">
-                    <div className="p-3 bg-yellow-950/20 border-b border-yellow-900/30 flex justify-between items-center cursor-pointer hover:bg-yellow-950/30 transition-colors"
-                      onClick={() => setCollapsedSections(prev => ({ ...prev, yellow: !prev.yellow }))}>
-                      <h4 className="font-bold text-yellow-400 flex items-center gap-2">
-                        <AlertTriangle className="w-5 h-5" /> Novos / Desconhecidos ({yellowItems.length})
-                      </h4>
-                      <div className="flex items-center gap-2">
-                        {yellowItems.length > 0 && !collapsedSections.yellow && (
-                          <button onClick={(e) => { e.stopPropagation(); handleBatchMagic(viewingBatch.id, yellowItems); }}
-                            disabled={isBatchProcessing || selectedPendingItems.size === 0}
-                            className="px-3 py-1 bg-amber-600 hover:bg-amber-500 text-white rounded text-xs font-bold flex items-center gap-1 shadow-lg shadow-amber-900/20 disabled:opacity-50 disabled:cursor-not-allowed">
-                            {isBatchProcessing ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3 fill-white" />}
-                            {isBatchProcessing ? 'Processando...' : `Identificar Selecionados (${selectedPendingItems.size}) com IA`}
-                          </button>
+                      {/* SECTION: NOVOS / DESCONHECIDOS */}
+                      <div className="rounded-xl overflow-hidden border border-yellow-900/30 bg-yellow-950/5">
+                        <div className="p-3.5 bg-yellow-950/20 flex justify-between items-center cursor-pointer" onClick={() => setCollapsedSections(prev => ({ ...prev, yellow: !prev.yellow }))}>
+                          <h4 className="font-bold text-yellow-400 flex items-center gap-2.5 text-sm uppercase tracking-tight">
+                            <AlertTriangle className="w-4 h-4" /> Desconhecidos ({yellowItems.length})
+                          </h4>
+                          <ChevronDown className={`w-4 h-4 text-yellow-700 transition-transform ${collapsedSections.yellow ? '-rotate-90' : ''}`} />
+                        </div>
+                        {!collapsedSections.yellow && (
+                          yellowItems.length === 0 
+                          ? <div className="p-10 text-center text-slate-600 text-xs italic">Tudo limpo nesta categoria.</div>
+                          : sectionTable(yellowItems, 'divide-yellow-900/20', 'yellow')
                         )}
-                        {collapsedSections.yellow ? <ChevronDown className="w-5 h-5 text-yellow-500" /> : <ChevronUp className="w-5 h-5 text-yellow-500" />}
                       </div>
-                    </div>
-                    {!collapsedSections.yellow && (
-                      yellowItems.length === 0
-                        ? <div className="p-8 text-center text-slate-500 italic">Nenhum item desconhecido.</div>
-                        : <table className="w-full text-left text-sm text-slate-300">
-                          <thead className="bg-yellow-950/20 text-yellow-600 uppercase tracking-wider text-xs sticky top-0">
-                            <tr>
-                              <th className="p-3 text-center w-10">
-                                <button onClick={() => toggleSelectAll(allYellowIndices)}>
-                                  {isAllSelected ? <CheckSquare className="w-4 h-4" /> : <Square className="w-4 h-4" />}
-                                </button>
-                              </th>
-                              <th className="p-3">Produto</th>
-                              <th className="p-3 text-center w-28">Emb. (Qtd)</th>
-                              <th className="p-3 text-center">Interpretação</th>
-                              <th className="p-3 text-right">Total Lote</th>
-                              <th className="p-3 text-right w-32">Unitário</th>
-                              <th className="p-3 text-center w-24">Ações</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-yellow-900/10">
-                            {yellowItems.map(x => renderItemRow(x.item, x.originalIndex, viewingBatch.id))}
-                          </tbody>
-                        </table>
-                    )}
-                  </div>
 
-                  {/* SECTION 2: BLUE — Reconhecidos / Não-Master */}
-                  <div className="border border-blue-900/30 bg-blue-950/5 rounded-lg overflow-hidden">
-                    <div className="p-3 bg-blue-950/20 border-b border-blue-900/30 flex justify-between items-center cursor-pointer hover:bg-blue-950/30 transition-colors"
-                      onClick={() => setCollapsedSections(prev => ({ ...prev, blue: !prev.blue }))}>
-                      <h4 className="font-bold text-blue-400 flex items-center gap-2">
-                        <Eye className="w-5 h-5" /> Reconhecidos / Não-Master ({blueItems.length})
-                      </h4>
-                      {collapsedSections.blue ? <ChevronDown className="w-5 h-5 text-blue-500" /> : <ChevronUp className="w-5 h-5 text-blue-500" />}
-                    </div>
-                    {!collapsedSections.blue && (
-                      blueItems.length === 0
-                        ? <div className="p-4 text-center text-slate-500 italic text-xs">Nenhum item reconhecido sem vínculo master.</div>
-                        : sectionTable(blueItems, 'divide-blue-900/10')
-                    )}
-                  </div>
-
-                  {/* SECTION 3: GREEN — Linkados ao Master */}
-                  <div className="border border-emerald-900/30 bg-emerald-950/5 rounded-lg overflow-hidden">
-                    <div className="p-3 bg-emerald-950/20 border-b border-emerald-900/30 flex justify-between items-center cursor-pointer hover:bg-emerald-950/30 transition-colors"
-                      onClick={() => setCollapsedSections(prev => ({ ...prev, green: !prev.green }))}>
-                      <h4 className="font-bold text-emerald-400 flex items-center gap-2">
-                        <CheckCircle className="w-5 h-5" /> Linkados ao Master ({greenItems.length})
-                      </h4>
-                      {collapsedSections.green ? <ChevronDown className="w-5 h-5 text-emerald-500" /> : <ChevronUp className="w-5 h-5 text-emerald-500" />}
-                    </div>
-                    {!collapsedSections.green && (
-                      greenItems.length === 0
-                        ? <div className="p-8 text-center text-slate-500 italic">Nenhum item linkado ao catálogo master ainda.</div>
-                        : sectionTable(greenItems, 'divide-emerald-900/10')
-                    )}
-                  </div>
-
-                  {/* SECTION 4: NOVELTIES — Produtos Inéditos confirmados */}
-                  {noveltyItems.length > 0 && (
-                    <div className="border border-violet-900/30 bg-violet-950/5 rounded-lg overflow-hidden">
-                      <div className="p-3 bg-violet-950/20 border-b border-violet-900/30 flex justify-between items-center cursor-pointer hover:bg-violet-950/30 transition-colors"
-                        onClick={() => setCollapsedSections(prev => ({ ...prev, novelties: !prev.novelties }))}>
-                        <h4 className="font-bold text-violet-400 flex items-center gap-2">
-                          <Star className="w-5 h-5" /> Novidades / Inéditos ({noveltyItems.length})
-                          <span className="text-[10px] font-normal text-violet-600 border border-violet-800/50 rounded px-1.5 py-0.5">
-                            classificados manualmente
-                          </span>
-                        </h4>
-                        {collapsedSections.novelties ? <ChevronDown className="w-5 h-5 text-violet-500" /> : <ChevronUp className="w-5 h-5 text-violet-500" />}
+                      {/* SECTION: RECONHECIDOS */}
+                      <div className="rounded-xl overflow-hidden border border-blue-900/20 bg-blue-950/5">
+                        <div className="p-3.5 bg-blue-950/20 flex justify-between items-center cursor-pointer" onClick={() => setCollapsedSections(prev => ({ ...prev, blue: !prev.blue }))}>
+                          <h4 className="font-bold text-blue-400 flex items-center gap-2.5 text-sm uppercase tracking-tight">
+                            <Eye className="w-4 h-4" /> Reconhecidos ({blueItems.length})
+                          </h4>
+                          <ChevronDown className={`w-4 h-4 text-blue-700 transition-transform ${collapsedSections.blue ? '-rotate-90' : ''}`} />
+                        </div>
+                        {!collapsedSections.blue && (
+                          blueItems.length === 0 
+                          ? <div className="p-10 text-center text-slate-600 text-xs italic">Nenhum item pendente.</div>
+                          : sectionTable(blueItems, 'divide-blue-900/20', 'blue')
+                        )}
                       </div>
-                      {!collapsedSections.novelties && sectionTable(noveltyItems, 'divide-violet-900/10')}
-                    </div>
-                  )}
-                </>
-              );
-            })()}
-          </div>
 
-          {/* Footer */}
-          <div className="p-4 border-t border-slate-700 bg-slate-800 rounded-b-xl flex justify-between items-center text-sm text-slate-400 shrink-0">
-            <span>{viewingBatch.items.length} itens · ✓ {viewingBatch.items.filter(i => i.isVerified).length} verificados</span>
-            <button onClick={handleClose} className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded text-sm">Fechar</button>
+                      {/* SECTION: LINKADOS */}
+                      <div className="rounded-xl overflow-hidden border border-emerald-900/20 bg-emerald-950/5 opacity-80 hover:opacity-100 transition-opacity">
+                        <div className="p-3.5 bg-emerald-950/20 flex justify-between items-center cursor-pointer" onClick={() => setCollapsedSections(prev => ({ ...prev, green: !prev.green }))}>
+                          <h4 className="font-bold text-emerald-400 flex items-center gap-2.5 text-sm uppercase tracking-tight">
+                            <CheckCircle className="w-4 h-4" /> Mapeados ao Catálogo ({greenItems.length})
+                          </h4>
+                          <ChevronDown className={`w-4 h-4 text-emerald-700 transition-transform ${collapsedSections.green ? '-rotate-90' : ''}`} />
+                        </div>
+                        {!collapsedSections.green && sectionTable(greenItems, 'divide-emerald-900/20', 'green')}
+                      </div>
+
+                      {/* SECTION: INÉDITOS */}
+                      {noveltyItems.length > 0 && (
+                         <div className="rounded-xl overflow-hidden border border-violet-900/20 bg-violet-950/5">
+                          <div className="p-3.5 bg-violet-950/20 flex justify-between items-center cursor-pointer" onClick={() => setCollapsedSections(prev => ({ ...prev, novelties: !prev.novelties }))}>
+                            <h4 className="font-bold text-violet-400 flex items-center gap-2.5 text-sm uppercase tracking-tight">
+                              <Star className="w-4 h-4" /> Inéditos ({noveltyItems.length})
+                            </h4>
+                            <ChevronDown className={`w-4 h-4 text-violet-700 transition-transform ${collapsedSections.novelties ? '-rotate-90' : ''}`} />
+                          </div>
+                          {!collapsedSections.novelties && sectionTable(noveltyItems, 'divide-violet-900/20', 'novelty')}
+                         </div>
+                      )}
+                    </>
+                  );
+                })()}
+              </div>
+            </div>
+
+            {/* Main Footer */}
+            <div className="p-5 border-t border-slate-800 bg-slate-800/80 flex justify-between items-center shrink-0">
+               <div className="flex items-center gap-6">
+                  <div className="flex flex-col">
+                    <span className="text-[10px] text-slate-500 uppercase font-bold tracking-tighter">Total de Itens</span>
+                    <span className="text-sm font-bold text-white">{viewingBatch.items.length}</span>
+                  </div>
+                  <div className="flex flex-col border-l border-slate-700 pl-6">
+                    <span className="text-[10px] text-slate-500 uppercase font-bold tracking-tighter">Valor Total Estimado</span>
+                    <span className="text-sm font-bold text-amber-500">
+                       R$ {viewingBatch.items.reduce((acc, it) => acc + (it.priceStrategy === 'pack' ? it.price : it.price * it.packQuantity), 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                    </span>
+                  </div>
+               </div>
+
+               <div className="flex items-center gap-3">
+                  <button onClick={handleClose} className="px-5 py-2 text-xs font-bold text-slate-400 hover:text-white transition-colors">Cancelar</button>
+                  <button onClick={saveBatch} 
+                    disabled={batchStatus === 'saved'}
+                    className={`flex items-center gap-2 px-8 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition-all shadow-xl ${
+                    batchStatus === 'saved'
+                      ? 'bg-emerald-950/30 text-emerald-500 border border-emerald-900/40 cursor-default'
+                      : 'bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 hover:to-amber-400 text-slate-900 shadow-amber-900/20 active:scale-95'
+                  }`}>
+                    <Save className="w-4 h-4" />
+                    {batchStatus === 'saved' ? 'Salvo no Banco' : 'Confirmar e Salvar'}
+                  </button>
+               </div>
+            </div>
           </div>
         </div>
-      </div>
     </>
   );
 };

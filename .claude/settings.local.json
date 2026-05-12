@@ -7,7 +7,11 @@
       "Bash(wc -l services/*.ts)",
       "Bash(sort -k5 -rn)",
       "Bash(grep -v \"\\\\.js$\")",
-      "Bash(npx tsc:*)"
+      "Bash(npx tsc:*)",
+      "Bash(npm run *)",
+      "Bash(node -e \"const fs = require\\('fs'\\); const content = fs.readFileSync\\('app/components/QuoteRequest.tsx', 'utf8'\\); const fixed = content.replace\\(/const searchNorm = \\\\\\(s: string\\\\\\) =>\\\\n  s\\\\.toLowerCase\\\\\\(\\\\\\)\\\\.normalize\\\\\\('NFD'\\\\\\)\\\\.replace\\\\\\(\\\\/\\\\[.*?\\\\]\\\\/g, ''\\\\\\);/, \\\\\"const searchNorm = \\(s: string\\) =>\\\\n  s.toLowerCase\\(\\).normalize\\('NFD'\\).replace\\(/[\\\\\\\\u0300-\\\\\\\\u036f]/g, ''\\);\\\\\"\\); console.log\\(fixed.includes\\('\\\\\\\\\\\\\\\\u0300'\\) ? 'FOUND unicode escape' : 'NOT FOUND'\\); console.log\\(fixed.substring\\(fixed.indexOf\\('searchNorm'\\), fixed.indexOf\\('searchNorm'\\) + 100\\)\\);\")",
+      "Bash(node -e ' *)",
+      "Bash(node_modules/.bin/tsc --noEmit)"
     ]
   }
 }

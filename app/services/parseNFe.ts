@@ -239,6 +239,12 @@ export function parseNFe(xmlString: string): ParseNFeResult {
       const eanClean = cEAN && cEAN !== '0' && cEAN !== 'SEM GTIN' ? cEAN : null;
       const sku = cProd ?? eanClean ?? '';
 
+      // Quantity Bought in Packs
+      // qCom usually comes in units. So if pack is 12 and qCom is 24, we bought 2 packs.
+      const quantityBought = packQuantity > 1 
+        ? Math.max(1, Math.round(quantity / packQuantity))
+        : quantity;
+
       const item: ProductQuote = {
         sku,
         name,
@@ -246,6 +252,7 @@ export function parseNFe(xmlString: string): ParseNFeResult {
         unit,
         packQuantity,
         unitPrice,      // sempre o preço da unidade avulsa
+        quantityBought,
         priceStrategy: packQuantity > 1 ? 'pack' : 'unit',
         isVerified: true,    // dados vindos de NF são exatos — marca como verificado
         isReprocessed: false,

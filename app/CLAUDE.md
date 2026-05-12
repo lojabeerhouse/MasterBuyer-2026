@@ -1,144 +1,53 @@
-# MasterBuyer 2026 — Instruções para Modificações
+# MasterBuyer 2026 — Agent Directives
 
-## Visão Geral do Projeto
-App pessoal de compras profissionais para a BeerHouse. Desenvolvido em React + TypeScript + Vite.
-Usa Firebase (Firestore + Authentication) para persistência de dados e login com Google.
+## 1. Workflow Orchestration
+- **Plan First:** Para tarefas >3 passos ou que alterem `App.tsx`/Tipagens, entre em "Modo Planejamento" (detalhe arquivos, riscos de regressão e dependências).
+- **Verification:** Nunca assuma que funciona. Valide impactos em dados legados.
+- **Elegance vs Pragmatism:** Evite over-engineering. Soluções simples e nativas do React primeiro.
+- **Autonomous Fix:** Se apontado um bug, resolva a causa raiz. Sem "band-aids".
 
-## Stack
-- React 18 + TypeScript
-- Vite
-- Tailwind CSS
-- Firebase (Firestore + Auth)
-- Lucide React (ícones)
-- Gemini API (geminiService.ts)
+## 2. Critical Constraints (Database & Types)
+- **IMMUTABLE TYPES:** NUNCA renomeie ou delete campos em `types.ts`. Dados de produção no Firestore (path `users/{userId}/data/{key}`) quebrarão.
+- **BACKWARD COMPATIBILITY:** Novos campos em interfaces devem SEMPRE ser opcionais (`?`).
+- **STATE SYNC:** Novo estado no `App.tsx` OBRIGA: inicialização vazia -> sync no `loadAllData` -> `useEffect` com `saveUserData`.
+- **LOCKED FILES:** `firebaseConfig.ts` é intocável.
 
-## Estrutura de Arquivos
-```
-/components         → Abas do app (SalesAnalyzer, QuoteComparator, etc.)
-/services
-  firebaseService.ts  → Funções saveUserData / loadUserData
-  geminiService.ts    → Integração com Gemini AI
-App.tsx             → Componente principal, gerencia todo o estado
-firebaseConfig.ts   → Configuração Firebase (NÃO MODIFICAR)
-types.ts            → Interfaces TypeScript (VER REGRAS ABAIXO)
-```
+## 3. Tech & Styling Context
+- **Stack:** React 18, TS, Vite, Tailwind CSS, Firebase (Auth/Firestore), Gemini API.
+- **UI Strict:** Apenas `lucide-react` para ícones. Apenas classes Tailwind (sem CSS inline).
+- **Theme Tokens:** Fundo `bg-slate-950` | Cards `bg-slate-900` | Borders `border-slate-800` | Accent `amber-600` (Geral) e `red-600` (Ofertas) | Text `slate-200` & `slate-400`.
 
-## Abas do App
-1. **Fornecedores** (`SupplierManager`) — cadastro de fornecedores e cotações
-2. **Produtos** (`ProductDatabase`) — catálogo master de produtos
-3. **Vendas** (`SalesAnalyzer`) — análise de vendas e forecast
-4. **Catálogo** (`ProductCatalog`) — visualização de produtos por fornecedor
-5. **Comparador** (`QuoteComparator`) — comparação de preços entre fornecedores
-6. **Pedidos** (`OrderManager`) — carrinho e geração de pedidos
-7. **Ofertas** (`OfferFlyer`) — criação de encartes de ofertas
+## 4. Contextual Triggers
+- **[PLANEJAMENTO]:** Se o usuário solicitar um "PLANEJAMENTO"/"PLAN":
+- PARE e NÃO execute nenhuma alteração no código
+- Antes de responder, escreva:
+  - Um breve resumo do que entendeu que o usuário quer
+  - Um plano em etapas contendo:
+    - Quais arquivos serão criados ou modificados
+    - Quais cuidados tomar (regressões, breaking changes, dependências)
+    - O que haverá de novo no app
+    - O que será removido ou alterado
+    - Se há chance de quebrar alguma coisa ou um conflito negativo com outra função já existente
+- Ao final, adicione uma seção **Recomendação do Agente** com:
+  - pontos positivos
+  - riscos
+  - motivação para cada um
 
-## Persistência de Dados (Firebase)
-Todos os dados são salvos no Firestore sob o path:
-`users/{userId}/data/{key}`
+## 5. System Map (No Discovery Needed)
+- `/components`: SupplierManager, ProductDatabase, SalesAnalyzer, ProductCatalog, QuoteComparator, OrderManager, OfferFlyer.
+- `/services`: firebaseService.ts, geminiService.ts.
+- `Firestore Keys`: suppliers, salesData, salesConfig, forecast, cart, mappings, ignoredMappings, masterProducts, dbSheetUrl, salesUrl, considerStock, globalPackRules, globalNamingRules.
 
-As chaves salvas são:
-- `suppliers` — fornecedores e suas cotações
-- `salesData` — histórico de vendas
-- `salesConfig` — configurações de forecast
-- `forecast` — previsão de demanda
-- `cart` — carrinho de compras
-- `mappings` — mapeamentos de produtos
-- `ignoredMappings` — mapeamentos ignorados
-- `masterProducts` — catálogo master
-- `dbSheetUrl` — URL da planilha de produtos
-- `salesUrl` — URL da planilha de vendas
-- `considerStock` — flag de considerar estoque
-- `globalPackRules` — regras globais de embalagem
-- `globalNamingRules` — regras globais de nomenclatura
+### EM CASO DE PLANEJAMENTO
 
----
 
-## Palavras-chave de Modo
-
-### PLANEJAMENTO
-Quando o prompt iniciar com "PLANEJAMENTO":
-- NÃO execute nenhuma alteração no código
-- Antes de responder, escreva um breve resumo do que entendeu que o usuário quer
-- Retorne um plano em etapas pontuais e consecutivas contendo:
-  - Quais arquivos serão criados ou modificados
-  - Quais cuidados tomar (regressões, breaking changes, dependências)
-  - O que haverá de novo no app
-  - O que será removido ou alterado
-  - Se há chance de quebrar alguma coisa ou um conflito negativo com outra função já existente
-- Ao final, adicione uma seção "💬 Recomendação do Agente" com sua opinião honesta: pontos positivos, riscos, e motivação para cada um
-
-### PESQUISA
-Quando a palavra "PESQUISA" aparecer nos primeiros 40 caracteres do prompt:
-- Não execute código
-- Pesquise e sintetize o tema citado no prompt
-- Foque em como o tema se aplica ao contexto do MasterBuyer 2026
-- Retorne um resumo objetivo com pontos práticos e relevantes para o projeto
-- A pesquisa deve ser um adicional ao prompt, não uma substituição
-
-## ⚠️ REGRAS CRÍTICAS — LEIA ANTES DE QUALQUER MODIFICAÇÃO
-
-### 1. NUNCA renomeie campos existentes em types.ts
-Os dados já estão salvos no Firebase com os nomes atuais. Renomear quebra tudo.
-
-```ts
-// ✅ CORRETO — adiciona campo novo opcional
-interface Supplier {
-  id: string;
-  name: string;
-  phone?: string; // novo campo, sempre com "?"
-}
-
-// ❌ ERRADO — renomear campo existente apaga dados salvos
-interface Supplier {
-  id: string;
-  supplierName: string; // era "name" — NUNCA FAÇA ISSO
-}
-```
-
-### 2. Novos campos em interfaces SEMPRE opcionais (`?`)
-Dados antigos no Firebase não têm o novo campo. Se não for opcional, o TypeScript vai reclamar e o app pode quebrar ao carregar dados antigos.
-
-```ts
-// ✅ CORRETO
-interface Supplier {
-  email?: string; // opcional
-}
-
-// ❌ ERRADO
-interface Supplier {
-  email: string; // obrigatório — quebra dados antigos
-}
-```
-
-### 3. NUNCA delete campos de interfaces existentes
-Mesmo que não use mais no frontend, manter o campo evita erros ao carregar dados antigos do Firebase.
-
-### 4. Ao adicionar novo estado no App.tsx, sempre:
-- Inicializar com valor vazio/padrão (não depender do Firebase para o estado inicial)
-- Adicionar o `useEffect` de persistência correspondente
-- Adicionar o `loadUserData` dentro da função `loadAllData`
-
-```ts
-// Exemplo de como adicionar novo estado corretamente:
-const [novoEstado, setNovoEstado] = useState<Tipo[]>([]);
-
-// Em loadAllData:
-const savedNovo = await loadUserData<Tipo[]>(uid, 'novoEstado', []);
-setNovoEstado(savedNovo);
-
-// useEffect de persistência:
-useEffect(() => { if (uid) saveUserData(uid, 'novoEstado', novoEstado); }, [novoEstado, uid]);
-```
-
-### 5. NUNCA altere firebaseConfig.ts
+### NUNCA altere firebaseConfig.ts
 As credenciais do Firebase estão corretas. Não modifique esse arquivo.
 
-### 6. Ao modificar componentes, preserve as props existentes
+### Preserve props existentes
 Os componentes recebem props do App.tsx. Nunca remova props existentes — apenas adicione novas se necessário.
 
----
-
-## Padrões de Código
+### Padrões de Código
 
 ### Ícones
 Usar apenas `lucide-react`. Não instalar outras bibliotecas de ícones.
@@ -146,7 +55,7 @@ Usar apenas `lucide-react`. Não instalar outras bibliotecas de ícones.
 ### Estilização
 Usar apenas classes Tailwind CSS. Não adicionar CSS customizado inline desnecessário.
 
-### Cores do tema
+### Cores
 - Fundo principal: `bg-slate-950`
 - Cards/Nav: `bg-slate-900`
 - Bordas: `border-slate-800`
@@ -159,8 +68,6 @@ Usar apenas classes Tailwind CSS. Não adicionar CSS customizado inline desneces
 - Criar dentro de `/components`
 - Usar TypeScript com tipagem completa
 - Props sempre tipadas com interface
-
----
 
 ## Antes de Qualquer Modificação Grande
 1. Confirmar que o usuário fez commit no GitHub

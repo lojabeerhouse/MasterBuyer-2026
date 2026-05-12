@@ -6,10 +6,12 @@ export interface ProductQuote {
   unit: string;
   packQuantity: number; // How many units are in this price? (e.g., 1, 12, 18)
   unitPrice: number; // Calculated price per single unit
+  quantityBought?: number; // Quantity bought in the invoice (in packs/units depending on context)
   priceStrategy?: 'pack' | 'unit'; // 'pack' = price is total for the box; 'unit' = price is for single unit
   isVerified?: boolean; // If true, the item is considered identified/ready
   isReprocessed?: boolean; // If true, rule was applied automatically, needs verification
   isNovelty?: boolean; // If true, user explicitly marked this as a new/unknown product from this supplier
+  isAiSuggested?: boolean; // If true, this value was suggested by AI and can be cleared on manual edit
 }
 
 export interface QuoteBatch {
@@ -189,12 +191,15 @@ export interface PurchaseOrder {
   deliveryOrPickup?: 'delivery' | 'pickup';
   deliveryAddressId?: string;   // id do endereço de entrega do usuário (quando delivery)
   transitions: PurchaseOrderTransition[];
-  originalSnapshot?: CartItem[]; // snapshot só quando há diferença de valor na conferência
+  originalSnapshot?: CartItem[]; // O que foi originalmente pedido
+  invoicedSnapshot?: CartItem[]; // O que a nota fiscal indicou que faturou
   cancelReason?: string;
   cancelNote?: string;
   notes?: string;               // observação livre do pedido
   invoiceNumber?: string;       // número da NF fiscal
   supplierOrderNumber?: string; // número do pedido no fornecedor
+  origin?: 'app' | 'external';  // origem do pedido
+  documentUrl?: string;         // link para o PDF ou Imagem
 }
 
 export interface MasterProduct {
@@ -398,4 +403,15 @@ export interface QuickNote {
   id: string;
   text: string;                       // texto da nota, suporta variável [EMAIL]
   trigger: 'delivery' | 'pickup' | 'all'; // quando sugerir essa nota
+}
+
+// ─── QUOTE STAGES (etapas de cotação agendadas pelo usuário) ─────────────────
+
+export interface QuoteStage {
+  id: string;
+  name: string;
+  productKeys: string[];  // `${supplierId}:${productId}`
+  createdAt: number;
+  sentAt?: number;
+  color?: string;
 }

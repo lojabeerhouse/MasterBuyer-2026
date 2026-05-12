@@ -1,8 +1,8 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { Supplier, QuoteBatch, ProductQuote, PackRule, BusinessHours, BusinessDayHours, ProductMapping, MasterProduct, PriceValidityConfig } from '../types';
-import { Upload, Trash2, FileText, CheckCircle, AlertCircle, Loader2, Plus, Ban, Eye, Package, Pencil, Save, X, Maximize2, XCircle, RefreshCw, HardDrive, Download, Coins, BoxSelect, Sparkles, ChevronLeft, ChevronRight, Wand2, ChevronDown, ChevronUp, AlertTriangle, Check, CheckSquare, Square, Undo2, Timer, Search, Files, FilePlus, Settings, Bot, FileStack, Scissors, MessageCircle, MapPin, Truck, Calendar, Clock, Phone, ArrowUpDown, SortAsc, SortDesc, Archive } from 'lucide-react';
+import { Upload, Trash2, FileText, CheckCircle, AlertCircle, Loader2, Plus, Ban, Eye, Package, Pencil, Save, X, Maximize2, XCircle, RefreshCw, HardDrive, Download, Coins, BoxSelect, Sparkles, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, AlertTriangle, Check, CheckSquare, Square, Undo2, Timer, Search, Files, FilePlus, Settings, Bot, FileStack, Scissors, MessageCircle, MapPin, Truck, Calendar, Clock, Phone, ArrowUpDown, SortAsc, SortDesc, Archive } from 'lucide-react';
 import QuoteDetailModal from './QuoteDetailModal';
-import { parseQuoteContent, generateProductVariations, extractCatalogRawData, RawCatalogItem } from '../services/geminiService';
+import { parseQuoteContent, extractCatalogRawData, RawCatalogItem } from '../services/geminiService';
 import { parseQuoteLocal } from '../services/parseQuoteLocal';
 import { isNFeXml, parseNFeFile } from '../services/parseNFe';
 import { useFileProcessor, applyRulesToQuotes, filterBlacklisted, recalculateItem } from '../hooks/useFileProcessor';
@@ -93,10 +93,7 @@ const SupplierManager: React.FC<SupplierManagerProps> = ({ suppliers, setSupplie
   const [historySearchTerm, setHistorySearchTerm] = useState('');
 
   // State for Product Renaming/Suggestions inside Modal
-  const [suggestionsMap, setSuggestionsMap] = useState<Record<string, string[]>>({});
-  const [suggestionIndexMap, setSuggestionIndexMap] = useState<Record<string, number>>({});
-  const [loadingSuggestions, setLoadingSuggestions] = useState<Set<string>>(new Set());
-  const [editingItemId, setEditingItemId] = useState<number | null>(null); 
+  const [editingItemId, setEditingItemId] = useState<number | null>(null);
   const [tempItemName, setTempItemName] = useState('');
 
 
@@ -670,10 +667,6 @@ const SupplierManager: React.FC<SupplierManagerProps> = ({ suppliers, setSupplie
   const startEditingItem = (index: number, currentName: string) => {
       setEditingItemId(index);
       setTempItemName(currentName);
-      const key = `${viewingBatch?.id}-${index}`;
-      if (suggestionsMap[key]) {
-         cancelSuggestion(viewingBatch!.id, index);
-      }
   };
 
   const saveItemName = (batchId: string, itemIndex: number, newName: string) => {
@@ -698,63 +691,6 @@ const SupplierManager: React.FC<SupplierManagerProps> = ({ suppliers, setSupplie
       }));
       
       setEditingItemId(null);
-  };
-
-  const fetchSuggestions = async (batchId: string, itemIndex: number, currentName: string, forceRefresh = false) => {
-      const key = `${batchId}-${itemIndex}`;
-      if (suggestionsMap[key] && !forceRefresh) return;
-
-      setLoadingSuggestions(prev => new Set(prev).add(key));
-
-      try {
-          const variations = await generateProductVariations(currentName);
-          if (variations.length > 0) {
-              setSuggestionsMap(prev => ({ ...prev, [key]: variations }));
-              setSuggestionIndexMap(prev => ({ ...prev, [key]: 0 }));
-          } else {
-              if(!forceRefresh) alert("Não encontrei sugestões para este produto.");
-          }
-      } catch (e) {
-          console.error(e);
-      } finally {
-          setLoadingSuggestions(prev => {
-              const next = new Set(prev);
-              next.delete(key);
-              return next;
-          });
-      }
-  };
-
-  const cycleSuggestion = (batchId: string, itemIndex: number, direction: 'prev' | 'next') => {
-      const key = `${batchId}-${itemIndex}`;
-      const list = suggestionsMap[key] || [];
-      if (list.length === 0) return;
-
-      setSuggestionIndexMap(prev => {
-          const current = prev[key] || 0;
-          let nextIndex = direction === 'next' ? current + 1 : current - 1;
-          if (nextIndex >= list.length) nextIndex = 0;
-          if (nextIndex < 0) nextIndex = list.length - 1;
-          return { ...prev, [key]: nextIndex };
-      });
-  };
-
-  const applySuggestion = (batchId: string, itemIndex: number) => {
-      const key = `${batchId}-${itemIndex}`;
-      const list = suggestionsMap[key];
-      const idx = suggestionIndexMap[key] || 0;
-      
-      if (list && list[idx]) {
-          saveItemName(batchId, itemIndex, list[idx]);
-          cancelSuggestion(batchId, itemIndex);
-      }
-  };
-
-  const cancelSuggestion = (batchId: string, itemIndex: number) => {
-      const key = `${batchId}-${itemIndex}`;
-      const newSuggestions = {...suggestionsMap};
-      delete newSuggestions[key];
-      setSuggestionsMap(newSuggestions);
   };
 
   const toggleSelection = (index: number) => {
@@ -1020,11 +956,6 @@ const SupplierManager: React.FC<SupplierManagerProps> = ({ suppliers, setSupplie
 
   // --- RENDER HELPERS ---
   const renderItemRow = (item: ProductQuote, idx: number, batchId: string) => {
-    const suggestKey = `${batchId}-${idx}`;
-    const suggestions = suggestionsMap[suggestKey] || [];
-    const currentSuggestIdx = suggestionIndexMap[suggestKey] || 0;
-    const isLoadingSuggestions = loadingSuggestions.has(suggestKey);
-
     const totalLotPrice = item.priceStrategy === 'pack' ? item.price : item.price * item.packQuantity;
 
     // Only allow selection for Pending Items (not verified)
@@ -1081,27 +1012,12 @@ const SupplierManager: React.FC<SupplierManagerProps> = ({ suppliers, setSupplie
                     </div>
                 ) : (
                     <div>
-                        {suggestions.length > 0 ? (
-                            <div className="flex items-center gap-1.5 bg-amber-900/20 border border-amber-900/50 p-1 rounded">
-                                <button onClick={() => cancelSuggestion(batchId, idx)} className="text-red-400 p-0.5"><X className="w-3 h-3"/></button>
-                                <button onClick={() => cycleSuggestion(batchId, idx, 'prev')} className="text-amber-500"><ChevronLeft className="w-3.5 h-3.5"/></button>
-                                <button onClick={() => applySuggestion(batchId, idx)} className="flex-1 text-center font-bold text-amber-400 hover:text-white text-xs px-1 rounded hover:bg-amber-600">
-                                    {suggestions[currentSuggestIdx]}
-                                </button>
-                                <button onClick={() => cycleSuggestion(batchId, idx, 'next')} className="text-amber-500"><ChevronRight className="w-3.5 h-3.5"/></button>
-                                <button onClick={() => fetchSuggestions(batchId, idx, item.name, true)} className="text-blue-400 p-0.5"><RefreshCw className="w-3 h-3"/></button>
-                            </div>
-                        ) : (
                             <div className="flex items-center gap-1.5 group/edit">
                                 <span className={`text-sm font-medium leading-tight ${!item.isVerified ? 'text-amber-100' : 'text-white'}`}>{item.name}</span>
                                 <div className="opacity-0 group-hover/edit:opacity-100 flex items-center gap-0.5 transition-opacity shrink-0">
                                     <button onClick={() => startEditingItem(idx, item.name)} className="text-slate-600 hover:text-blue-400 p-0.5 rounded" title="Editar nome"><Pencil className="w-3 h-3"/></button>
-                                    <button onClick={() => fetchSuggestions(batchId, idx, item.name)} className="text-slate-600 hover:text-amber-400 p-0.5 rounded" disabled={isLoadingSuggestions} title="Sugerir com IA">
-                                        {isLoadingSuggestions ? <Loader2 className="w-3 h-3 animate-spin"/> : <Wand2 className="w-3 h-3"/>}
-                                    </button>
                                 </div>
                             </div>
-                        )}
                         {item.sku && <span className="text-[10px] text-slate-700 block">{item.sku}</span>}
                     </div>
                 )}

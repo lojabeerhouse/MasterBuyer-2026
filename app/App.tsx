@@ -4,6 +4,8 @@ import { auth, googleProvider } from './firebaseConfig';
 import { saveUserData, loadUserData, saveChunkedData, loadChunkedData } from './services/firebaseService';
 import { loadNotifications, saveNotifications, processBatchIntoHistory, resolveDuplicate, normalizeProductKey, loadPriceHistory, savePriceHistory } from './services/historyService';
 import { loadAllCatalogs, processBatchIntoCatalog, saveCatalog, normForMapping, makeProductId } from './services/supplierCatalogService';
+import { RightSidebarProvider } from './contexts/RightSidebarContext';
+import RightActionSidebar from './components/RightActionSidebar';
 const NotificationCenter = lazy(() => import('./components/NotificationCenter'));
 const Dashboard = lazy(() => import('./components/Dashboard'));
 const UploadCenter = lazy(() => import('./components/UploadCenter'));
@@ -34,11 +36,12 @@ import {
   AppSettings,
   PurchaseOrder,
   UserProfile,
+  QuoteStage,
 } from './types';
 import {
   BarChart3, Users, FileText, Database, Scale, Settings,
   CalendarDays, ClipboardList, LogOut, ChevronDown, Tag, MessageSquare,
-  LayoutDashboard, Menu, X, UploadCloud
+  LayoutDashboard, Menu, X, UploadCloud, Package, TrendingUp, Lock, ChevronRight
 } from 'lucide-react';
 const BuyingAssistant = lazy(() => import('./components/BuyingAssistant'));
 const QuoteRequest = lazy(() => import('./components/QuoteRequest'));
@@ -74,36 +77,197 @@ const DEFAULT_USER_PROFILE: UserProfile = {
 
 // ─── Login / Loading ──────────────────────────────────────────────────────────
 
+const AnimatedHeroText: React.FC = () => {
+  const [active, setActive] = useState<0 | 1>(0);
+  const [phase, setPhase] = useState<'idle' | 'entering' | 'holding' | 'leaving'>('idle');
+
+  // Wait for entrance animations, then start the cycle
+  useEffect(() => {
+    const t = setTimeout(() => setPhase('entering'), 1500);
+    return () => clearTimeout(t);
+  }, []);
+
+  useEffect(() => {
+    if (phase === 'idle') return;
+    let t: ReturnType<typeof setTimeout>;
+    if (phase === 'entering') {
+      t = setTimeout(() => setPhase('holding'), 500);
+    } else if (phase === 'holding') {
+      t = setTimeout(() => setPhase('leaving'), 3000);
+    } else {
+      t = setTimeout(() => {
+        setActive(p => (p === 0 ? 1 : 0) as 0 | 1);
+        setPhase('entering');
+      }, 500);
+    }
+    return () => clearTimeout(t);
+  }, [phase]);
+
+  const estIsAmber  = (active === 0 && (phase === 'entering' || phase === 'holding')) || phase === 'idle';
+  const estIsPushed = active === 0 && (phase === 'entering' || phase === 'holding');
+  const resIsAmber  = active === 1 && (phase === 'entering' || phase === 'holding');
+  const resIsPushed = active === 1 && (phase === 'entering' || phase === 'holding');
+
+  return (
+    <div className="font-display font-bold leading-none select-none text-[clamp(3rem,5.5vw,4.8rem)]">
+      <span className="block text-white">COMPRAS</span>
+
+      {/* ESTRATÉGICAS */}
+      <div className="relative">
+        <ChevronRight
+          size={28}
+          className={`absolute top-1/2 -translate-y-1/2 text-amber-400 transition-all duration-500 ease-out ${
+            estIsPushed ? 'opacity-100 -left-8' : 'opacity-0 -left-20'
+          }`}
+        />
+        <span className={`block transition-all duration-500 ease-out ${
+          estIsPushed ? 'translate-x-7' : 'translate-x-0'
+        } ${estIsAmber ? 'text-amber-400' : 'text-white/25'}`}>
+          ESTRATÉGICAS.
+        </span>
+      </div>
+
+      {/* RESULTADOS REAIS */}
+      <div className="relative">
+        <ChevronRight
+          size={28}
+          className={`absolute top-1/2 -translate-y-1/2 text-amber-400 transition-all duration-500 ease-out ${
+            resIsPushed ? 'opacity-100 -left-8' : 'opacity-0 -left-20'
+          }`}
+        />
+        <div className={`transition-all duration-500 ease-out ${
+          resIsPushed ? 'translate-x-7' : 'translate-x-0'
+        } ${resIsAmber ? 'text-amber-400' : 'text-white/25'}`}>
+          <span className="block">RESULTADOS</span>
+          <span className="block">REAIS.</span>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const LoginScreen: React.FC<{ onLogin: () => void; loading: boolean }> = ({ onLogin, loading }) => (
-  <div className="flex flex-col items-center justify-center h-screen bg-slate-950 text-slate-200">
-    <div className="bg-slate-900 border border-slate-800 rounded-2xl p-10 flex flex-col items-center gap-6 shadow-2xl w-full max-w-sm">
-      <div className="w-16 h-16 bg-amber-600 rounded-xl flex items-center justify-center shadow-lg">
-        <span className="font-black text-3xl text-white">B</span>
+  <div className="flex h-screen overflow-hidden bg-[#0e0b08]">
+
+    {/* ── LEFT PANEL — branding (desktop only) ───────────────────────────── */}
+    <div className="hidden lg:flex lg:w-[58%] relative flex-col p-10 xl:p-14 overflow-x-hidden overflow-y-auto border-r border-amber-900/20 bg-[#0e0b08]">
+      {/* Grid texture */}
+      <div className="absolute inset-0 login-grid pointer-events-none" />
+      {/* Directional gradient */}
+      <div className="absolute inset-0 bg-gradient-to-br from-transparent via-[#0e0b08]/60 to-amber-950/20 pointer-events-none" />
+      {/* Ambient glow orbs */}
+      <div className="absolute top-[18%] left-[10%] w-[480px] h-[480px] bg-amber-600/5 rounded-full blur-3xl pointer-events-none" />
+      <div className="absolute bottom-[8%] right-[5%] w-[280px] h-[280px] bg-amber-700/[0.04] rounded-full blur-3xl pointer-events-none" />
+
+      {/* Top: wordmark */}
+      <div className="relative shrink-0 flex items-center gap-3 login-anim login-anim-1">
+        <div className="w-8 h-8 bg-amber-600 rounded-lg flex items-center justify-center shrink-0">
+          <span className="font-display font-bold text-base text-white">B</span>
+        </div>
+        <span className="font-body text-white/60 text-sm font-medium tracking-wider">BeerHouse</span>
       </div>
-      <div className="text-center">
-        <h1 className="text-2xl font-bold text-white">BeerHouse</h1>
-        <p className="text-slate-400 text-sm mt-1">MasterBuyer 2026</p>
+
+      {/* Center: hero + description + bullets — vertically centered, compresses gracefully */}
+      <div className="relative flex-1 flex flex-col justify-center min-h-0 py-8 gap-8">
+        <div className="login-anim login-anim-2">
+          <p className="font-body text-amber-500/60 text-[10px] font-semibold tracking-[0.22em] uppercase mb-5">
+            MasterBuyer 2026
+          </p>
+          <AnimatedHeroText />
+        </div>
+
+        <p className="font-body text-slate-500 text-sm leading-relaxed max-w-xs login-anim login-anim-3">
+          Plataforma completa de gestão de compras para distribuidoras. Cotações, pedidos e análises em um único lugar.
+        </p>
+
+        {/* Feature bullets */}
+        <div className="space-y-3 login-anim login-anim-4">
+          {([
+            { icon: BarChart3,  text: 'Comparador de cotações em tempo real' },
+            { icon: Package,    text: 'Gestão completa de pedidos e fornecedores' },
+            { icon: TrendingUp, text: 'Histórico de preços com análise de IA' },
+          ] as { icon: React.ElementType; text: string }[]).map(({ icon: Icon, text }) => (
+            <div key={text} className="flex items-center gap-3">
+              <div className="w-7 h-7 rounded-md bg-amber-600/10 border border-amber-600/20 flex items-center justify-center shrink-0">
+                <Icon size={13} className="text-amber-500" />
+              </div>
+              <span className="font-body text-slate-400 text-sm">{text}</span>
+            </div>
+          ))}
+        </div>
       </div>
-      <button
-        onClick={onLogin}
-        disabled={loading}
-        className="w-full flex items-center justify-center gap-3 bg-white text-slate-900 font-semibold py-3 px-6 rounded-lg hover:bg-slate-100 transition-all disabled:opacity-50"
-      >
-        {loading ? (
-          <span className="text-sm">Entrando...</span>
-        ) : (
-          <>
-            <svg className="w-5 h-5" viewBox="0 0 24 24">
-              <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
-              <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
-              <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
-              <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
-            </svg>
-            <span>Entrar com Google</span>
-          </>
-        )}
-      </button>
-      <p className="text-slate-600 text-xs text-center">Seus dados ficam salvos na nuvem e sincronizados em qualquer dispositivo.</p>
+
+      {/* Bottom: copyright */}
+      <p className="relative shrink-0 font-body text-white/15 text-xs login-anim login-anim-5">
+        © 2026 BeerHouse. Todos os direitos reservados.
+      </p>
+    </div>
+
+    {/* ── RIGHT PANEL — login form ────────────────────────────────────────── */}
+    <div className="flex-1 flex flex-col items-center justify-center p-8 bg-[#080605] relative">
+      <div className="absolute inset-0 bg-gradient-to-t from-amber-950/[0.08] via-transparent to-transparent pointer-events-none" />
+
+      <div className="relative w-full max-w-[340px] space-y-7">
+
+        {/* Mobile logo */}
+        <div className="flex lg:hidden justify-center login-anim login-anim-1">
+          <div className="w-12 h-12 bg-amber-600 rounded-xl flex items-center justify-center shadow-lg">
+            <span className="font-display font-bold text-xl text-white">B</span>
+          </div>
+        </div>
+
+        {/* Header */}
+        <div className="login-anim login-anim-2">
+          <h1 className="font-display font-bold text-white tracking-tight text-[2rem]">
+            BEM-VINDO
+          </h1>
+          <p className="font-body text-slate-500 mt-1.5 text-sm">Acesse sua conta para continuar</p>
+        </div>
+
+        {/* Divider */}
+        <div className="flex items-center gap-3 login-anim login-anim-3">
+          <div className="flex-1 h-px bg-white/[0.06]" />
+          <span className="font-body text-white/20 text-[10px] tracking-[0.18em] uppercase">login</span>
+          <div className="flex-1 h-px bg-white/[0.06]" />
+        </div>
+
+        {/* Google button */}
+        <div className="login-anim login-anim-4">
+          <button
+            onClick={onLogin}
+            disabled={loading}
+            className="w-full flex items-center justify-center gap-3 bg-white text-slate-900 font-semibold py-3.5 px-5 rounded-xl hover:bg-slate-50 active:scale-[0.98] transition-all duration-150 shadow-2xl disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {loading ? (
+              <span className="font-body text-sm text-slate-500">Entrando...</span>
+            ) : (
+              <>
+                <svg className="w-[18px] h-[18px] shrink-0" viewBox="0 0 24 24">
+                  <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                  <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                  <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+                  <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+                </svg>
+                <span className="font-body text-sm">Entrar com Google</span>
+              </>
+            )}
+          </button>
+        </div>
+
+        {/* Security note */}
+        <div className="flex items-center justify-center gap-2 text-white/20 login-anim login-anim-5">
+          <Lock size={11} />
+          <p className="font-body text-xs">Login seguro · Dados sincronizados na nuvem</p>
+        </div>
+
+        {/* Version badge */}
+        <div className="flex justify-center login-anim login-anim-6">
+          <span className="font-body px-3 py-1 bg-white/[0.04] border border-white/[0.07] rounded-full text-white/20 text-[11px]">
+            MasterBuyer 2026
+          </span>
+        </div>
+
+      </div>
     </div>
   </div>
 );
@@ -156,6 +320,9 @@ const App: React.FC = () => {
   const [supplierCatalogs, setSupplierCatalogs] = useState<Record<string, SupplierCatalog>>({});
   const [priceValidityConfig, setPriceValidityConfig] = useState<PriceValidityConfig>({ globalDays: 7 });
   const [catalogTab, setCatalogTab] = useState<string>('master');
+
+  // --- QUOTE STAGES ---
+  const [quoteStages, setQuoteStages] = useState<QuoteStage[]>([]);
 
   // --- SETTINGS ---
   const [hiddenProducts, setHiddenProducts] = useState<HiddenProduct[]>([]);
@@ -251,16 +418,18 @@ const App: React.FC = () => {
     setSupplierCatalogs(catalogsMap);
     setPriceValidityConfig(savedValidityConfig);
 
-    const [savedHidden, savedAppSettings, savedPurchaseOrders, savedUserProfile] = await Promise.all([
+    const [savedHidden, savedAppSettings, savedPurchaseOrders, savedUserProfile, savedQuoteStages] = await Promise.all([
       loadUserData<HiddenProduct[]>(uid, 'hiddenProducts', []),
       loadUserData<AppSettings>(uid, 'appSettings', { showInactiveProducts: false, priceValidityDays: 7 }),
       loadUserData<PurchaseOrder[]>(uid, 'purchaseOrders', []),
       loadUserData<UserProfile>(uid, 'userProfile', DEFAULT_USER_PROFILE),
+      loadUserData<QuoteStage[]>(uid, 'quoteStages', []),
     ]);
     setHiddenProducts(savedHidden);
     setAppSettings(savedAppSettings);
     setPurchaseOrders(savedPurchaseOrders);
     setUserProfile(savedUserProfile);
+    setQuoteStages(savedQuoteStages);
 
     setDataLoading(false);
     setIsLoaded(true);
@@ -286,6 +455,7 @@ const App: React.FC = () => {
   useEffect(() => { if (uid && isLoaded) saveUserData(uid, 'hiddenProducts', hiddenProducts); }, [hiddenProducts, uid, isLoaded]);
   useEffect(() => { if (uid && isLoaded) saveUserData(uid, 'appSettings', appSettings); }, [appSettings, uid, isLoaded]);
   useEffect(() => { if (uid && isLoaded) saveUserData(uid, 'userProfile', userProfile); }, [userProfile, uid, isLoaded]);
+  useEffect(() => { if (uid && isLoaded) saveUserData(uid, 'quoteStages', quoteStages); }, [quoteStages, uid, isLoaded]);
   useEffect(() => { if (uid && isLoaded) saveNotifications(uid, notifications); }, [notifications, uid, isLoaded]);
 
   // --- ARQUIVAMENTO AUTOMÁTICO DE COTAÇÕES ANTIGAS ---
@@ -706,6 +876,7 @@ const App: React.FC = () => {
   ];
 
   return (
+    <RightSidebarProvider>
     <div className="flex h-screen w-full bg-slate-950 text-slate-200 font-sans overflow-hidden">
       
       {/* Mobile overlay */}
@@ -842,8 +1013,11 @@ const App: React.FC = () => {
         </div>
       </div>
 
-      {/* Main Content Wrapper */}
-      <div className="flex-1 flex flex-col min-w-0 h-screen overflow-hidden relative">
+      {/* Main Content Wrapper — inclui conteúdo principal + sidebar direita */}
+      <div className="flex-1 flex flex-row min-w-0 h-screen overflow-hidden relative">
+
+        {/* Coluna central: mobile topbar + main + assistente */}
+        <div className="flex-1 flex flex-col min-w-0 h-screen overflow-hidden">
         {/* Mobile Top Bar */}
         <div className="xl:hidden h-16 bg-slate-900 border-b border-slate-800 flex items-center gap-3 px-4 shrink-0 transition-all">
           <button
@@ -1015,6 +1189,8 @@ const App: React.FC = () => {
             suppliers={suppliers}
             catalogs={supplierCatalogs}
             globalValidityDays={appSettings.priceValidityDays}
+            quoteStages={quoteStages}
+            onSaveStages={setQuoteStages}
           />
         )}
         {activeTab === 'settings' && (
@@ -1055,8 +1231,14 @@ const App: React.FC = () => {
       <Suspense fallback={null}>
         <BuyingAssistant suppliers={suppliers} cart={cart} setCart={setCart} salesData={salesData} />
       </Suspense>
-      </div>
+        </div>{/* fim coluna central */}
+
+        {/* Sidebar de Ações Global */}
+        <RightActionSidebar />
+
+      </div>{/* fim Main Content Wrapper */}
     </div>
+    </RightSidebarProvider>
   );
 };
 
