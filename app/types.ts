@@ -217,6 +217,7 @@ export interface MasterProduct {
   // Extended Fields
   brand?: string; // "Marca"
   category?: string; // "Categoria do produto" (Coluna BF)
+  categoryId?: string; // ID do nó-folha na categoryTree (novo sistema)
   tags?: string; // "Grupo de Tags/Tags" (Antiga categoria)
   productGroup?: string; // "Grupo de produtos" (Coluna AL)
   department?: string; // "Departamento"
@@ -338,7 +339,8 @@ export interface SupplierCatalogProduct {
   masterSku?: string;           // SKU do meu produto linkado
   masterProductName?: string;   // nome do meu produto (cache para display)
   masterTags?: string;          // tags herdadas do meu produto
-  masterCategory?: string;      // categoria herdada do meu produto
+  masterCategory?: string;      // categoria herdada do meu produto (legado: string >>)
+  masterCategoryId?: string;    // ID do nó-folha na categoryTree (novo sistema)
   linkConfirmed?: boolean;      // true = usuário confirmou o link manualmente
   linkSuggestion?: string;      // SKU sugerido automaticamente (aguardando confirmação)
   linkSuggestionScore?: number; // % de similaridade da sugestão
@@ -415,3 +417,26 @@ export interface QuoteStage {
   sentAt?: number;
   color?: string;
 }
+
+// ─── INVENTORY COUNT ──────────────────────────────────────────────────────────
+
+/** Contagem física de estoque: chave = SKU do produto, valor = quantidade contada */
+export type InventoryCountMap = Record<string, number>;
+
+export type InventoryCountSortOption = 'alpha' | 'category' | 'stockHigh' | 'stockLow';
+
+export interface InventoryCountSettings {
+  sortBy: InventoryCountSortOption;
+  showSystemStock: boolean;
+}
+
+// ─── CATEGORY TREE ────────────────────────────────────────────────────────────
+
+/** Nó da árvore de categorias. ID é a chave no Record (sequencial imutável). */
+export interface CategoryNode {
+  nome: string;
+  pai: string | null; // null = categoria raiz
+}
+
+/** Árvore completa de categorias: Record<id, CategoryNode> */
+export type CategoryTree = Record<string, CategoryNode>;

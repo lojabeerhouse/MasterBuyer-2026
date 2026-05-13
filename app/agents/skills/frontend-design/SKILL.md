@@ -39,12 +39,4 @@ Interpret creatively and make unexpected choices that feel genuinely designed fo
 
 **IMPORTANT**: Match implementation complexity to the aesthetic vision. Maximalist designs need elaborate code with extensive animations and effects. Minimalist or refined designs need restraint, precision, and careful attention to spacing, typography, and subtle details. Elegance comes from executing the vision well.
 
-## Industrial & ERP Design Patterns
-
-When designing operational modules (ERPs, Dashboards, Master Data Management):
-
-- **Horizontal Scrolling is an Anti-Pattern**: The user's screen is a hard boundary. Rolagem lateral soa como má otimização. Prioritize responsiveness by shrinking elements proportionally, truncating non-essential text (`min-w-0`), or changing the axis to vertical (`flex-col`). Avoid fixed minimum widths that force screen overflow.
-- **Data-Density over Whitespace**: Vertical space is precious. Use dense horizontal designs (e.g., condensed data tables or rich lists). Allocate surgical, tight widths for predictable fields (dates, currencies, quantities - e.g., ~40-80px), reserving the flexible space (`flex-1`) for critical unpredictable fields like Names, preventing harsh truncation.
-- **Pixel-Perfect Harmonic Alignment**: Visual hierarchy fails if margins don't align. A container's content should start on the exact same X-axis as its header. Avoid "double padding" (e.g., a parent with `p-6` and a child with `px-4`) that pushes content unnecessarily to the right. Ensure an impeccable vertical line on the left edge.
-
 Remember: Claude is capable of extraordinary creative work. Don't hold back, show what can truly be created when thinking outside the box and committing fully to a distinctive vision.

@@ -20,14 +20,14 @@
 ## 4. Contextual Triggers
 - **[PLANEJAMENTO]:** Se o usuário solicitar um "PLANEJAMENTO"/"PLAN":
 - PARE e NÃO execute nenhuma alteração no código
-- Antes de responder, escreva:
+- Antes de responder, escreva EM UM IMPLEMENTATION PLAN (em PT-BR):
   - Um breve resumo do que entendeu que o usuário quer
   - Um plano em etapas contendo:
     - Quais arquivos serão criados ou modificados
     - Quais cuidados tomar (regressões, breaking changes, dependências)
     - O que haverá de novo no app
-    - O que será removido ou alterado
-    - Se há chance de quebrar alguma coisa ou um conflito negativo com outra função já existente
+    - O que será removido ou alterado (De forma resumida)
+    - Se há chance de quebrar alguma coisa ou um conflito negativo com outra função já existente (De forma resumida)
 - Ao final, adicione uma seção **Recomendação do Agente** com:
   - pontos positivos
   - riscos
@@ -68,6 +68,11 @@ Usar apenas classes Tailwind CSS. Não adicionar CSS customizado inline desneces
 - Criar dentro de `/components`
 - Usar TypeScript com tipagem completa
 - Props sempre tipadas com interface
+
+## Banco de dados — DATA MODEL
+
+Ao criar, modificar ou remover qualquer campo ou coleção do Firestore,
+ler e seguir `app/DATA_MODEL/DATA_MODEL.skill.md`.
 
 ## Antes de Qualquer Modificação Grande
 1. Confirmar que o usuário fez commit no GitHub

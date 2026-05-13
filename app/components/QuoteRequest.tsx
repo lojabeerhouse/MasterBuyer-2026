@@ -40,6 +40,12 @@ const fmtDate = (ts: number) =>
 const searchNorm = (s: string) =>
   s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
 
+const resolveCategoryLabel = (raw: string): string => {
+  const parts = raw.split('>>').map(s => s.trim()).filter(Boolean);
+  if (parts.length <= 2) return parts.join(' > ');
+  return parts.slice(-2).join(' > ');
+};
+
 const computePriority = (p: SupplierCatalogProduct, isExpired: boolean): Priority => {
   if (p.priceHistory.length === 0) return 'low';
   if (isExpired && p.priceHistory.length >= 3) return 'urgent';
@@ -502,10 +508,11 @@ const QuoteRequest: React.FC<QuoteRequestProps> = ({
               <button
                 key={cat}
                 onClick={() => toggleCategoryFilter(cat)}
+                title={cat}
                 className={`flex items-center gap-1 text-[11px] px-2.5 py-1 rounded-full border transition-colors ${categoryFilter.has(cat) ? 'bg-amber-600/20 border-amber-500 text-amber-300' : 'bg-slate-900 border-slate-700 text-slate-500 hover:text-slate-300'}`}
               >
                 {categoryFilter.has(cat) && <Check className="w-2.5 h-2.5" />}
-                {cat}
+                {cat === 'Sem categoria' ? cat : resolveCategoryLabel(cat)}
               </button>
             ))}
             {categoryFilter.size > 0 && (
@@ -616,7 +623,14 @@ const QuoteRequest: React.FC<QuoteRequestProps> = ({
                 </button>
 
                 {groupBy === 'category' && <Tag className="w-3.5 h-3.5 text-slate-500 shrink-0" />}
-                <span className="font-bold text-slate-200 flex-1 truncate">{group.name}</span>
+                <span
+                  className="font-bold text-slate-200 flex-1 truncate"
+                  title={groupBy === 'category' ? group.name : undefined}
+                >
+                  {groupBy === 'category' && group.name !== 'Sem categoria'
+                    ? resolveCategoryLabel(group.name)
+                    : group.name}
+                </span>
 
                 <div className="flex items-center gap-2 shrink-0">
                   {group.expiredCount > 0 && (
@@ -660,7 +674,9 @@ const QuoteRequest: React.FC<QuoteRequestProps> = ({
                                 onClick={() => toggleSubGroup(subKey)}
                               >
                                 <Tag className="w-3 h-3 text-slate-600" />
-                                <span className="text-[11px] text-slate-500 font-medium flex-1">{cat}</span>
+                                <span className="text-[11px] text-slate-500 font-medium flex-1" title={cat}>
+                                  {cat === 'Sem categoria' ? cat : resolveCategoryLabel(cat)}
+                                </span>
                                 {subSelCount > 0 && <span className="text-[10px] text-emerald-400">{subSelCount} sel.</span>}
                                 <span className="text-[10px] text-slate-600">{prods.length}</span>
                                 {subExpanded ? <ChevronUp className="w-3 h-3 text-slate-600" /> : <ChevronDown className="w-3 h-3 text-slate-600" />}

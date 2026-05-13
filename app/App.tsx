@@ -37,14 +37,19 @@ import {
   PurchaseOrder,
   UserProfile,
   QuoteStage,
+  InventoryCountMap,
+  CategoryTree,
 } from './types';
 import {
   BarChart3, Users, FileText, Database, Scale, Settings,
   CalendarDays, ClipboardList, LogOut, ChevronDown, Tag, MessageSquare,
-  LayoutDashboard, Menu, X, UploadCloud, Package, TrendingUp, Lock, ChevronRight
+  LayoutDashboard, Menu, X, UploadCloud, Package, TrendingUp, Lock, ChevronRight,
+  PackageSearch,
 } from 'lucide-react';
 const BuyingAssistant = lazy(() => import('./components/BuyingAssistant'));
 const QuoteRequest = lazy(() => import('./components/QuoteRequest'));
+const InventoryCount = lazy(() => import('./components/inventory_count/InventoryCount'));
+const CategoryManager = lazy(() => import('./components/category_manager/CategoryManager'));
 
 // ─── defaults ────────────────────────────────────────────────────────────────
 
@@ -294,7 +299,8 @@ const App: React.FC = () => {
   // --- APP STATE ---
   const [activeTab, setActiveTab] = useState<
     'dashboard' | 'uploads' | 'sales' | 'comparator' | 'purchase_orders' | 'schedule' |
-    'catalog' | 'suppliers' | 'database' | 'settings' | 'profile' | 'quote_request'
+    'catalog' | 'suppliers' | 'database' | 'settings' | 'profile' | 'quote_request' |
+    'inventory_count' | 'category_manager'
   >('dashboard');
 
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
@@ -323,6 +329,12 @@ const App: React.FC = () => {
 
   // --- QUOTE STAGES ---
   const [quoteStages, setQuoteStages] = useState<QuoteStage[]>([]);
+
+  // --- INVENTORY COUNT (confirmed / Firebase) ---
+  const [inventoryCount, setInventoryCount] = useState<InventoryCountMap>({});
+
+  // --- CATEGORY TREE ---
+  const [categoryTree, setCategoryTree] = useState<CategoryTree>({});
 
   // --- SETTINGS ---
   const [hiddenProducts, setHiddenProducts] = useState<HiddenProduct[]>([]);
@@ -418,18 +430,22 @@ const App: React.FC = () => {
     setSupplierCatalogs(catalogsMap);
     setPriceValidityConfig(savedValidityConfig);
 
-    const [savedHidden, savedAppSettings, savedPurchaseOrders, savedUserProfile, savedQuoteStages] = await Promise.all([
+    const [savedHidden, savedAppSettings, savedPurchaseOrders, savedUserProfile, savedQuoteStages, savedInventoryCount, savedCategoryTree] = await Promise.all([
       loadUserData<HiddenProduct[]>(uid, 'hiddenProducts', []),
       loadUserData<AppSettings>(uid, 'appSettings', { showInactiveProducts: false, priceValidityDays: 7 }),
       loadUserData<PurchaseOrder[]>(uid, 'purchaseOrders', []),
       loadUserData<UserProfile>(uid, 'userProfile', DEFAULT_USER_PROFILE),
       loadUserData<QuoteStage[]>(uid, 'quoteStages', []),
+      loadUserData<InventoryCountMap>(uid, 'inventoryCount', {}),
+      loadUserData<CategoryTree>(uid, 'categoryTree', {}),
     ]);
     setHiddenProducts(savedHidden);
     setAppSettings(savedAppSettings);
     setPurchaseOrders(savedPurchaseOrders);
     setUserProfile(savedUserProfile);
     setQuoteStages(savedQuoteStages);
+    setInventoryCount(savedInventoryCount);
+    setCategoryTree(savedCategoryTree);
 
     setDataLoading(false);
     setIsLoaded(true);
@@ -457,6 +473,8 @@ const App: React.FC = () => {
   useEffect(() => { if (uid && isLoaded) saveUserData(uid, 'userProfile', userProfile); }, [userProfile, uid, isLoaded]);
   useEffect(() => { if (uid && isLoaded) saveUserData(uid, 'quoteStages', quoteStages); }, [quoteStages, uid, isLoaded]);
   useEffect(() => { if (uid && isLoaded) saveNotifications(uid, notifications); }, [notifications, uid, isLoaded]);
+  useEffect(() => { if (uid && isLoaded) saveUserData(uid, 'inventoryCount', inventoryCount); }, [inventoryCount, uid, isLoaded]);
+  useEffect(() => { if (uid && isLoaded) saveUserData(uid, 'categoryTree', categoryTree); }, [categoryTree, uid, isLoaded]);
 
   // --- ARQUIVAMENTO AUTOMÁTICO DE COTAÇÕES ANTIGAS ---
   useEffect(() => {
@@ -866,6 +884,8 @@ const App: React.FC = () => {
     { tab: 'dashboard', icon: <LayoutDashboard className="w-5 h-5" />, label: 'Início' },
     { tab: 'uploads', icon: <UploadCloud className="w-5 h-5" />, label: 'Uploads' },
     { tab: 'suppliers', icon: <Users className="w-5 h-5" />, label: 'Fornecedores' },
+    { tab: 'inventory_count', icon: <PackageSearch className="w-5 h-5" />, label: 'Contagem de Estoque' },
+    { tab: 'category_manager', icon: <Tag className="w-5 h-5" />, label: 'Categorias' },
     { tab: 'database', icon: <Database className="w-5 h-5" />, label: 'Produtos' },
     { tab: 'sales', icon: <BarChart3 className="w-5 h-5" />, label: 'Vendas' },
     { tab: 'catalog', icon: <FileText className="w-5 h-5" />, label: 'Catálogo' },
@@ -1162,6 +1182,26 @@ const App: React.FC = () => {
               )}
             </div>
           </div>
+        )}
+        {activeTab === 'inventory_count' && (
+          <Suspense fallback={<div className="flex items-center justify-center h-full text-slate-500 text-sm">Carregando...</div>}>
+            <InventoryCount
+              masterProducts={masterProducts}
+              userId={user.uid}
+              confirmedCount={inventoryCount}
+              onSaveCount={setInventoryCount}
+            />
+          </Suspense>
+        )}
+        {activeTab === 'category_manager' && (
+          <Suspense fallback={<div className="flex items-center justify-center h-full text-slate-500 text-sm">Carregando...</div>}>
+            <CategoryManager
+              categoryTree={categoryTree}
+              masterProducts={masterProducts}
+              onSaveCategoryTree={setCategoryTree}
+              onUpdateMasterProducts={setMasterProducts}
+            />
+          </Suspense>
         )}
         {activeTab === 'database' && (
           <ProductDatabase
