@@ -430,6 +430,8 @@ export interface InventoryCountSettings {
   showSystemStock: boolean;
 }
 
+export type InventoryCountTimestamps = Record<string, string>; // productId → ISO 8601
+
 // ─── CATEGORY TREE ────────────────────────────────────────────────────────────
 
 /** Nó da árvore de categorias. ID é a chave no Record (sequencial imutável). */
@@ -440,3 +442,16 @@ export interface CategoryNode {
 
 /** Árvore completa de categorias: Record<id, CategoryNode> */
 export type CategoryTree = Record<string, CategoryNode>;
+// ─── LOG SYSTEM ─────────────────────────────────────────────────────────────
+
+export type LogLevel = 'info' | 'success' | 'warn' | 'error';
+
+export interface AppLog {
+  id: string;
+  level: LogLevel;
+  message: string;
+  source?: string;    // ex: "Firebase", "Gemini", "Auth"
+  hint?: string;      // Dica para o usuário em caso de erro
+  timestamp: number;
+  read?: boolean;     // Para controle de logs não vistos
+}

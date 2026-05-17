@@ -873,8 +873,10 @@ const QuoteDetailModal: React.FC<QuoteDetailModalProps> = ({
                     .map((it, idx) => ({ item: it, originalIndex: idx }))
                     .filter(x => {
                       if (!detailsSearchTerm) return true;
-                      const term = detailsSearchTerm.toLowerCase();
-                      return x.item.name.toLowerCase().includes(term) || x.item.sku.toLowerCase().includes(term);
+                      const tokens = detailsSearchTerm.toLowerCase().split(/\s+/).filter(t => t);
+                      const n = x.item.name.toLowerCase();
+                      const s = (x.item.sku || '').toLowerCase();
+                      return tokens.every(t => n.includes(t) || s.includes(t));
                     })
                     .sort((a, b) => {
                       switch (detailsSortBy) {

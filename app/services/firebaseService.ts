@@ -3,13 +3,22 @@ import { doc, getDoc, setDoc } from "firebase/firestore";
 
 const CHUNK_SIZE = 500;
 
-// Fingerprint leve: count + sku/id do primeiro e último item
+// Fingerprint: count + sku/id do primeiro e último item + checksum de categoryId + checksum de stock
 const loadedFingerprints = new Map<string, string>();
 
 function getFingerprint<T>(data: T[]): string {
   const first = (data[0] as any)?.sku || (data[0] as any)?.id || '';
   const last  = (data[data.length - 1] as any)?.sku || (data[data.length - 1] as any)?.id || '';
-  return `${data.length}:${first}:${last}`;
+  let catChecksum = 0;
+  let stockChecksum = 0;
+  for (const item of data) {
+    const catId = (item as any).categoryId || '';
+    for (let i = 0; i < catId.length; i++) {
+      catChecksum = (catChecksum * 31 + catId.charCodeAt(i)) & 0xffffffff;
+    }
+    stockChecksum = (stockChecksum * 31 + ((item as any).stock ?? 0)) & 0xffffffff;
+  }
+  return `${data.length}:${first}:${last}:${catChecksum}:${stockChecksum}`;
 }
 
 export async function saveChunkedData<T>(userId: string, key: string, data: T[]): Promise<void> {

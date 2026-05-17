@@ -1704,12 +1704,13 @@ const SupplierManager: React.FC<SupplierManagerProps> = ({ suppliers, setSupplie
                {[...selectedSupplier.quotes]
                  .filter(q => {
                      if (!historySearchTerm) return true;
-                     const term = historySearchTerm.toLowerCase();
-                     const matchName = (q.fileName || 'Texto Colado').toLowerCase().includes(term);
-                     const matchItem = q.archivedCsv
-                       ? q.archivedCsv.toLowerCase().includes(term)
-                       : q.items.some(i => i.name.toLowerCase().includes(term));
-                     return matchName || matchItem;
+                     const tokens = historySearchTerm.toLowerCase().split(/\s+/).filter(t => t);
+                     const name = (q.fileName || 'Texto Colado').toLowerCase();
+                     const itemsContent = q.archivedCsv 
+                       ? q.archivedCsv.toLowerCase() 
+                       : q.items.map(i => i.name.toLowerCase()).join(' ');
+
+                     return tokens.every(t => name.includes(t) || itemsContent.includes(t));
                  })
                  .sort((a, b) => {
                      if (quoteSortMode === 'uploadDate') {

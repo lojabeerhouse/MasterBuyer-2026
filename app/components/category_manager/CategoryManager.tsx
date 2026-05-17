@@ -57,14 +57,24 @@ const CategoryManager: React.FC<Props> = ({
 
   const handleAssignCategory = (productId: string, categoryId: string | undefined) => {
     onUpdateMasterProducts(
-      masterProducts.map(p => p.id === productId ? { ...p, categoryId } : p)
+      masterProducts.map(p => {
+        if (p.id !== productId) return p;
+        const updated = { ...p, categoryId };
+        if (categoryId) delete updated.category;
+        return updated;
+      })
     );
   };
 
   const handleBatchAssignCategory = (updates: Array<{ productId: string; categoryId: string }>) => {
     const map = new Map(updates.map(u => [u.productId, u.categoryId]));
     onUpdateMasterProducts(
-      masterProducts.map(p => map.has(p.id) ? { ...p, categoryId: map.get(p.id) } : p)
+      masterProducts.map(p => {
+        if (!map.has(p.id)) return p;
+        const updated = { ...p, categoryId: map.get(p.id) };
+        delete updated.category;
+        return updated;
+      })
     );
   };
 
@@ -138,10 +148,10 @@ const CategoryManager: React.FC<Props> = ({
       </div>
 
       {/* Main content: tree + product list */}
-      <div className="flex-1 flex gap-3 overflow-hidden min-h-0">
+      <div className="flex-1 flex flex-col lg:flex-row gap-3 overflow-hidden min-h-0">
 
         {/* Left: Category tree */}
-        <div className="w-72 shrink-0 bg-slate-800 border border-slate-700 rounded-xl flex flex-col overflow-hidden">
+        <div className="w-full lg:w-72 lg:shrink-0 bg-slate-800 border border-slate-700 rounded-xl flex flex-col overflow-hidden max-h-52 lg:max-h-none">
           <div className="px-3 py-2.5 border-b border-slate-700 shrink-0">
             <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide">Árvore de Categorias</p>
           </div>

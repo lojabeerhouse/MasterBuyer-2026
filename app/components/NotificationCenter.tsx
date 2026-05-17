@@ -7,8 +7,8 @@ import ExpandedNotifications from './ExpandedNotifications';
 interface NotificationCenterProps {
   notifications: AppNotification[];
   onResolve: (id: string, keepWhich?: 'existing' | 'incoming') => void;
-  onClearConsole: () => void;
 }
+
 
 const formatCurrency = (v: number) =>
   v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -103,9 +103,9 @@ const DuplicateModal: React.FC<{
 const NotificationCenter: React.FC<NotificationCenterProps> = ({
   notifications,
   onResolve,
-  onClearConsole,
 }) => {
-  const [openPanel, setOpenPanel] = useState<'attention' | 'console' | null>(null);
+  const [openPanel, setOpenPanel] = useState<boolean>(false);
+
   const [selectedNotif, setSelectedNotif] = useState<AppNotification | null>(null);
   const [expandedOpen, setExpandedOpen] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -114,20 +114,19 @@ const NotificationCenter: React.FC<NotificationCenterProps> = ({
   const consoleNotifs = notifications.filter(n => n.type === 'console');
   const unreadConsole = consoleNotifs.filter(n => !n.resolved).length;
 
-  // Close panel on outside click
   useEffect(() => {
     const handleClick = (e: MouseEvent) => {
       if (panelRef.current && !panelRef.current.contains(e.target as Node)) {
-        setOpenPanel(null);
+        setOpenPanel(false);
       }
     };
     document.addEventListener('mousedown', handleClick);
     return () => document.removeEventListener('mousedown', handleClick);
   }, []);
 
-  const toggle = (panel: 'attention' | 'console') => {
-    setOpenPanel(prev => prev === panel ? null : panel);
-  };
+  const toggle = () => setOpenPanel(prev => !prev);
+
+
 
   return (
     <>
@@ -152,14 +151,14 @@ const NotificationCenter: React.FC<NotificationCenterProps> = ({
         />
       )}
 
-      <div ref={panelRef} className="relative flex items-center gap-1">
+      <div ref={panelRef} className="relative flex items-center">
         {/* ─── Attention Bell ─── */}
         <div className="relative">
           <button
-            onClick={() => toggle('attention')}
+            onClick={toggle}
             title="Notificações de atenção"
             className={`relative p-1.5 rounded-lg transition-all ${
-              openPanel === 'attention'
+              openPanel
                 ? 'bg-amber-600/20 text-amber-400'
                 : 'text-slate-400 hover:text-amber-400 hover:bg-slate-800'
             }`}
@@ -172,8 +171,8 @@ const NotificationCenter: React.FC<NotificationCenterProps> = ({
             )}
           </button>
 
-          {openPanel === 'attention' && (
-            <div className="absolute left-0 bottom-full mb-2 w-80 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl z-50 overflow-hidden">
+          {openPanel && (
+            <div className="absolute left-0 bottom-full xl:bottom-auto xl:top-full mb-2 xl:mt-2 xl:mb-0 xl:right-0 xl:left-auto w-80 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl z-50 overflow-hidden">
               <div className="flex items-center justify-between px-4 py-3 border-b border-slate-800">
                 <div className="flex items-center gap-2">
                   <AlertTriangle className="w-4 h-4 text-amber-400" />
@@ -185,7 +184,7 @@ const NotificationCenter: React.FC<NotificationCenterProps> = ({
                   )}
                 </div>
                 <button
-                  onClick={() => { setExpandedOpen(true); setOpenPanel(null); }}
+                  onClick={() => { setExpandedOpen(true); setOpenPanel(false); }}
                   className="flex items-center gap-1 text-slate-400 hover:text-amber-400 text-xs transition-colors"
                   title="Expandir notificações"
                 >
@@ -203,7 +202,7 @@ const NotificationCenter: React.FC<NotificationCenterProps> = ({
                   attentionNotifs.map(n => (
                     <button
                       key={n.id}
-                      onClick={() => { setSelectedNotif(n); setOpenPanel(null); }}
+                      onClick={() => { setSelectedNotif(n); setOpenPanel(false); }}
                       className="w-full text-left px-4 py-3 border-b border-slate-800/50 hover:bg-amber-950/20 transition-all group"
                     >
                       <div className="flex items-start gap-3">
@@ -222,62 +221,8 @@ const NotificationCenter: React.FC<NotificationCenterProps> = ({
             </div>
           )}
         </div>
-
-        {/* ─── Console Terminal ─── */}
-        <div className="relative">
-          <button
-            onClick={() => toggle('console')}
-            title="Log de operações"
-            className={`relative p-1.5 rounded-lg transition-all ${
-              openPanel === 'console'
-                ? 'bg-slate-700 text-slate-200'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
-            }`}
-          >
-            <Terminal className="w-4 h-4" />
-            {unreadConsole > 0 && (
-              <span className="absolute -top-0.5 -right-0.5 w-3 h-3 bg-emerald-500 rounded-full" />
-            )}
-          </button>
-
-          {openPanel === 'console' && (
-            <div className="absolute left-0 bottom-full mb-2 w-80 bg-slate-950 border border-slate-700 rounded-xl shadow-2xl z-50 overflow-hidden font-mono">
-              <div className="flex items-center justify-between px-4 py-3 border-b border-slate-800 bg-slate-900">
-                <div className="flex items-center gap-2">
-                  <Terminal className="w-4 h-4 text-emerald-400" />
-                  <span className="text-emerald-400 font-bold text-sm">console.log</span>
-                </div>
-                <button
-                  onClick={onClearConsole}
-                  className="text-slate-600 hover:text-slate-300 transition-colors"
-                  title="Limpar console"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                </button>
-              </div>
-
-              <div className="max-h-80 overflow-y-auto p-2 space-y-1">
-                {consoleNotifs.length === 0 ? (
-                  <p className="text-slate-600 text-xs px-2 py-4 text-center">Nenhum log ainda</p>
-                ) : (
-                  [...consoleNotifs].reverse().map(n => (
-                    <div key={n.id} className="flex items-start gap-2 px-2 py-1.5 rounded hover:bg-slate-900 transition-colors">
-                      <CheckCircle className="w-3 h-3 text-emerald-500 mt-0.5 shrink-0" />
-                      <div className="flex-1 min-w-0">
-                        <p className="text-emerald-300 text-[11px] leading-relaxed">{n.message}</p>
-                        <div className="flex items-center gap-1 mt-0.5">
-                          <Clock className="w-2.5 h-2.5 text-slate-600" />
-                          <span className="text-slate-600 text-[10px]">{timeAgo(n.timestamp)}</span>
-                        </div>
-                      </div>
-                    </div>
-                  ))
-                )}
-              </div>
-            </div>
-          )}
-        </div>
       </div>
+
     </>
   );
 };

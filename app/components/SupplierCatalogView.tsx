@@ -53,9 +53,13 @@ const LinkModal: React.FC<{
 
   const filtered = useMemo(() => {
     if (!search) return suggestions;
-    const s = searchNormalize(search);
+    const tokens = searchNormalize(search).split(/\s+/).filter(t => t);
     return masterProducts
-      .filter(mp => searchNormalize(mp.name).includes(s) || searchNormalize(mp.sku).includes(s))
+      .filter(mp => {
+        const n = searchNormalize(mp.name);
+        const s = searchNormalize(mp.sku);
+        return tokens.every(t => n.includes(t) || s.includes(t));
+      })
       .slice(0, 10)
       .map(mp => ({ sku: mp.sku, name: mp.name, score: 0 }));
   }, [search, suggestions, masterProducts]);
@@ -366,12 +370,13 @@ const CatalogContent: React.FC<{
     let prods = localCatalog.products;
     if (!showInactive) prods = prods.filter(p => !hiddenIds.has(p.id));
     if (search) {
-      const s = searchNormalize(search);
-      prods = prods.filter(p =>
-        searchNormalize(p.name).includes(s) ||
-        searchNormalize(p.supplierSku ?? '').includes(s) ||
-        searchNormalize(p.masterProductName ?? '').includes(s)
-      );
+      const tokens = searchNormalize(search).split(/\s+/).filter(t => t);
+      prods = prods.filter(p => {
+        const n = searchNormalize(p.name);
+        const ss = searchNormalize(p.supplierSku ?? '');
+        const mpn = searchNormalize(p.masterProductName ?? '');
+        return tokens.every(t => n.includes(t) || ss.includes(t) || mpn.includes(t));
+      });
     }
     if (filterCategory) prods = prods.filter(p => p.masterCategory?.includes(filterCategory));
     switch (filterLinked) {

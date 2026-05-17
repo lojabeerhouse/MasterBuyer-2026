@@ -5,6 +5,8 @@ import {
 } from 'firebase/firestore';
 import { AppNotification, PriceRecord, ProductPriceHistory, DuplicatePayload } from '../types';
 import { ProductQuote, QuoteBatch, Supplier } from '../types';
+import { appLogger } from './loggerService';
+
 
 // ─── HELPERS ────────────────────────────────────────────────────────────────
 
@@ -217,31 +219,22 @@ export const processBatchIntoHistory = async (
     await savePriceHistory(uid, history);
   }
 
-  // Console notification for batch success
   const dateStr = new Date(batch.timestamp).toLocaleDateString('pt-BR', {
     day: '2-digit', month: '2-digit', year: '2-digit'
   });
   const timeStr = new Date(batch.timestamp).toLocaleTimeString('pt-BR', {
     hour: '2-digit', minute: '2-digit'
   });
+
   const batchName = batch.fileName
     ? `"${batch.fileName.substring(0, 20)}"`
     : `"Listagem ${new Date(batch.timestamp).toLocaleDateString('pt-BR')}"`;
 
-  newNotifications.push({
-    id: crypto.randomUUID(),
-    type: 'console',
-    title: `${batchName} processada`,
-    message: `${batchName} analisada com sucesso em ${dateStr} - ${timeStr} [${supplier.name}]`,
-    timestamp: Date.now(),
-    resolved: true,
-    supplierId: supplier.id,
-    supplierName: supplier.name,
-    batchId: batch.id,
-  });
+  appLogger.success(`${batchName} processada com sucesso em ${dateStr} - ${timeStr} [${supplier.name}]`, "Histórico");
 
   return { newNotifications, updatedHistories };
 };
+
 
 /**
  * Resolve uma duplicata: mantém um dos dois registros, ou ambos

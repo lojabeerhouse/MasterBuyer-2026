@@ -1,81 +1,103 @@
-# MasterBuyer 2026 — Agent Directives
 
-## 1. Workflow Orchestration
-- **Plan First:** Para tarefas >3 passos ou que alterem `App.tsx`/Tipagens, entre em "Modo Planejamento" (detalhe arquivos, riscos de regressão e dependências).
-- **Verification:** Nunca assuma que funciona. Valide impactos em dados legados.
-- **Elegance vs Pragmatism:** Evite over-engineering. Soluções simples e nativas do React primeiro.
-- **Autonomous Fix:** Se apontado um bug, resolva a causa raiz. Sem "band-aids".
+# MasterBuyer — Agent Directives
 
-## 2. Critical Constraints (Database & Types)
-- **IMMUTABLE TYPES:** NUNCA renomeie ou delete campos em `types.ts`. Dados de produção no Firestore (path `users/{userId}/data/{key}`) quebrarão.
-- **BACKWARD COMPATIBILITY:** Novos campos em interfaces devem SEMPRE ser opcionais (`?`).
-- **STATE SYNC:** Novo estado no `App.tsx` OBRIGA: inicialização vazia -> sync no `loadAllData` -> `useEffect` com `saveUserData`.
-- **LOCKED FILES:** `firebaseConfig.ts` é intocável.
+## A. PROTOCOLO DE EXECUÇÃO (obrigatório em toda task)
 
-## 3. Tech & Styling Context
-- **Stack:** React 18, TS, Vite, Tailwind CSS, Firebase (Auth/Firestore), Gemini API.
-- **UI Strict:** Apenas `lucide-react` para ícones. Apenas classes Tailwind (sem CSS inline).
-- **Theme Tokens:** Fundo `bg-slate-950` | Cards `bg-slate-900` | Borders `border-slate-800` | Accent `amber-600` (Geral) e `red-600` (Ofertas) | Text `slate-200` & `slate-400`.
+Antes de qualquer alteração de código, responda com:
 
-## 4. Contextual Triggers
-- **[PLANEJAMENTO]:** Se o usuário solicitar um "PLANEJAMENTO"/"PLAN":
-- PARE e NÃO execute nenhuma alteração no código
-- Antes de responder, escreva EM UM IMPLEMENTATION PLAN (em PT-BR):
-  - Um breve resumo do que entendeu que o usuário quer
-  - Um plano em etapas contendo:
-    - Quais arquivos serão criados ou modificados
-    - Quais cuidados tomar (regressões, breaking changes, dependências)
-    - O que haverá de novo no app
-    - O que será removido ou alterado (De forma resumida)
-    - Se há chance de quebrar alguma coisa ou um conflito negativo com outra função já existente (De forma resumida)
-- Ao final, adicione uma seção **Recomendação do Agente** com:
-  - pontos positivos
-  - riscos
-  - motivação para cada um
+1. **Entendi:** 1 frase do que o usuário quer.
+2. **Vou mexer em:** lista de arquivos + o que muda em cada um.
+3. **Riscos:** regressões possíveis ou conflitos com código existente.
+4. **Skills consultadas:** quais skills você leu para esta task (ver seção D).
+5. **Aguardando aprovação.**
 
-## 5. System Map (No Discovery Needed)
-- `/components`: SupplierManager, ProductDatabase, SalesAnalyzer, ProductCatalog, QuoteComparator, OrderManager, OfferFlyer.
-- `/services`: firebaseService.ts, geminiService.ts.
-- `Firestore Keys`: suppliers, salesData, salesConfig, forecast, cart, mappings, ignoredMappings, masterProducts, dbSheetUrl, salesUrl, considerStock, globalPackRules, globalNamingRules.
+Só execute após "ok", "pode", "vai" ou equivalente explícito do usuário.
 
-### EM CASO DE PLANEJAMENTO
+### Gatilhos de aviso adicional
 
+Adicione ao final do plano, antes do "Aguardando aprovação":
 
-### NUNCA altere firebaseConfig.ts
-As credenciais do Firebase estão corretas. Não modifique esse arquivo.
+- **Se vai modificar >3 arquivos** OU **tocar `types.ts` ou `App.tsx`** (mesmo que 1 arquivo só):
+  > ⚠️ Vai mexer em N arquivos. Considere fazer commit antes de aprovar.
 
-### Preserve props existentes
-Os componentes recebem props do App.tsx. Nunca remova props existentes — apenas adicione novas se necessário.
+- **Se a task é reestruturação de componente existente** (não criação nem ajuste pontual):
+  > ⚠️ Reestruturação altera bastante código. Salvou o progresso atual?
 
-### Padrões de Código
+### Princípios
 
-### Ícones
-Usar apenas `lucide-react`. Não instalar outras bibliotecas de ícones.
+- Bug apontado = resolver causa raiz, sem band-aid.
+- Solução simples e nativa do React antes de abstrair.
+- Não assuma que funciona — valide impactos em dados legados.
 
-### Estilização
-Usar apenas classes Tailwind CSS. Não adicionar CSS customizado inline desnecessário.
+## B. REGRAS IMUTÁVEIS (quebrar = quebrar produção)
 
-### Cores
-- Fundo principal: `bg-slate-950`
-- Cards/Nav: `bg-slate-900`
-- Bordas: `border-slate-800`
-- Destaque/Primária: `amber-600`
-- Destaque Ofertas: `red-600`
-- Texto principal: `text-slate-200`
-- Texto secundário: `text-slate-400`
+- **`types.ts`:** nunca renomeie ou delete campos. Novos campos sempre opcionais (`?`).
+  Motivo: dados em produção em `users/{userId}/data/{key}`.
+  Exceção: só com pedido explícito do usuário para migração planejada de campo.
 
-### Componentes novos
-- Criar dentro de `/components`
-- Usar TypeScript com tipagem completa
-- Props sempre tipadas com interface
+- **`firebaseConfig.ts`:** intocável.
 
-## Banco de dados — DATA MODEL
+- **Estado novo em `App.tsx`** exige os 3 passos:
+  1. Inicialização vazia no `useState`.
+  2. Sync dentro de `loadAllData` (carregar do Firestore ao logar).
+  3. `useEffect` com `saveUserData` (persistir ao mudar).
 
-Ao criar, modificar ou remover qualquer campo ou coleção do Firestore,
-ler e seguir `app/DATA_MODEL/DATA_MODEL.skill.md`.
+- **Props existentes em componentes:** só adicionar, nunca remover sem pedido explícito.
 
-## Antes de Qualquer Modificação Grande
-1. Confirmar que o usuário fez commit no GitHub
-2. Verificar se a mudança afeta `types.ts` — se sim, seguir as regras acima
-3. Verificar se a mudança afeta o estado do `App.tsx` — se sim, atualizar `loadAllData` e os `useEffect`s de persistência
-4. Preferir adicionar funcionalidades novas a modificar as existentes
+- **Firestore (criar/alterar/remover campo ou coleção):** 
+  ler `app/DATA_MODEL/DATA_MODEL.skill.md` antes de executar.
+
+## C. STACK & ESTILO
+
+- React 18 + TS + Vite + Tailwind + Firebase (Auth/Firestore) + Gemini API.
+- Ícones: só `lucide-react`.
+- Estilo: só classes Tailwind (sem CSS inline ou custom).
+- Componentes novos: em `/components`, TS tipado, props com `interface`.
+
+### Tokens de cor (resumo — detalhes em FORCATO-ERP-Design)
+
+| Uso | Classe |
+|---|---|
+| Fundo | `bg-slate-950` |
+| Cards/Nav | `bg-slate-900` |
+| Bordas | `border-slate-800` |
+| Texto principal | `text-slate-200` |
+| Texto secundário | `text-slate-400` |
+| Accent geral | `amber-600` |
+| Accent ofertas | `red-600` |
+
+## D. SKILLS — QUANDO LER
+
+### Design e padrões de componente
+
+Qualquer task que envolva UI, layout, ou componente novo/refatorado:
+**leia `app/SKILLS/FORCATO-ERP-Design/SKILL.md`** — ele direciona para as sub-skills específicas (listas, filtros, modais, formulários, etc.) conforme a task.
+
+Não invente padrões visuais ou de interação sem consultar essa skill primeiro.
+
+### Modelo de dados Firestore
+
+### Modelo de dados Firestore
+Ao tocar no Firestore, siga `app/DATA_MODEL/DATA_MODEL.skill.md`.
+
+### Banco de ideias
+
+Quando o usuário citar uma ideia para anotar/trabalhar depois:
+**siga `app/SKILLS/IDEIAS/IDEIA_PLANEJAMENTO.skill.md`**.
+Não execute a ideia — apenas registre com observações suas dentro do planejamento dela.
+
+### Assinatura de skills lidas
+Ao final de toda resposta que envolveu leitura de skill, adicione as 
+assinaturas das skills consultadas (declaradas no topo de cada skill, 
+formato `emoji+sigla.`).
+
+Exemplo: `📋list. 🐱fd. 🔍sear.` indica que foram lidas Lista, 
+Forcato-Design e Search nesta task.
+
+## E. SYSTEM MAP
+
+Caso precise localizar componentes, services ou Firestore keys, 
+consulte `app/SKILLS/SYSTEM_MAP/SMAP_MASTERB.md`.
+
+Após criar, renomear ou deletar arquivo em `/components` ou `/services`, 
+**atualize `SMAP_MASTERB.md` no mesmo turno da modificação**.

@@ -149,9 +149,12 @@ const QuoteRequest: React.FC<QuoteRequestProps> = ({
     if (categoryFilter.size > 0)
       list = list.filter(p => categoryFilter.has(p.masterCategory ?? 'Sem categoria'));
     if (searchTerm.trim()) {
-      const t = searchNorm(searchTerm);
-      list = list.filter(p =>
-        searchNorm(p.name).includes(t) || searchNorm(p.supplierSku ?? '').includes(t));
+      const tokens = searchTerm.toLowerCase().split(/\s+/).filter(t => t);
+      list = list.filter(p => {
+        const n = searchNorm(p.name);
+        const s = searchNorm(p.supplierSku ?? '');
+        return tokens.every(t => n.includes(t) || s.includes(t));
+      });
     }
     return list;
   }, [allProducts, showOnlyExpired, categoryFilter, searchTerm]);

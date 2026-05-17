@@ -55,7 +55,7 @@ export const getChildren = (tree: CategoryTree, pai: string | null): string[] =>
   Object.entries(tree)
     .filter(([, node]) => node.pai === pai)
     .map(([id]) => id)
-    .sort((a, b) => tree[a].nome.localeCompare(tree[b].nome, 'pt-BR'));
+    .sort((a, b) => tree[a].nome.localeCompare(tree[b].nome, 'pt-BR', { numeric: true }));
 
 /** true se o nó tem filhos. */
 export const hasChildren = (tree: CategoryTree, id: string): boolean =>

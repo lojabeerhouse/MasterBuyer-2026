@@ -3,10 +3,16 @@ import { signInWithPopup, signOut, onAuthStateChanged, User } from 'firebase/aut
 import { auth, googleProvider } from './firebaseConfig';
 import { saveUserData, loadUserData, saveChunkedData, loadChunkedData } from './services/firebaseService';
 import { loadNotifications, saveNotifications, processBatchIntoHistory, resolveDuplicate, normalizeProductKey, loadPriceHistory, savePriceHistory } from './services/historyService';
+import { initLogger, addLogListener } from './services/loggerService';
+
 import { loadAllCatalogs, processBatchIntoCatalog, saveCatalog, normForMapping, makeProductId } from './services/supplierCatalogService';
 import { RightSidebarProvider } from './contexts/RightSidebarContext';
 import RightActionSidebar from './components/RightActionSidebar';
 const NotificationCenter = lazy(() => import('./components/NotificationCenter'));
+const LogViewer = lazy(() => import('./components/notifications_and_logs/LogViewer'));
+const ExpandedLogs = lazy(() => import('./components/notifications_and_logs/ExpandedLogs'));
+import { appLogger } from './services/loggerService';
+
 const Dashboard = lazy(() => import('./components/Dashboard'));
 const UploadCenter = lazy(() => import('./components/UploadCenter'));
 const SalesDashboard = lazy(() => import("./components/SalesDashboard"));
@@ -16,6 +22,7 @@ const Schedule = lazy(() => import('./components/Schedule'));
 const ProductCatalog = lazy(() => import('./components/ProductCatalog'));
 const ProductDatabase = lazy(() => import('./components/ProductDatabase'));
 const OfferFlyer = lazy(() => import('./components/OfferFlyer'));
+const ExitUnsavedModal = lazy(() => import('./components/shared/ExitUnsavedModal'));
 const SupplierManager = lazy(() => import('./components/SupplierManager'));
 const SupplierCatalogView = lazy(() => import('./components/SupplierCatalogView'));
 const AppSettingsPanel = lazy(() => import('./components/AppSettings'));
@@ -38,14 +45,18 @@ import {
   UserProfile,
   QuoteStage,
   InventoryCountMap,
+  InventoryCountTimestamps,
   CategoryTree,
+  AppLog,
 } from './types';
+
 import {
   BarChart3, Users, FileText, Database, Scale, Settings,
   CalendarDays, ClipboardList, LogOut, ChevronDown, Tag, MessageSquare,
   LayoutDashboard, Menu, X, UploadCloud, Package, TrendingUp, Lock, ChevronRight,
-  PackageSearch,
+  PackageSearch, Terminal,
 } from 'lucide-react';
+
 const BuyingAssistant = lazy(() => import('./components/BuyingAssistant'));
 const QuoteRequest = lazy(() => import('./components/QuoteRequest'));
 const InventoryCount = lazy(() => import('./components/inventory_count/InventoryCount'));
@@ -319,8 +330,10 @@ const App: React.FC = () => {
   const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([]);
   const [userProfile, setUserProfile] = useState<UserProfile>(DEFAULT_USER_PROFILE);
 
-  // --- NOTIFICATIONS ---
+  // --- NOTIFICATIONS & LOGS ---
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
+  const [appLogs, setAppLogs] = useState<AppLog[]>([]);
+
 
   // --- CATALOGS ---
   const [supplierCatalogs, setSupplierCatalogs] = useState<Record<string, SupplierCatalog>>({});
@@ -332,6 +345,7 @@ const App: React.FC = () => {
 
   // --- INVENTORY COUNT (confirmed / Firebase) ---
   const [inventoryCount, setInventoryCount] = useState<InventoryCountMap>({});
+  const [inventoryTimestamps, setInventoryTimestamps] = useState<InventoryCountTimestamps>({});
 
   // --- CATEGORY TREE ---
   const [categoryTree, setCategoryTree] = useState<CategoryTree>({});
@@ -345,6 +359,13 @@ const App: React.FC = () => {
   const [offerFlyerOpen, setOfferFlyerOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [sidebarExpanded, setSidebarExpanded] = useState(true);
+  const [isLogsOpen, setIsLogsOpen] = useState(false);
+  const [isExpandedLogsOpen, setIsExpandedLogsOpen] = useState(false);
+  const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
+
+  const [isDirty, setIsDirty] = useState(false);
+
+  const [showExitModal, setShowExitModal] = useState<{ nextTab: typeof activeTab } | null>(null);
   const profileDropdownRef = useRef<HTMLDivElement>(null);
   const mobileMenuRef = useRef<HTMLDivElement>(null);
 
@@ -368,11 +389,21 @@ const App: React.FC = () => {
       setUser(firebaseUser);
       setAuthLoading(false);
       if (firebaseUser) {
+        initLogger(firebaseUser.uid);
         await loadAllData(firebaseUser.uid);
       }
     });
     return () => unsubscribe();
   }, []);
+
+  // Listener para logs do sistema
+  useEffect(() => {
+    const unsubscribe = addLogListener((newLogs) => {
+      setAppLogs(newLogs);
+    });
+    return () => unsubscribe();
+  }, []);
+
 
   // --- CARREGA TODOS OS DADOS DO FIREBASE ---
   const loadAllData = async (uid: string) => {
@@ -430,7 +461,7 @@ const App: React.FC = () => {
     setSupplierCatalogs(catalogsMap);
     setPriceValidityConfig(savedValidityConfig);
 
-    const [savedHidden, savedAppSettings, savedPurchaseOrders, savedUserProfile, savedQuoteStages, savedInventoryCount, savedCategoryTree] = await Promise.all([
+    const [savedHidden, savedAppSettings, savedPurchaseOrders, savedUserProfile, savedQuoteStages, savedInventoryCount, savedCategoryTree, savedInventoryTimestamps] = await Promise.all([
       loadUserData<HiddenProduct[]>(uid, 'hiddenProducts', []),
       loadUserData<AppSettings>(uid, 'appSettings', { showInactiveProducts: false, priceValidityDays: 7 }),
       loadUserData<PurchaseOrder[]>(uid, 'purchaseOrders', []),
@@ -438,6 +469,7 @@ const App: React.FC = () => {
       loadUserData<QuoteStage[]>(uid, 'quoteStages', []),
       loadUserData<InventoryCountMap>(uid, 'inventoryCount', {}),
       loadUserData<CategoryTree>(uid, 'categoryTree', {}),
+      loadUserData<InventoryCountTimestamps>(uid, 'inventoryTimestamps', {}),
     ]);
     setHiddenProducts(savedHidden);
     setAppSettings(savedAppSettings);
@@ -446,6 +478,7 @@ const App: React.FC = () => {
     setQuoteStages(savedQuoteStages);
     setInventoryCount(savedInventoryCount);
     setCategoryTree(savedCategoryTree);
+    setInventoryTimestamps(savedInventoryTimestamps);
 
     setDataLoading(false);
     setIsLoaded(true);
@@ -474,7 +507,23 @@ const App: React.FC = () => {
   useEffect(() => { if (uid && isLoaded) saveUserData(uid, 'quoteStages', quoteStages); }, [quoteStages, uid, isLoaded]);
   useEffect(() => { if (uid && isLoaded) saveNotifications(uid, notifications); }, [notifications, uid, isLoaded]);
   useEffect(() => { if (uid && isLoaded) saveUserData(uid, 'inventoryCount', inventoryCount); }, [inventoryCount, uid, isLoaded]);
+  useEffect(() => { if (uid && isLoaded) saveUserData(uid, 'inventoryTimestamps', inventoryTimestamps); }, [inventoryTimestamps, uid, isLoaded]);
   useEffect(() => { if (uid && isLoaded) saveUserData(uid, 'categoryTree', categoryTree); }, [categoryTree, uid, isLoaded]);
+
+  const handleSaveTimestamps = useCallback((ts: InventoryCountTimestamps) => {
+    setInventoryTimestamps(prev => ({ ...prev, ...ts }));
+  }, []);
+
+  const handleUpdateProductStocks = useCallback((stockUpdates: Record<string, number>) => {
+    setMasterProducts(prev =>
+      prev.map(p => stockUpdates[p.id] !== undefined ? { ...p, stock: stockUpdates[p.id] } : p)
+    );
+    setInventoryCount(prev => {
+      const next = { ...prev };
+      Object.keys(stockUpdates).forEach(id => delete next[id]);
+      return next;
+    });
+  }, []);
 
   // --- ARQUIVAMENTO AUTOMÁTICO DE COTAÇÕES ANTIGAS ---
   useEffect(() => {
@@ -876,6 +925,10 @@ const App: React.FC = () => {
 
   // helper para navegação no mobile
   const navigateTo = (tab: typeof activeTab) => {
+    if (isDirty) {
+      setShowExitModal({ nextTab: tab });
+      return;
+    }
     setActiveTab(tab);
     setMobileMenuOpen(false);
   };
@@ -898,6 +951,20 @@ const App: React.FC = () => {
   return (
     <RightSidebarProvider>
     <div className="flex h-screen w-full bg-slate-950 text-slate-200 font-sans overflow-hidden">
+      {/* EXIT CONFIRMATION MODAL */}
+      {showExitModal && (
+        <Suspense fallback={null}>
+          <ExitUnsavedModal 
+            onConfirm={() => {
+              setIsDirty(false);
+              setActiveTab(showExitModal.nextTab);
+              setShowExitModal(null);
+              setMobileMenuOpen(false);
+            }}
+            onCancel={() => setShowExitModal(null)}
+          />
+        </Suspense>
+      )}
       
       {/* Mobile overlay */}
       {mobileMenuOpen && (
@@ -954,16 +1021,16 @@ const App: React.FC = () => {
           ))}
         </div>
 
-        {/* Bottom Actions Area */}
-        <div className="border-t border-slate-800 p-3 flex flex-col gap-2 shrink-0">
-          <div className={`flex ${sidebarExpanded ? 'flex-row' : 'flex-col'} items-center justify-center gap-2`}>
+        {/* Bottom Actions Area (Mobile Only or Sidebar Bottom) */}
+        <div className="border-t border-slate-800 p-3 flex flex-col gap-2 shrink-0 xl:hidden">
+          <div className="flex items-center justify-center gap-4">
             <Suspense fallback={<div className="w-8 h-8" />}>
               <NotificationCenter
                 notifications={notifications}
                 onResolve={handleNotificationResolve}
-                onClearConsole={handleClearConsole}
               />
             </Suspense>
+
             <button
               onClick={() => navigateTo('settings')}
               title="Configurações"
@@ -972,6 +1039,7 @@ const App: React.FC = () => {
               <Settings className="w-5 h-5" />
             </button>
           </div>
+
 
           <div className="relative" ref={profileDropdownRef}>
             <button
@@ -1020,10 +1088,12 @@ const App: React.FC = () => {
               </div>
             )}
           </div>
-          
+        </div>
+
+        <div className="p-3 shrink-0 hidden xl:block">
           <button
             onClick={() => setSidebarExpanded(!sidebarExpanded)}
-            className="hidden xl:flex items-center justify-center p-2 text-slate-500 hover:text-white hover:bg-slate-800 transition-all rounded-xl mt-1"
+            className="flex w-full items-center justify-center p-2 text-slate-500 hover:text-white hover:bg-slate-800 transition-all rounded-xl mt-1"
             title={sidebarExpanded ? "Recolher Menus" : "Expandir Menus"}
           >
              <svg className={`w-5 h-5 transition-transform duration-300 ${sidebarExpanded ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1053,6 +1123,91 @@ const App: React.FC = () => {
             <h1 className="text-lg font-bold text-white">BeerHouse</h1>
           </div>
         </div>
+
+        {/* ─── Desktop Header ─── */}
+        <header className="hidden xl:flex h-16 items-center justify-between px-8 bg-slate-950/50 border-b border-slate-800/50 backdrop-blur-md shrink-0 z-30">
+          <div className="flex items-center gap-4">
+             <h2 className="text-slate-400 text-sm font-medium tracking-wide uppercase">
+               {navItems.find(i => i.tab === activeTab)?.label || 'Dashboard'}
+             </h2>
+          </div>
+
+          <div className="flex items-center gap-6">
+            {/* Notificações */}
+            <button 
+              onClick={() => setIsNotificationsOpen(!isNotificationsOpen)}
+              className="flex items-center gap-2 text-slate-400 hover:text-amber-400 transition-all text-sm font-medium"
+            >
+              <div className="relative">
+                <BarChart3 className="w-4 h-4" /> {/* Substituir por Bell depois na refatoração */}
+                {notifications.filter(n => !n.resolved).length > 0 && (
+                  <span className="absolute -top-1 -right-1 w-2 h-2 bg-red-500 rounded-full" />
+                )}
+              </div>
+              Notificações
+            </button>
+
+            {/* Logs */}
+            <div className="relative">
+              <button 
+                onClick={() => setIsLogsOpen(!isLogsOpen)}
+                className={`flex items-center gap-2 transition-all text-sm font-medium ${isLogsOpen ? 'text-blue-400' : 'text-slate-400 hover:text-blue-400'}`}
+              >
+                <Terminal className="w-4 h-4" />
+                Logs
+              </button>
+
+              {isLogsOpen && (
+                <LogViewer 
+                  logs={appLogs}
+                  onClose={() => setIsLogsOpen(false)}
+                  onClear={() => appLogger.clear()}
+                  onExpand={() => { setIsExpandedLogsOpen(true); setIsLogsOpen(false); }}
+                />
+              )}
+            </div>
+
+            {/* Configurações */}
+
+            <button 
+              onClick={() => navigateTo('settings')}
+              className={`flex items-center gap-2 transition-all text-sm font-medium ${activeTab === 'settings' ? 'text-amber-500' : 'text-slate-400 hover:text-white'}`}
+            >
+              <Settings className="w-4 h-4" />
+              Configurações
+            </button>
+
+            {/* Perfil */}
+            <div className="h-6 w-px bg-slate-800 mx-2" />
+            <div className="relative" ref={profileDropdownRef}>
+              <button
+                onClick={() => setProfileDropdownOpen(v => !v)}
+                className="flex items-center gap-3 pl-2 pr-1 py-1 rounded-full hover:bg-slate-800/50 transition-all"
+              >
+                <div className="flex flex-col items-end">
+                  <span className="text-xs font-bold text-white leading-none">{userProfile.displayName || 'Usuário'}</span>
+                  <span className="text-[10px] text-slate-500 mt-1">{user.email?.split('@')[0]}</span>
+                </div>
+                {user.photoURL ? (
+                  <img src={user.photoURL} alt="avatar" className="w-8 h-8 rounded-full border border-slate-700" />
+                ) : (
+                  <div className="w-8 h-8 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center text-white text-xs font-bold">
+                    {(userProfile.displayName || user.email || 'U')[0].toUpperCase()}
+                  </div>
+                )}
+              </button>
+
+              {profileDropdownOpen && (
+                <div className="absolute top-full right-0 mt-2 w-48 bg-slate-900 border border-slate-800 rounded-xl shadow-2xl z-50 overflow-hidden animate-in fade-in slide-in-from-top-1">
+                  <button onClick={() => { navigateTo('profile'); setProfileDropdownOpen(false); }} className="w-full flex items-center gap-3 px-4 py-3 text-sm text-slate-300 hover:text-white hover:bg-slate-800 transition-colors"><span className="text-base">👤</span> Meu Perfil</button>
+                  <button onClick={() => { setOfferFlyerOpen(true); setProfileDropdownOpen(false); }} className="w-full flex items-center gap-3 px-4 py-3 text-sm text-slate-300 hover:text-white hover:bg-slate-800 transition-colors"><Tag className="w-4 h-4 text-red-400" /> Ofertas</button>
+                  <div className="border-t border-slate-800" />
+                  <button onClick={() => { setProfileDropdownOpen(false); handleLogout(); }} className="w-full flex items-center gap-3 px-4 py-3 text-sm text-red-400 hover:text-red-300 hover:bg-slate-800 transition-colors"><LogOut className="w-4 h-4" /> Sair</button>
+                </div>
+              )}
+            </div>
+          </div>
+        </header>
 
       {/* Modal OfferFlyer (acessado via dropdown) */}
       {offerFlyerOpen && (
@@ -1190,6 +1345,10 @@ const App: React.FC = () => {
               userId={user.uid}
               confirmedCount={inventoryCount}
               onSaveCount={setInventoryCount}
+              categoryTree={Object.keys(categoryTree).length > 0 ? categoryTree : undefined}
+              countTimestamps={inventoryTimestamps}
+              onSaveTimestamps={handleSaveTimestamps}
+              onUpdateStock={handleUpdateProductStocks}
             />
           </Suspense>
         )}
@@ -1207,6 +1366,8 @@ const App: React.FC = () => {
           <ProductDatabase
             masterProducts={masterProducts} setMasterProducts={setMasterProducts}
             sheetUrl={dbSheetUrl} setSheetUrl={setDbSheetUrl}
+            categoryTree={categoryTree}
+            setIsDirty={setIsDirty}
           />
         )}
         {activeTab === 'suppliers' && (
@@ -1278,7 +1439,19 @@ const App: React.FC = () => {
 
       </div>{/* fim Main Content Wrapper */}
     </div>
+    
+    {/* Expanded Logs Modal */}
+    {isExpandedLogsOpen && (
+      <Suspense fallback={null}>
+        <ExpandedLogs 
+          logs={appLogs}
+          onClear={() => appLogger.clear()}
+          onClose={() => setIsExpandedLogsOpen(false)}
+        />
+      </Suspense>
+    )}
     </RightSidebarProvider>
+
   );
 };
 

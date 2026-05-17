@@ -50,12 +50,14 @@ const OfferFlyer: React.FC<OfferFlyerProps> = ({ products }) => {
 
   const searchResults = useMemo(() => {
     if (!searchTerm.trim()) return [];
-    const term = searchTerm.toLowerCase();
+    const tokens = searchTerm.toLowerCase().split(/\s+/).filter(t => t);
     return products
-      .filter(p => 
-        (p.name.toLowerCase().includes(term) || p.sku.toLowerCase().includes(term)) &&
-        !flyerItems.find(fi => fi.originalProductId === p.id)
-      )
+      .filter(p => {
+        const n = p.name.toLowerCase();
+        const s = p.sku.toLowerCase();
+        const isMatch = tokens.every(t => n.includes(t) || s.includes(t));
+        return isMatch && !flyerItems.find(fi => fi.originalProductId === p.id);
+      })
       .slice(0, 10);
   }, [products, searchTerm, flyerItems]);
 

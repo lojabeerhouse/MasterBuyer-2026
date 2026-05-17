@@ -111,6 +111,63 @@ Horizontal scrolling on the pagination bar is forbidden (per Horizontal Scrollin
 
 Every list in the app
 
+## Checkbox Selection Pattern
+
+Operational lists with multi-select must follow this structure:
+
+- **Row layout**: checkbox (left, `w-3.5 h-3.5`, `shrink-0`) → content (`flex-1 min-w-0`) → hover-only inline action (`shrink-0`, `opacity-0 group-hover:opacity-100`). Checkbox is always the leftmost element.
+- **Shift+click range selection is mandatory** on any multi-select list. Implement via a shared hook (`useCheckboxSelection`) that tracks `lastClickedId` in a ref and computes ranges from the flat visible list in DOM order. Range is always additive — shift+click never deselects.
+- **"Select all page"** header checkbox selects only the current page slice — never all records. Disabled when section is collapsed.
+- **Bulk action bar** appears only when `selectedIds.size > 0`, positioned below search, above list. Always shows count so user sees selection even when items are off-screen. Pre-fill target when context is unambiguous (e.g., current leaf node).
+- **3-stage visual hierarchy** (when applicable): Stage 1 active (`bg-emerald-900/15`, `text-emerald-400`) → Stage 2 needs-action (`bg-slate-800/60`, `text-slate-300`) → Stage 3 informational (`bg-slate-900/40`, `text-slate-500`, collapsed). Never invert this order.
+- **Reuse `useCheckboxSelection` hook** (located at `app/components/shared/useCheckboxSelection.ts`) for all lists — do not inline selection logic per component.
+
+## Collapsible Group Pattern
+
+Grouped lists (multiple named sections within a single scrollable container) must follow this structure:
+
+- **All named groups are collapsible** — no group may have a static, non-interactive header. The entire header row is the toggle target (single `<button>` wrapping chevron + label + count).
+- **Chevron anatomy**: `ChevronDown` (`w-3.5 h-3.5`), rotated `-rotate-90` when collapsed. Always leftmost element inside the header button. Rotation uses `transition-transform`.
+- **Header layout**: `[chevron] [label] [count] → flex-1 button` + optional right-side action (`shrink-0`, visible only when section is expanded). Never put the action inside the toggle button.
+- **Default expansion rules**: Primary group (the contextually active section — e.g., "Nesta categoria") starts **expanded**. Secondary and informational groups start **collapsed**.
+- **State reset on context switch**: When the user navigates to a different record or context, all groups reset to their default expansion state (primary → expanded, others → collapsed).
+- **Collapsed groups are excluded from `visibleList`**: Shift+click range selection (via `useCheckboxSelection`) only spans visible DOM rows. Items in a collapsed section are not selectable and not part of any range.
+- **"Select all" checkbox on header**: Disabled when section is collapsed (`disabled={!showSection || slice.length === 0}`). Enabled only for the current page slice, never all records.
+- **Empty state inside group**: Render only when the section is expanded. A collapsed group shows nothing below its header.
+
+## Search Logic / Campos de busca e pesquisa multi-termo - Flexible implementation
+
+Search and filter inputs in operational lists must follow this multi-term flexible implementation:
+
+- **Tokenized Search**: The search term must be split into independent tokens (separated by whitespace). A match is successful only if **all tokens** are found within the target fields (Name, SKU, EAN, etc.), regardless of their order or position.
+- **Normalization and Case-Insensitivity**: All strings must be converted to lowercase and normalized to remove accents before comparison (e.g., "Cerveja" matches "cerveja").
+- **Canonical Implementation**:
+  ```typescript
+  const tokens = searchTerm.toLowerCase().trim().split(/\s+/).filter(t => t);
+  const isMatch = tokens.every(token => 
+      normalizedName.includes(token) || normalizedSku.includes(token)
+  );
+  ```
+- **UX Requirements**: Search interaction must reset pagination to page 1. When no results are found, show a clear "No results found" message that preserves the layout density.
+
+### Search Debounce (Performance & UX)
+
+To prevent UI lag and unnecessary re-renders in large datasets (e.g., Inventory, Product Database), all search inputs MUST implement a debounce pattern:
+
+- **Timing**: Use exactly **400ms** (`400`) as the default debounce interval. This is the sweet spot between perceived responsiveness and system performance.
+- **Implementation**: Use a local state for the input value (`searchTerm`) and a separate state for the effective filter (`debouncedSearch`).
+- **Canonical Code Pattern**:
+  ```tsx
+  const [searchTerm, setSearchTerm] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(searchTerm), 400);
+    return () => clearTimeout(t);
+  }, [searchTerm]);
+  ```
+- **Filter Hook**: The heavy filtering logic (`useMemo`) must depend on `debouncedSearch`, not `searchTerm`.
+
 ## Implementation Standards
 
 Generated code must be:
@@ -136,3 +193,59 @@ Design systems should feel internally coherent across:
 - CRUD workflows
 
 The interface should feel like software built by people who understand operations, not just UI trends.
+
+## Unsaved Changes Guard Pattern (Exit_Unsaved_Modal)
+
+Operational safety is paramount. Any interface that allows destructive or non-auto-saved changes MUST protect the user from accidental data loss:
+
+- **State Awareness**: The app must track a `isDirty` state (boolean) that becomes true as soon as the first edit is made.
+- **Navigation Interception**: All navigation targets (sidebar, mobile menu, breadcrumbs) must be intercepted. If `isDirty` is true, the navigation is blocked and the `ExitUnsavedModal` is displayed.
+- **Canonical Modal Structure**:
+  - **Header**: High-visibility warning icon (`AlertTriangle` in Red/Amber), bold title in uppercase, and a concise subtitle.
+  - **Body**: Clear explanation of what will be lost. Use bold text for critical words like **perdidas** or **descartadas**.
+  - **Actions (Footer)**:
+    - `Primary`: [Salvar e Sair] (if applicable) - Highlighted with the system's primary accent.
+    - `Secondary`: [Sair sem Salvar] - Clearly labeled, often with a `LogOut` or `Trash` icon. High-contrast vs the primary action.
+    - `Cancel`: [Voltar e Editar] - Neutral, standard button style.
+- **Draft Logic**: Implement a "Draft" vs "Master" state pattern. Edits happen in the draft. Saving applies draft to master. Canceling clears draft. This ensures "Exit without Saving" is physically impossible to fail.
+- **Browser Protection**: In addition to app-level navigation, use the `beforeunload` browser event for power users who might close the tab or reload.
+
+### Apply to:
+Any complex form, inline table editing, or multi-step configuration wizard.
+
+## Timezone / Timestamps Locais
+
+Sempre que gerar uma data representando o **momento exato em que um evento ocorreu** (timestamp de contagem, data de exportação, nome de arquivo, comparação de "hoje"), usar os métodos locais do objeto `Date` em vez de `toISOString()`.
+
+**Motivo:** `toISOString()` retorna sempre UTC. No fuso de Brasília (UTC-3), após as 21:00 o UTC já está no dia seguinte — datas e comparações aparecem erradas para o usuário.
+
+**Regra:**
+- **Armazenamento** (Firestore, localStorage): manter `new Date().toISOString()` — ISO UTC é o formato canônico para persistência.
+- **Extração de data local** (comparação de "hoje", nome de arquivo, filtro por dia): usar a helper abaixo.
+
+**Helper canônico — usar em todos os componentes que extraem parte de data:**
+```typescript
+const localDateStr = (d: Date): string =>
+  `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+```
+
+Exemplos de uso correto:
+```typescript
+// ✅ data local de hoje
+const today = localDateStr(new Date());
+
+// ✅ comparar se timestamp pertence a hoje
+const isToday = localDateStr(new Date(isoTimestamp)) === localDateStr(new Date());
+
+// ✅ nome de arquivo exportado
+const dateStr = localDateStr(new Date()); // "2026-05-15", nunca "2026-05-16"
+```
+
+Exemplos do que **não** fazer:
+```typescript
+// ❌ extrai data UTC — errado após 21h BRT
+new Date().toISOString().split('T')[0]
+
+// ❌ compara UTC do timestamp com UTC do momento — errado para datas locais
+timestamp.split('T')[0] === new Date().toISOString().split('T')[0]
+```

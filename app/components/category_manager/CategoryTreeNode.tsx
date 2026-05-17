@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { CategoryTree, CategoryNode } from '../../types';
 import {
   getChildren, hasChildren,
-  addCategoryNode, renameCategoryNode, deleteCategoryNode, moveCategoryNode,
+  addCategoryNode, renameCategoryNode, deleteCategoryNode, moveCategoryNode, buildPath,
 } from '../../services/category_manager/categoryService';
 import {
   ChevronDown, ChevronRight, Plus, Pencil, Trash2, Check, X, MoveRight,
@@ -84,9 +84,20 @@ const CategoryTreeNode: React.FC<Props> = ({
     <div>
       <div
         className={`flex items-center gap-1 px-2 py-1.5 rounded-lg cursor-pointer group transition-colors ${isSelected ? 'bg-amber-900/30 border border-amber-700/40' : 'hover:bg-slate-800'}`}
-        style={{ paddingLeft: `${8 + indent}px` }}
+        style={{ paddingLeft: `${8 + (node.pai !== null ? Math.max(0, indent - 14) : indent)}px` }}
         onClick={() => { onSelect(id); if (hasKids) setExpanded(v => !v); }}
       >
+        {/* Left reparent icon — subcategories only, uses the indent space */}
+        {node.pai !== null && (
+          <button
+            onClick={e => { e.stopPropagation(); setMoving(v => !v); }}
+            className="w-3.5 h-3.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity text-slate-500 hover:text-violet-400 flex items-center justify-center"
+            title="Mover para outra categoria pai"
+          >
+            <MoveRight className="w-3 h-3" />
+          </button>
+        )}
+
         {/* Expand chevron */}
         <span className="w-4 h-4 shrink-0 text-slate-600">
           {hasKids
@@ -126,7 +137,9 @@ const CategoryTreeNode: React.FC<Props> = ({
             <>
               <button onClick={() => { setEditing(true); setEditValue(node.nome); }} className="p-1 text-slate-500 hover:text-amber-400" title="Renomear"><Pencil className="w-3 h-3" /></button>
               <button onClick={() => setAddingChild(true)} className="p-1 text-slate-500 hover:text-blue-400" title="Adicionar subcategoria"><Plus className="w-3 h-3" /></button>
-              <button onClick={() => setMoving(v => !v)} className="p-1 text-slate-500 hover:text-violet-400" title="Mover"><MoveRight className="w-3 h-3" /></button>
+              {node.pai === null && (
+                <button onClick={() => setMoving(v => !v)} className="p-1 text-slate-500 hover:text-violet-400" title="Mover"><MoveRight className="w-3 h-3" /></button>
+              )}
               {!hasKids && (
                 <button onClick={confirmDelete} className="p-1 text-slate-500 hover:text-red-400" title="Excluir"><Trash2 className="w-3 h-3" /></button>
               )}
@@ -144,10 +157,13 @@ const CategoryTreeNode: React.FC<Props> = ({
             onChange={e => setMoveTarget(e.target.value)}
             className="flex-1 bg-slate-800 border border-slate-700 text-slate-300 text-xs rounded px-2 py-1 focus:outline-none focus:border-amber-500"
           >
-            <option value="__root__">Raiz</option>
-            {moveOptions.map(([oid, n]) => (
-              <option key={oid} value={oid}>{n.nome}</option>
-            ))}
+            <option value="__root__">Raiz (nível superior)</option>
+            {moveOptions
+              .sort((a, b) => buildPath(tree, a[0]).localeCompare(buildPath(tree, b[0]), 'pt-BR', { numeric: true }))
+              .map(([oid]) => (
+                <option key={oid} value={oid}>{buildPath(tree, oid)}</option>
+              ))
+            }
           </select>
           <button onClick={confirmMove} className="text-emerald-400 hover:text-emerald-300 p-1"><Check className="w-3.5 h-3.5" /></button>
           <button onClick={() => setMoving(false)} className="text-slate-500 hover:text-white p-1"><X className="w-3.5 h-3.5" /></button>

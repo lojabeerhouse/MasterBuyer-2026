@@ -54,13 +54,14 @@ const LinkProductModal: React.FC<LinkProductModalProps> = ({
         .slice(0, 30)
         .map(({ p }) => p);
     }
-    const term = linkSearch.toLowerCase();
+    const tokens = linkSearch.toLowerCase().split(/\s+/).filter(t => t);
     return masterProducts
-      .filter(p =>
-        p.name.toLowerCase().includes(term) ||
-        p.sku.toLowerCase().includes(term) ||
-        (p.brand && p.brand.toLowerCase().includes(term))
-      )
+      .filter(p => {
+        const n = p.name.toLowerCase();
+        const s = (p.sku || '').toLowerCase();
+        const b = (p.brand || '').toLowerCase();
+        return tokens.every(t => n.includes(t) || s.includes(t) || b.includes(t));
+      })
       .map(p => ({ p, score: smartSimilarityScore(linkSearch, p.name) }))
       .sort((a, b) => b.score - a.score)
       .slice(0, 50)

@@ -97,11 +97,13 @@ const ProductCatalog: React.FC<ProductCatalogProps> = ({ suppliers, cart, setCar
               .normalize('NFD')
               .replace(/[\u0300-\u036f]/g, '')
               .replace(/\x00/g, 'ç');
-          const term = searchNormalize(searchTerm);
-          items = items.filter(i =>
-            searchNormalize(i.name || '').includes(term) ||
-            searchNormalize(i.sku || '').includes(term)
-          );
+          
+          const tokens = searchNormalize(searchTerm).split(/\s+/).filter(t => t);
+          items = items.filter(i => {
+              const n = searchNormalize(i.name || '');
+              const s = searchNormalize(i.sku || '');
+              return tokens.every(t => n.includes(t) || s.includes(t));
+          });
       }
 
       return items.sort((a, b) => {

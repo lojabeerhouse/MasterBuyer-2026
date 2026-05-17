@@ -11,6 +11,7 @@ interface InventoryCountItemProps {
   onIncrement: (id: string) => void;
   onDecrement: (id: string) => void;
   onChangeManual: (id: string, value: string) => void;
+  lastCountedAt?: string;
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -22,10 +23,20 @@ export const InventoryCountItem: React.FC<InventoryCountItemProps> = ({
   onIncrement,
   onDecrement,
   onChangeManual,
+  lastCountedAt,
 }) => {
   const isCounted = count !== undefined;
   const displayCount = count ?? 0;
   const inputRef = useRef<HTMLInputElement>(null);
+
+  const formattedTimestamp = lastCountedAt ? (() => {
+    const d = new Date(lastCountedAt);
+    const localDateStr = (dt: Date) => `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}`;
+    const isToday = localDateStr(new Date(lastCountedAt)) === localDateStr(new Date());
+    const time = d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+    const date = d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+    return isToday ? `Contado hoje às ${time}` : `Contado ${date} às ${time}`;
+  })() : null;
 
   // Focus the input on card tap (anywhere outside buttons)
   const handleCardClick = useCallback((e: React.MouseEvent) => {
@@ -85,6 +96,11 @@ export const InventoryCountItem: React.FC<InventoryCountItemProps> = ({
             </span>
           )}
         </div>
+        {formattedTimestamp && (
+          <span className="text-[10px] text-amber-600/70 mt-0.5 block leading-none">
+            {formattedTimestamp}
+          </span>
+        )}
       </div>
 
       {/* Counter controls */}
