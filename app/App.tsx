@@ -3,15 +3,17 @@ import { signInWithPopup, signOut, onAuthStateChanged, User } from 'firebase/aut
 import { auth, googleProvider } from './firebaseConfig';
 import { saveUserData, loadUserData, saveChunkedData, loadChunkedData } from './services/firebaseService';
 import { loadNotifications, saveNotifications, processBatchIntoHistory, resolveDuplicate, normalizeProductKey, loadPriceHistory, savePriceHistory } from './services/historyService';
-import { initLogger, addLogListener } from './services/loggerService';
+import { initLogger, addLogListener } from './services/notifications_and_logs/loggerService';
+
 
 import { loadAllCatalogs, processBatchIntoCatalog, saveCatalog, normForMapping, makeProductId } from './services/supplierCatalogService';
 import { RightSidebarProvider } from './contexts/RightSidebarContext';
 import RightActionSidebar from './components/RightActionSidebar';
-const NotificationCenter = lazy(() => import('./components/NotificationCenter'));
+const NotificationCenter = lazy(() => import('./components/notifications_and_logs/NotificationCenter'));
 const LogViewer = lazy(() => import('./components/notifications_and_logs/LogViewer'));
 const ExpandedLogs = lazy(() => import('./components/notifications_and_logs/ExpandedLogs'));
-import { appLogger } from './services/loggerService';
+import { appLogger } from './services/notifications_and_logs/loggerService';
+
 
 const Dashboard = lazy(() => import('./components/Dashboard'));
 const UploadCenter = lazy(() => import('./components/UploadCenter'));
@@ -361,7 +363,7 @@ const App: React.FC = () => {
   const [sidebarExpanded, setSidebarExpanded] = useState(true);
   const [isLogsOpen, setIsLogsOpen] = useState(false);
   const [isExpandedLogsOpen, setIsExpandedLogsOpen] = useState(false);
-  const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
+
 
   const [isDirty, setIsDirty] = useState(false);
 
@@ -1134,18 +1136,14 @@ const App: React.FC = () => {
 
           <div className="flex items-center gap-6">
             {/* Notificações */}
-            <button 
-              onClick={() => setIsNotificationsOpen(!isNotificationsOpen)}
-              className="flex items-center gap-2 text-slate-400 hover:text-amber-400 transition-all text-sm font-medium"
-            >
-              <div className="relative">
-                <BarChart3 className="w-4 h-4" /> {/* Substituir por Bell depois na refatoração */}
-                {notifications.filter(n => !n.resolved).length > 0 && (
-                  <span className="absolute -top-1 -right-1 w-2 h-2 bg-red-500 rounded-full" />
-                )}
-              </div>
-              Notificações
-            </button>
+            <Suspense fallback={<div className="w-8 h-8" />}>
+              <NotificationCenter
+                notifications={notifications}
+                onResolve={handleNotificationResolve}
+                showLabel={true}
+              />
+            </Suspense>
+
 
             {/* Logs */}
             <div className="relative">

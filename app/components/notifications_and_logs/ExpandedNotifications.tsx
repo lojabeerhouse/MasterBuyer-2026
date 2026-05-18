@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { AppNotification, DuplicatePayload } from '../types';
+import { AppNotification, DuplicatePayload } from '../../types';
 import { X, Bell, AlertTriangle, Layers, HelpCircle, CheckSquare, Square, GitMerge } from 'lucide-react';
+
 
 const timeAgo = (ts: number) => {
   const diff = Date.now() - ts;

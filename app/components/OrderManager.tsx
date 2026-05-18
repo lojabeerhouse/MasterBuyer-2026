@@ -146,6 +146,9 @@ const OrderManager: React.FC<OrderManagerProps> = ({
   const [manualQtys, setManualQtys] = useState<Record<string, number>>({});
   const [manualSupplierSearch, setManualSupplierSearch] = useState('');
   const [manualSupplierOpen, setManualSupplierOpen] = useState(false);
+  const [manualNotes, setManualNotes] = useState('');
+  const [manualInitialStatus, setManualInitialStatus] = useState<'draft' | 'received_unchecked'>('draft');
+  const [manualPrices, setManualPrices] = useState<Record<string, { packPrice: number; unitPrice: number }>>({});
   const manualSupplierRef = useRef<HTMLDivElement>(null);
 
   // MODAL UPLOAD
@@ -338,8 +341,8 @@ const OrderManager: React.FC<OrderManagerProps> = ({
          supplierName: supplier.name,
          packQuantity: qty,
          packPrice: packPrice,
-         quantityToBuy: 1, // Assume 1 lote por padrão para conferência
-         totalCost: packPrice * 1
+         quantityToBuy: q.quantityBought ?? 1,
+         totalCost: packPrice * (q.quantityBought ?? 1)
        };
     });
 
@@ -413,6 +416,28 @@ const OrderManager: React.FC<OrderManagerProps> = ({
   };
 
   // ── MANUAL ORDER LOGIC ───────────────────────────────────────────────────
+
+  const getItemPrice = (productId: string, lastPackPrice: number, packQuantity: number) => {
+    return manualPrices[productId] ?? {
+      packPrice: lastPackPrice,
+      unitPrice: lastPackPrice / (packQuantity || 1),
+    };
+  };
+
+  const updatePackPrice = (productId: string, packPrice: number, packQuantity: number) => {
+    setManualPrices(prev => ({
+      ...prev,
+      [productId]: { packPrice, unitPrice: packPrice / (packQuantity || 1) },
+    }));
+  };
+
+  const updateUnitPrice = (productId: string, unitPrice: number, packQuantity: number) => {
+    setManualPrices(prev => ({
+      ...prev,
+      [productId]: { unitPrice, packPrice: unitPrice * (packQuantity || 1) },
+    }));
+  };
+
   const manualFilteredProducts = useMemo(() => {
     const catalog = supplierCatalogs[manualSupplierId];
     if (!catalog) return [];
@@ -429,6 +454,7 @@ const OrderManager: React.FC<OrderManagerProps> = ({
       .filter(([, qty]) => qty > 0)
       .map(([productId, qty]) => {
         const p = catalog.products.find(pr => pr.id === productId)!;
+        const priceData = getItemPrice(productId, p.lastPackPrice, p.packQuantity || 1);
         return {
           id: `${manualSupplierId}-${p.name}-${p.packQuantity}`,
           sku: p.supplierSku || p.name.substring(0, 10),
@@ -436,9 +462,9 @@ const OrderManager: React.FC<OrderManagerProps> = ({
           supplierId: manualSupplierId,
           supplierName: supplier.name,
           packQuantity: p.packQuantity || 1,
-          packPrice: p.lastPackPrice,
+          packPrice: priceData.packPrice,
           quantityToBuy: qty,
-          totalCost: p.lastPackPrice * qty,
+          totalCost: priceData.packPrice * qty,
         };
       });
 
@@ -452,16 +478,22 @@ const OrderManager: React.FC<OrderManagerProps> = ({
       supplierName: supplier.name,
       items,
       totalValue: items.reduce((s, i) => s + i.packPrice * i.quantityToBuy, 0),
-      status: 'draft',
+      status: manualInitialStatus,
       createdAt: now,
       updatedAt: now,
       deliveryOrPickup: 'delivery',
-      transitions: [],
+      notes: manualNotes || undefined,
+      transitions: manualInitialStatus !== 'draft'
+        ? [{ from: 'draft' as PurchaseOrderStatus, to: manualInitialStatus, timestamp: now, note: 'Criado diretamente como "A Conferir"' }]
+        : [],
     };
     setPurchaseOrders(prev => [newOrder, ...prev]);
     setShowManualModal(false);
     setManualSupplierId('');
     setManualQtys({});
+    setManualPrices({});
+    setManualNotes('');
+    setManualInitialStatus('draft');
   };
 
   const handleSaveCheck = (updatedItems: CartItem[], note: string) => {
@@ -827,7 +859,7 @@ const OrderManager: React.FC<OrderManagerProps> = ({
                 <Plus className="w-4 h-4 text-amber-400"/>
                 <h3 className="font-bold text-white">Novo Pedido Manual</h3>
               </div>
-              <button onClick={() => { setShowManualModal(false); setManualSupplierId(''); setManualSearch(''); setManualQtys({}); setManualSupplierSearch(''); setManualSupplierOpen(false); }}>
+              <button onClick={() => { setShowManualModal(false); setManualSupplierId(''); setManualSearch(''); setManualQtys({}); setManualPrices({}); setManualNotes(''); setManualInitialStatus('draft'); setManualSupplierSearch(''); setManualSupplierOpen(false); }}>
                 <X className="w-5 h-5 text-slate-500 hover:text-white"/>
               </button>
             </div>
@@ -849,7 +881,7 @@ const OrderManager: React.FC<OrderManagerProps> = ({
                       </div>
                       <div className="max-h-40 overflow-y-auto">
                         {suppliers.filter(s => s.name.toLowerCase().includes(manualSupplierSearch.toLowerCase())).map(s => (
-                          <button key={s.id} type="button" onClick={() => { setManualSupplierId(s.id); setManualSearch(''); setManualQtys({}); setManualSupplierOpen(false); setManualSupplierSearch(''); }} className={`w-full text-left px-3 py-2 text-sm transition-colors flex items-center gap-2 ${manualSupplierId === s.id ? 'bg-amber-600 text-white' : 'text-slate-200 hover:bg-slate-700'}`}>
+                          <button key={s.id} type="button" onClick={() => { setManualSupplierId(s.id); setManualSearch(''); setManualQtys({}); setManualPrices({}); setManualSupplierOpen(false); setManualSupplierSearch(''); }} className={`w-full text-left px-3 py-2 text-sm transition-colors flex items-center gap-2 ${manualSupplierId === s.id ? 'bg-amber-600 text-white' : 'text-slate-200 hover:bg-slate-700'}`}>
                             {manualSupplierId === s.id && <Check className="w-3.5 h-3.5 shrink-0"/>}
                             {s.name}
                           </button>
@@ -876,8 +908,17 @@ const OrderManager: React.FC<OrderManagerProps> = ({
                           <p className="text-slate-500 text-[10px]">Cx {p.packQuantity} · {fmtCurrency(p.lastPackPrice)}/cx</p>
                         </div>
                         <div className="flex items-center gap-1 shrink-0">
-                          <button onClick={() => setManualQtys(prev => { const n = { ...prev }; if ((n[p.id] || 0) <= 1) delete n[p.id]; else n[p.id]--; return n; })} className="w-6 h-6 rounded bg-slate-700 hover:bg-slate-600 text-slate-400">−</button>
-                          <span className="w-6 text-center text-white text-xs font-semibold">{qty}</span>
+                          <button onClick={() => setManualQtys(prev => { const n = { ...prev }; if ((n[p.id] || 0) <= 1) delete n[p.id]; else n[p.id]--; return n; })} className="w-6 h-6 rounded bg-slate-700 hover:bg-slate-600 text-slate-400 flex items-center justify-center">−</button>
+                          <input
+                            type="number"
+                            min="0"
+                            value={qty === 0 ? '' : qty}
+                            onChange={e => {
+                              const v = Math.max(0, parseInt(e.target.value) || 0);
+                              setManualQtys(prev => { const n = { ...prev }; if (v === 0) delete n[p.id]; else n[p.id] = v; return n; });
+                            }}
+                            className="w-9 text-center bg-slate-800 border border-slate-700 rounded text-white text-xs font-semibold focus:outline-none focus:border-amber-500 py-0.5"
+                          />
                           <button onClick={() => setManualQtys(prev => ({ ...prev, [p.id]: (prev[p.id] || 0) + 1 }))} className="w-6 h-6 rounded bg-slate-700 hover:bg-amber-600 text-slate-300 hover:text-white flex items-center justify-center text-sm">+</button>
                         </div>
                       </div>
@@ -887,28 +928,108 @@ const OrderManager: React.FC<OrderManagerProps> = ({
               </div>
 
               <div className="flex flex-col flex-[2] p-4 min-h-0">
-                <p className="text-xs text-slate-400 font-semibold mb-3 shrink-0">Resumo do Pedido</p>
-                <div className="flex-1 overflow-y-auto min-h-0 space-y-1 mb-3">
-                  {(Object.entries(manualQtys) as [string, number][]).map(([productId, qty]) => {
-                    const p = supplierCatalogs[manualSupplierId]?.products.find(pr => pr.id === productId);
-                    if (!p) return null;
-                    return (
-                      <div key={productId} className="flex items-start gap-2 py-1.5 border-b border-slate-800/60 last:border-0">
-                        <div className="flex-1 min-w-0">
-                          <p className="text-xs text-slate-300 truncate">{p.name}</p>
-                          <p className="text-[10px] text-slate-500">{qty}cx · {fmtCurrency(p.lastPackPrice * qty)}</p>
-                        </div>
-                      </div>
-                    );
-                  })}
+                <p className="text-xs text-slate-400 font-semibold mb-2 shrink-0">Resumo do Pedido</p>
+
+                {/* Tabela de itens com preços editáveis */}
+                <div className="flex-1 overflow-y-auto min-h-0 mb-3">
+                  {Object.keys(manualQtys).length === 0 ? (
+                    <p className="text-xs text-slate-600 text-center pt-6">Adicione produtos →</p>
+                  ) : (
+                    <table className="w-full text-[11px]">
+                      <thead>
+                        <tr className="text-slate-500 border-b border-slate-800">
+                          <th className="text-left pb-1.5 font-medium">Produto</th>
+                          <th className="text-center pb-1.5 font-medium w-7">Cx</th>
+                          <th className="text-center pb-1.5 font-medium w-10">Qtd</th>
+                          <th className="text-right pb-1.5 font-medium w-[72px]">Preço un</th>
+                          <th className="text-right pb-1.5 font-medium w-[72px]">Preço cx</th>
+                          <th className="text-right pb-1.5 font-medium w-14">Total</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(Object.entries(manualQtys) as [string, number][]).map(([productId, qty]) => {
+                          const p = supplierCatalogs[manualSupplierId]?.products.find(pr => pr.id === productId);
+                          if (!p) return null;
+                          const pd = getItemPrice(productId, p.lastPackPrice, p.packQuantity || 1);
+                          return (
+                            <tr key={productId} className="border-b border-slate-800/50 last:border-0">
+                              <td className="py-1.5 pr-1">
+                                <p className="text-slate-300 truncate max-w-[90px]" title={p.name}>{p.name}</p>
+                              </td>
+                              <td className="text-center text-slate-500">{p.packQuantity || 1}</td>
+                              <td className="text-center">
+                                <input
+                                  type="number" min="1"
+                                  value={qty}
+                                  onChange={e => { const v = Math.max(1, parseInt(e.target.value) || 1); setManualQtys(prev => ({ ...prev, [productId]: v })); }}
+                                  className="w-10 text-center bg-slate-800 border border-slate-700 rounded text-white focus:outline-none focus:border-amber-500 py-0.5"
+                                />
+                              </td>
+                              <td className="text-right">
+                                <input
+                                  type="number" step="0.01" min="0"
+                                  value={pd.unitPrice.toFixed(2)}
+                                  onChange={e => updateUnitPrice(productId, parseFloat(e.target.value) || 0, p.packQuantity || 1)}
+                                  className="w-[68px] text-right bg-slate-800 border border-slate-700 rounded text-slate-300 focus:outline-none focus:border-amber-500 px-1 py-0.5"
+                                />
+                              </td>
+                              <td className="text-right">
+                                <input
+                                  type="number" step="0.01" min="0"
+                                  value={pd.packPrice.toFixed(2)}
+                                  onChange={e => updatePackPrice(productId, parseFloat(e.target.value) || 0, p.packQuantity || 1)}
+                                  className="w-[68px] text-right bg-slate-800 border border-amber-700/40 rounded text-white focus:outline-none focus:border-amber-500 px-1 py-0.5"
+                                />
+                              </td>
+                              <td className="text-right text-amber-400 font-semibold pl-1">
+                                {fmtCurrency(pd.packPrice * qty)}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  )}
                 </div>
-                <div className="shrink-0 mt-auto space-y-3">
+
+                <div className="shrink-0 space-y-3">
+                  {/* Status inicial */}
+                  <div>
+                    <label className="text-[10px] text-slate-500 block mb-1 uppercase font-semibold tracking-wide">Status inicial</label>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setManualInitialStatus('draft')}
+                        className={`flex-1 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${manualInitialStatus === 'draft' ? 'bg-slate-700 border-slate-500 text-white' : 'bg-slate-800/50 border-slate-700 text-slate-500 hover:border-slate-500'}`}
+                      >
+                        Rascunho
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setManualInitialStatus('received_unchecked')}
+                        className={`flex-1 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${manualInitialStatus === 'received_unchecked' ? 'bg-yellow-900/40 border-yellow-700/50 text-yellow-400' : 'bg-slate-800/50 border-slate-700 text-slate-500 hover:border-slate-500'}`}
+                      >
+                        Já chegou (A Conferir)
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Observações */}
+                  <textarea
+                    value={manualNotes}
+                    onChange={e => setManualNotes(e.target.value)}
+                    placeholder="Observações (opcional)..."
+                    rows={2}
+                    className="w-full bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-xs text-slate-300 focus:outline-none focus:border-amber-500 resize-none"
+                  />
+
                   <div className="flex justify-between items-center border-t border-slate-700 pt-2">
                     <span className="text-xs text-slate-400">Total</span>
                     <span className="text-sm font-bold text-white">
                       {fmtCurrency((Object.entries(manualQtys) as [string, number][]).reduce((s, [id, qty]) => {
                         const p = supplierCatalogs[manualSupplierId]?.products.find(pr => pr.id === id);
-                        return s + (p?.lastPackPrice || 0) * qty;
+                        const pd = getItemPrice(id, p?.lastPackPrice || 0, p?.packQuantity || 1);
+                        return s + pd.packPrice * qty;
                       }, 0))}
                     </span>
                   </div>

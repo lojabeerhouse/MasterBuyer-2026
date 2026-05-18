@@ -5,7 +5,8 @@ import {
 } from 'firebase/firestore';
 import { AppNotification, PriceRecord, ProductPriceHistory, DuplicatePayload } from '../types';
 import { ProductQuote, QuoteBatch, Supplier } from '../types';
-import { appLogger } from './loggerService';
+import { appLogger } from './notifications_and_logs/loggerService';
+
 
 
 // ─── HELPERS ────────────────────────────────────────────────────────────────

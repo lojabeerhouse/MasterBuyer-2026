@@ -1,6 +1,7 @@
-import { AppLog, LogLevel } from '../types';
-import { db } from '../firebaseConfig';
+import { AppLog, LogLevel } from '../../types';
+import { db } from '../../firebaseConfig';
 import { doc, setDoc, getDoc } from 'firebase/firestore';
+
 
 // Cache local em memória (epêmero por sessão para sucessos, persistente via Firestore para erros)
 let logBuffer: AppLog[] = [];

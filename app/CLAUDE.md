@@ -47,6 +47,12 @@ Adicione ao final do plano, antes do "Aguardando aprovação":
 - **Firestore (criar/alterar/remover campo ou coleção):** 
   ler `app/DATA_MODEL/DATA_MODEL.skill.md` antes de executar.
 
+## Mover arquivos
+Sempre usar `git mv`. Nunca deletar e recriar para "mover" um arquivo.
+Após mover, atualizar imports com `sed` em massa. Nunca editar arquivos um a um.
+O `sed` deve usar o path mais específico possível para evitar substituições indesejadas.
+Sempre rodar `sed` sem `-i` primeiro para simular. Só aplicar com `-i` após aprovação.
+
 ## C. STACK & ESTILO
 
 - React 18 + TS + Vite + Tailwind + Firebase (Auth/Firestore) + Gemini API.

@@ -1,13 +1,16 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { AppNotification, DuplicatePayload } from '../types';
+import { AppNotification, DuplicatePayload } from '../../types';
 import { Bell, Terminal, X, CheckCircle, AlertTriangle, Clock, ChevronRight, Trash2, Maximize2 } from 'lucide-react';
 import ExpandedNotifications from './ExpandedNotifications';
+
 
 interface NotificationCenterProps {
   notifications: AppNotification[];
   onResolve: (id: string, keepWhich?: 'existing' | 'incoming') => void;
+  showLabel?: boolean;
 }
+
 
 
 const formatCurrency = (v: number) =>
@@ -103,7 +106,9 @@ const DuplicateModal: React.FC<{
 const NotificationCenter: React.FC<NotificationCenterProps> = ({
   notifications,
   onResolve,
+  showLabel = false,
 }) => {
+
   const [openPanel, setOpenPanel] = useState<boolean>(false);
 
   const [selectedNotif, setSelectedNotif] = useState<AppNotification | null>(null);
@@ -154,22 +159,43 @@ const NotificationCenter: React.FC<NotificationCenterProps> = ({
       <div ref={panelRef} className="relative flex items-center">
         {/* ─── Attention Bell ─── */}
         <div className="relative">
-          <button
-            onClick={toggle}
-            title="Notificações de atenção"
-            className={`relative p-1.5 rounded-lg transition-all ${
-              openPanel
-                ? 'bg-amber-600/20 text-amber-400'
-                : 'text-slate-400 hover:text-amber-400 hover:bg-slate-800'
-            }`}
-          >
-            <Bell className="w-4 h-4" />
-            {attentionNotifs.length > 0 && (
-              <span className="absolute -top-0.5 -right-0.5 w-4 h-4 bg-red-500 rounded-full text-[9px] font-bold text-white flex items-center justify-center">
-                {attentionNotifs.length > 9 ? '9+' : attentionNotifs.length}
-              </span>
-            )}
-          </button>
+          {showLabel ? (
+            <button
+              onClick={toggle}
+              title="Notificações de atenção"
+              className={`flex items-center gap-2 transition-all text-sm font-medium ${
+                openPanel
+                  ? 'text-amber-500'
+                  : 'text-slate-400 hover:text-amber-400'
+              }`}
+            >
+              <div className="relative">
+                <Bell className="w-4 h-4" />
+                {attentionNotifs.length > 0 && (
+                  <span className="absolute -top-1 -right-1 w-2 h-2 bg-red-500 rounded-full" />
+                )}
+              </div>
+              Notificações
+            </button>
+          ) : (
+            <button
+              onClick={toggle}
+              title="Notificações de atenção"
+              className={`relative p-1.5 rounded-lg transition-all ${
+                openPanel
+                  ? 'bg-amber-600/20 text-amber-400'
+                  : 'text-slate-400 hover:text-amber-400 hover:bg-slate-800'
+              }`}
+            >
+              <Bell className="w-4 h-4" />
+              {attentionNotifs.length > 0 && (
+                <span className="absolute -top-0.5 -right-0.5 w-4 h-4 bg-red-500 rounded-full text-[9px] font-bold text-white flex items-center justify-center">
+                  {attentionNotifs.length > 9 ? '9+' : attentionNotifs.length}
+                </span>
+              )}
+            </button>
+          )}
+
 
           {openPanel && (
             <div className="absolute left-0 bottom-full xl:bottom-auto xl:top-full mb-2 xl:mt-2 xl:mb-0 xl:right-0 xl:left-auto w-80 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl z-50 overflow-hidden">
