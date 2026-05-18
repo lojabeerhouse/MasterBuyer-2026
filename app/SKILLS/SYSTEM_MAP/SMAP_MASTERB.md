@@ -21,21 +21,31 @@ Este documento serve como mapa de referência para a localização de todos os c
 | `category_manager/` | Mapeamento e árvore de categorias |
 | `shared/` | Componentes reutilizáveis (ex: ExitUnsavedModal) |
 
+### Vendas (sales/)
+| Arquivo | Responsabilidade |
+|---|---|
+| `SalesDashboard.tsx` | Painel geral e abas do módulo de Vendas |
+| `POS.tsx` | Módulo Frente de Caixa (PDV) rápido |
+| `SalesOrders.tsx` | Gestão de pedidos de vendas B2B (placeholder) |
+| `SalesAnalyzer.tsx` | Importação, relatórios e simulação de demanda |
+
+### Compras (compras/)
+| Arquivo | Responsabilidade |
+|---|---|
+| `SupplierManager.tsx` | Gestão de fornecedores |
+| `SupplierCatalogView.tsx` | Visualização de catálogo do fornecedor |
+| `QuoteComparator.tsx` | Comparação de cotações |
+| `QuoteRequest.tsx` | Solicitação de cotação |
+| `BuyingAssistant.tsx` | Assistente de compras com IA |
+| `OrderManager.tsx` | Gestão de pedidos de compra |
+
 ### Módulos Principais
 | Arquivo | Responsabilidade |
 |---|---|
 | `Dashboard.tsx` | Painel geral do ERP |
-| `SalesDashboard.tsx` | Painel de vendas |
-| `SupplierManager.tsx` | Gestão de fornecedores |
-| `SupplierCatalogView.tsx` | Visualização de catálogo do fornecedor |
 | `ProductDatabase.tsx` | Base de produtos |
 | `ProductCatalog.tsx` | Catálogo de produtos por fornecedor |
-| `QuoteComparator.tsx` | Comparação de cotações |
-| `QuoteRequest.tsx` | Solicitação de cotação |
 | `QuoteActionsPanel.tsx` | Ações sobre cotação ativa |
-| `BuyingAssistant.tsx` | Assistente de compras com IA |
-| `OrderManager.tsx` | Gestão de pedidos |
-| `SalesAnalyzer.tsx` | Análise de vendas |
 | `OfferFlyer.tsx` | Gerador de flyer de ofertas |
 | `AppSettings.tsx` | Configurações do app |
 | `UserProfile.tsx` | Perfil do usuário |
@@ -55,16 +65,21 @@ Este documento serve como mapa de referência para a localização de todos os c
 |---|---|
 | `inventory_count/` | Persistência e cálculo de contagem física |
 | `category_manager/` | Lógica da árvore de categorias |
+| `compras/` | Serviços e utilitários de compras e cotações |
 
-### Utilitários
+### Utilitários (compras/)
 | Arquivo | Responsabilidade |
 |---|---|
-| `firebaseService.ts` | Integração Firestore (carregar/salvar dados) |
-| `geminiService.ts` | Chamadas ao Gemini |
 | `historyService.ts` | Histórico de cotações e duplicidades |
 | `supplierCatalogService.ts` | Normalização de catálogos de fornecedores |
 | `parseNFe.ts` | Parser de XML de NF-e |
 | `parseQuoteLocal.ts` | Parser de arquivos locais de cotação |
+
+### Utilitários Gerais
+| Arquivo | Responsabilidade |
+|---|---|
+| `firebaseService.ts` | Integração Firestore (carregar/salvar dados) |
+| `geminiService.ts` | Chamadas ao Gemini |
 
 ## Firestore Keys (`users/{userId}/data/{key}`)
 

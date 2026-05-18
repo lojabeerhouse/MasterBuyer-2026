@@ -17,7 +17,7 @@
  * onde ProductQuote já vem com isVerified = true (dados exatos da NF).
  */
 
-import { ProductQuote } from '../types';
+import { ProductQuote } from '../../types';
 
 // ─── Tipos de retorno ────────────────────────────────────────────────────────
 

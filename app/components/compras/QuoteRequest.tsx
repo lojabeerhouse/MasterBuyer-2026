@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useCallback } from 'react';
-import { Supplier, SupplierCatalog, SupplierCatalogProduct, QuoteStage } from '../types';
-import { getValidPrice } from '../services/supplierCatalogService';
+import { Supplier, SupplierCatalog, SupplierCatalogProduct, QuoteStage } from '../../types';
+import { getValidPrice } from '../../services/compras/supplierCatalogService';
 import {
   Search, MessageSquare, Phone, Copy, Check, ChevronDown, ChevronUp,
   Clock, X, SendHorizonal, Zap, Square, CheckSquare, Package,

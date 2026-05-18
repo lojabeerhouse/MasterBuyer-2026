@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Supplier, CartItem, SalesRecord } from '../types';
+import { Supplier, CartItem, SalesRecord } from '../../types';
 import { ShoppingBag, X, Search, Paperclip, Plus, ChevronRight, Package, TrendingDown, Clock, AlertCircle } from 'lucide-react';
 
 interface BuyingAssistantProps {

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { Supplier, ForecastItem, CartItem, ProductMapping, MasterProduct } from '../types';
+import { Supplier, ForecastItem, CartItem, ProductMapping, MasterProduct } from '../../types';
 import { ShoppingCart, Package, ChevronDown, ChevronRight, X, Link as LinkIcon, RefreshCw, ChevronLeft, GripVertical, Merge, Tags, LayoutGrid, Sparkles, Box, Unlink, Search, TrendingUp, TrendingDown, BarChart2 } from 'lucide-react';
-import LinkProductModal from './LinkProductModal';
+import LinkProductModal from '../LinkProductModal';
 
 interface QuoteComparatorProps {
   suppliers: Supplier[];

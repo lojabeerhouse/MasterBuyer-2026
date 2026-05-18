@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import {
   PurchaseOrder, PurchaseOrderStatus, CartItem, Supplier, SupplierCatalog, UserProfile, PackRule
-} from '../types';
+} from '../../types';
 import {
   Plus, Trash2, ChevronDown, ChevronUp, ChevronRight,
   CheckCircle, XCircle, Truck, Package, ClipboardList,
@@ -9,8 +9,8 @@ import {
   Send, RotateCcw, Archive, Eye, Edit3, X, Save,
   ShoppingCart, MapPin, Phone, Search, UploadCloud, FileText, LayoutGrid
 } from 'lucide-react';
-import { useFileProcessor } from '../hooks/useFileProcessor';
-import EditOrderModal from './EditOrderModal';
+import { useFileProcessor } from '../../hooks/useFileProcessor';
+import EditOrderModal from '../EditOrderModal';
 
 interface OrderManagerProps {
   suppliers: Supplier[];

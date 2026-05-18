@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { Search, ShoppingCart, Plus, Minus, Trash2, CreditCard, Banknote, Tag, ScanBarcode } from 'lucide-react';
-import { MasterProduct } from '../types';
+import { MasterProduct } from '../../types';
 
 interface POSProps {
   masterProducts: MasterProduct[];

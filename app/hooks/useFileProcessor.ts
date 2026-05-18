@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Supplier, ProductQuote, PackRule } from '../types';
-import { isNFeXml, parseNFeFile } from '../services/parseNFe';
+import { isNFeXml, parseNFeFile } from '../services/compras/parseNFe';
 import { parseQuoteContent } from '../services/geminiService';
 
 // --- PURE FUNCTIONS FOR REUSE ---

@@ -7,7 +7,7 @@ import {
   Star, RotateCcw, ShieldAlert, Calendar,
 } from 'lucide-react';
 import { batchSmartIdentify } from '../services/geminiService';
-import { normalizeProductName, normForMapping, findMasterProductMatches } from '../services/supplierCatalogService';
+import { normalizeProductName, normForMapping, findMasterProductMatches } from '../services/compras/supplierCatalogService';
 import LinkProductModal from './LinkProductModal';
 import { useSidebar } from '../contexts/RightSidebarContext';
 import QuoteActionsPanel from './QuoteActionsPanel';

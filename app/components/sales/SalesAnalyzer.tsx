@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { SalesRecord, ForecastItem } from '../types';
+import { SalesRecord, ForecastItem } from '../../types';
 import { FileSpreadsheet, Play, TrendingUp, AlertCircle, Save, Link as LinkIcon, RefreshCw, Box } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, CartesianGrid } from 'recharts';
 

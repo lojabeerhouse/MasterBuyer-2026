@@ -2,12 +2,12 @@ import React, { useState, useEffect, useMemo, startTransition } from 'react';
 import {
   SupplierCatalog, SupplierCatalogProduct, MasterProduct,
   PriceValidityMode, HiddenProduct, Supplier,
-} from '../types';
+} from '../../types';
 import {
   findMasterProductMatches, getValidPrice,
   confirmProductLink, removeProductLink,
   rejectLinkSuggestion, saveCatalog, processBatchIntoCatalog,
-} from '../services/supplierCatalogService';
+} from '../../services/compras/supplierCatalogService';
 import {
   Search, Link, Unlink, Check, X, ChevronDown, ChevronUp, ChevronLeft, ChevronRight,
   Clock, Snowflake, Globe, Calendar, TrendingUp, TrendingDown,

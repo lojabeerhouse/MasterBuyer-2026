@@ -1,4 +1,4 @@
-import { ProductQuote } from '../types';
+import { ProductQuote } from '../../types';
 
 /**
  * Parser local v3 — sem Gemini, 100% offline

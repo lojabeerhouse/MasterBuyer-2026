@@ -1,4 +1,4 @@
-import { db } from '../firebaseConfig';
+import { db } from '../../firebaseConfig';
 import { doc, getDoc, setDoc, collection, getDocs } from 'firebase/firestore';
 import {
   SupplierCatalog,
@@ -7,7 +7,7 @@ import {
   PriceValidityMode,
   MasterProduct,
   QuoteBatch,
-} from '../types';
+} from '../../types';
 
 // ─── NORMALIZAÇÃO ────────────────────────────────────────────────────────────
 

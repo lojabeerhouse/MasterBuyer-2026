@@ -1,11 +1,11 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { Supplier, QuoteBatch, ProductQuote, PackRule, BusinessHours, BusinessDayHours, ProductMapping, MasterProduct, PriceValidityConfig } from '../types';
+import { Supplier, QuoteBatch, ProductQuote, PackRule, BusinessHours, BusinessDayHours, ProductMapping, MasterProduct, PriceValidityConfig } from '../../types';
 import { Upload, Trash2, FileText, CheckCircle, AlertCircle, Loader2, Plus, Ban, Eye, Package, Pencil, Save, X, Maximize2, XCircle, RefreshCw, HardDrive, Download, Coins, BoxSelect, Sparkles, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, AlertTriangle, Check, CheckSquare, Square, Undo2, Timer, Search, Files, FilePlus, Settings, Bot, FileStack, Scissors, MessageCircle, MapPin, Truck, Calendar, Clock, Phone, ArrowUpDown, SortAsc, SortDesc, Archive } from 'lucide-react';
-import QuoteDetailModal from './QuoteDetailModal';
-import { parseQuoteContent, extractCatalogRawData, RawCatalogItem } from '../services/geminiService';
-import { parseQuoteLocal } from '../services/parseQuoteLocal';
-import { isNFeXml, parseNFeFile } from '../services/parseNFe';
-import { useFileProcessor, applyRulesToQuotes, filterBlacklisted, recalculateItem } from '../hooks/useFileProcessor';
+import QuoteDetailModal from '../QuoteDetailModal';
+import { parseQuoteContent, extractCatalogRawData, RawCatalogItem } from '../../services/geminiService';
+import { parseQuoteLocal } from '../../services/compras/parseQuoteLocal';
+import { isNFeXml, parseNFeFile } from '../../services/compras/parseNFe';
+import { useFileProcessor, applyRulesToQuotes, filterBlacklisted, recalculateItem } from '../../hooks/useFileProcessor';
 
 // ─── Constantes de padrão ─────────────────────────────────────────────────────
 

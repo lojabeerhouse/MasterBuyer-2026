@@ -1,11 +1,11 @@
-import { db } from '../firebaseConfig';
+import { db } from '../../firebaseConfig';
 import {
   doc, getDoc, setDoc, collection,
   getDocs, deleteDoc
 } from 'firebase/firestore';
-import { AppNotification, PriceRecord, ProductPriceHistory, DuplicatePayload } from '../types';
-import { ProductQuote, QuoteBatch, Supplier } from '../types';
-import { appLogger } from './notifications_and_logs/loggerService';
+import { AppNotification, PriceRecord, ProductPriceHistory, DuplicatePayload } from '../../types';
+import { ProductQuote, QuoteBatch, Supplier } from '../../types';
+import { appLogger } from '../notifications_and_logs/loggerService';
 
 
 

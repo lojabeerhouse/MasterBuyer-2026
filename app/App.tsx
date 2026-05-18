@@ -2,11 +2,11 @@ import React, { useState, useEffect, useCallback, useRef, lazy, Suspense } from 
 import { signInWithPopup, signOut, onAuthStateChanged, User } from 'firebase/auth';
 import { auth, googleProvider } from './firebaseConfig';
 import { saveUserData, loadUserData, saveChunkedData, loadChunkedData } from './services/firebaseService';
-import { loadNotifications, saveNotifications, processBatchIntoHistory, resolveDuplicate, normalizeProductKey, loadPriceHistory, savePriceHistory } from './services/historyService';
+import { loadNotifications, saveNotifications, processBatchIntoHistory, resolveDuplicate, normalizeProductKey, loadPriceHistory, savePriceHistory } from './services/compras/historyService';
 import { initLogger, addLogListener } from './services/notifications_and_logs/loggerService';
 
 
-import { loadAllCatalogs, processBatchIntoCatalog, saveCatalog, normForMapping, makeProductId } from './services/supplierCatalogService';
+import { loadAllCatalogs, processBatchIntoCatalog, saveCatalog, normForMapping, makeProductId } from './services/compras/supplierCatalogService';
 import { RightSidebarProvider } from './contexts/RightSidebarContext';
 import RightActionSidebar from './components/RightActionSidebar';
 const NotificationCenter = lazy(() => import('./components/notifications_and_logs/NotificationCenter'));
@@ -17,16 +17,16 @@ import { appLogger } from './services/notifications_and_logs/loggerService';
 
 const Dashboard = lazy(() => import('./components/Dashboard'));
 const UploadCenter = lazy(() => import('./components/UploadCenter'));
-const SalesDashboard = lazy(() => import("./components/SalesDashboard"));
-const QuoteComparator = lazy(() => import('./components/QuoteComparator'));
-const OrderManager = lazy(() => import('./components/OrderManager'));
+const SalesDashboard = lazy(() => import("./components/sales/SalesDashboard"));
+const QuoteComparator = lazy(() => import('./components/compras/QuoteComparator'));
+const OrderManager = lazy(() => import('./components/compras/OrderManager'));
 const Schedule = lazy(() => import('./components/Schedule'));
 const ProductCatalog = lazy(() => import('./components/ProductCatalog'));
 const ProductDatabase = lazy(() => import('./components/ProductDatabase'));
 const OfferFlyer = lazy(() => import('./components/OfferFlyer'));
 const ExitUnsavedModal = lazy(() => import('./components/shared/ExitUnsavedModal'));
-const SupplierManager = lazy(() => import('./components/SupplierManager'));
-const SupplierCatalogView = lazy(() => import('./components/SupplierCatalogView'));
+const SupplierManager = lazy(() => import('./components/compras/SupplierManager'));
+const SupplierCatalogView = lazy(() => import('./components/compras/SupplierCatalogView'));
 const AppSettingsPanel = lazy(() => import('./components/AppSettings'));
 const UserProfilePanel = lazy(() => import('./components/UserProfile'));
 import {
@@ -59,8 +59,8 @@ import {
   PackageSearch, Terminal,
 } from 'lucide-react';
 
-const BuyingAssistant = lazy(() => import('./components/BuyingAssistant'));
-const QuoteRequest = lazy(() => import('./components/QuoteRequest'));
+const BuyingAssistant = lazy(() => import('./components/compras/BuyingAssistant'));
+const QuoteRequest = lazy(() => import('./components/compras/QuoteRequest'));
 const InventoryCount = lazy(() => import('./components/inventory_count/InventoryCount'));
 const CategoryManager = lazy(() => import('./components/category_manager/CategoryManager'));
 

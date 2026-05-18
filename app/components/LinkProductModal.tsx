@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { ProductQuote, Supplier, MasterProduct } from '../types';
 import { X, Search, CheckCircle, ChevronDown, ChevronUp, History, BookOpen } from 'lucide-react';
-import { normalizeProductName, smartSimilarityScore } from '../services/supplierCatalogService';
+import { normalizeProductName, smartSimilarityScore } from '../services/compras/supplierCatalogService';
 
 interface LinkProductModalProps {
   item: { name: string; [key: string]: any };
