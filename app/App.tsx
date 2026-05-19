@@ -17,7 +17,7 @@ import { appLogger } from './services/notifications_and_logs/loggerService';
 
 const Dashboard = lazy(() => import('./components/Dashboard'));
 const UploadCenter = lazy(() => import('./components/UploadCenter'));
-const SalesDashboard = lazy(() => import("./components/sales/SalesDashboard"));
+const SalesDashboard = lazy(() => import("./components/vendas/SalesDashboard"));
 const QuoteComparator = lazy(() => import('./components/compras/QuoteComparator'));
 const OrderManager = lazy(() => import('./components/compras/OrderManager'));
 const Schedule = lazy(() => import('./components/Schedule'));

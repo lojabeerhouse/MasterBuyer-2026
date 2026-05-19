@@ -21,7 +21,7 @@ Este documento serve como mapa de referência para a localização de todos os c
 | `category_manager/` | Mapeamento e árvore de categorias |
 | `shared/` | Componentes reutilizáveis (ex: ExitUnsavedModal) |
 
-### Vendas (sales/)
+### Vendas (vendas/)
 | Arquivo | Responsabilidade |
 |---|---|
 | `SalesDashboard.tsx` | Painel geral e abas do módulo de Vendas |
