@@ -291,11 +291,40 @@ const LoginScreen: React.FC<{ onLogin: () => void; loading: boolean }> = ({ onLo
 );
 
 const LoadingScreen: React.FC = () => (
-  <div className="flex flex-col items-center justify-center h-screen bg-slate-950 text-slate-400 gap-4">
-    <div className="w-10 h-10 bg-amber-600 rounded-lg flex items-center justify-center animate-pulse">
-      <span className="font-black text-xl text-white">B</span>
+  <div className="relative flex flex-col items-center justify-center h-screen overflow-hidden bg-[#0e0b08]">
+    {/* Fundo de Grade e Efeitos de Brilho idênticos aos da tela de Login */}
+    <div className="absolute inset-0 login-grid pointer-events-none" />
+    <div className="absolute inset-0 bg-gradient-to-br from-transparent via-[#0e0b08]/60 to-amber-950/20 pointer-events-none" />
+    <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[400px] h-[400px] bg-amber-600/5 rounded-full blur-3xl pointer-events-none" />
+
+    {/* Card Premium de Vidro */}
+    <div className="relative z-10 flex flex-col items-center p-8 rounded-2xl bg-white/[0.02] border border-white/[0.05] backdrop-blur-md shadow-2xl max-w-[280px] w-full text-center">
+      {/* Icone da Marca com Spinner Orbital */}
+      <div className="relative w-16 h-16 mb-5 flex items-center justify-center">
+        {/* Anel Externo Estático */}
+        <div className="absolute inset-0 border-2 border-amber-600/10 rounded-xl" />
+        {/* Anel Rotativo de Carregamento */}
+        <div className="absolute inset-0 border-2 border-t-amber-500 border-r-amber-500 rounded-xl animate-spin" />
+        
+        {/* Logo Central Pulsante */}
+        <div className="w-10 h-10 bg-amber-600 rounded-lg flex items-center justify-center shadow-lg shadow-amber-600/20 animate-pulse">
+          <span className="font-display font-black text-lg text-white">B</span>
+        </div>
+      </div>
+
+      {/* Textos de Status */}
+      <h3 className="font-display font-bold text-white tracking-widest text-[10px] uppercase mb-1.5 opacity-90">
+        Sincronizando
+      </h3>
+      <p className="font-body text-slate-400 text-xs animate-pulse">
+        Carregando seus dados...
+      </p>
+
+      {/* Linha de Progresso Fluida */}
+      <div className="w-full h-1 bg-white/[0.04] rounded-full overflow-hidden mt-4">
+        <div className="h-full bg-gradient-to-r from-amber-600 to-amber-400 rounded-full animate-pulse w-[65%]" />
+      </div>
     </div>
-    <p className="text-sm">Carregando seus dados...</p>
   </div>
 );
 

@@ -14,72 +14,106 @@ Este documento serve como mapa de referência para a localização de todos os c
 | `LogViewer.tsx` | Terminal dropdown de logs em tempo real |
 | `ExpandedLogs.tsx` | Painel expandido com filtros e estatísticas de log |
 
-### Estoque e Categorias
+### Estoque (`inventory_count/`)
 | Arquivo | Responsabilidade |
 |---|---|
-| `inventory_count/` | Módulos de contagem física de estoque |
-| `category_manager/` | Mapeamento e árvore de categorias |
-| `shared/` | Componentes reutilizáveis (ex: ExitUnsavedModal) |
+| `InventoryCount.tsx` | Orquestrador da contagem física de estoque |
+| `InventoryCountItem.tsx` | Item individual na lista de contagem |
 
-### Vendas (vendas/)
+### Categorias (`category_manager/`)
+| Arquivo | Responsabilidade |
+|---|---|
+| `CategoryManager.tsx` | Tela principal de gerenciamento de categorias |
+| `CategoryTreeNode.tsx` | Nó individual da árvore de categorias |
+| `CategoryProductList.tsx` | Lista de produtos dentro de uma categoria |
+
+### Vendas (`vendas/`)
 | Arquivo | Responsabilidade |
 |---|---|
 | `SalesDashboard.tsx` | Painel geral e abas do módulo de Vendas |
 | `POS.tsx` | Módulo Frente de Caixa (PDV) rápido |
-| `SalesOrders.tsx` | Gestão de pedidos de vendas B2B (placeholder) |
+| `SalesOrders.tsx` | Gestão de pedidos de vendas B2B |
 | `SalesAnalyzer.tsx` | Importação, relatórios e simulação de demanda |
 
-### Compras (compras/)
+### Compras (`compras/`)
 | Arquivo | Responsabilidade |
 |---|---|
-| `SupplierManager.tsx` | Gestão de fornecedores |
+| `OrderManager.tsx` | Gestão de pedidos de compra (kanban + importação de NF) |
+| `SupplierManager.tsx` | Gestão de fornecedores e catálogos |
 | `SupplierCatalogView.tsx` | Visualização de catálogo do fornecedor |
-| `QuoteComparator.tsx` | Comparação de cotações |
-| `QuoteRequest.tsx` | Solicitação de cotação |
+| `QuoteComparator.tsx` | Comparação de cotações multi-fornecedor |
+| `QuoteRequest.tsx` | Solicitação e envio de cotação |
 | `BuyingAssistant.tsx` | Assistente de compras com IA |
-| `OrderManager.tsx` | Gestão de pedidos de compra |
 
-### Módulos Principais
+### Shared (`shared/`)
+| Arquivo | Responsabilidade |
+|---|---|
+| `ConfirmDialog.tsx` | Modal de confirmação reutilizável (danger/warning/info) |
+| `ExitUnsavedModal.tsx` | Modal de alerta ao sair com alterações não salvas |
+| `Pagination.tsx` | Paginação genérica de listas |
+| `useCheckboxSelection.ts` | Hook de seleção múltipla por checkbox |
+
+### Módulos Principais (raiz `/components`)
 | Arquivo | Responsabilidade |
 |---|---|
 | `Dashboard.tsx` | Painel geral do ERP |
 | `ProductDatabase.tsx` | Base de produtos |
 | `ProductCatalog.tsx` | Catálogo de produtos por fornecedor |
+| `EditOrderModal.tsx` | Modal de conferência de carga / visualização de pedido completo |
 | `QuoteActionsPanel.tsx` | Ações sobre cotação ativa |
+| `QuoteDetailModal.tsx` | Modal de detalhe de cotação |
+| `LinkProductModal.tsx` | Modal de vinculação de item de catálogo a produto master |
+| `ReviewImportModal.tsx` | Modal de revisão pré-importação |
+| `RightActionSidebar.tsx` | Sidebar de ações contextuais direita |
 | `OfferFlyer.tsx` | Gerador de flyer de ofertas |
-| `AppSettings.tsx` | Configurações do app |
-| `UserProfile.tsx` | Perfil do usuário |
+| `Schedule.tsx` | Cronograma / agenda de pedidos |
 | `UploadCenter.tsx` | Central de importação de arquivos |
 | `UploadItem.tsx` | Item individual de upload |
-| `ReviewImportModal.tsx` | Modal de revisão pré-importação |
+| `AppSettings.tsx` | Configurações do app |
+| `UserProfile.tsx` | Perfil do usuário |
+
+---
 
 ## Services (`/services`)
+
+### Compras (`compras/`)
+| Arquivo | Responsabilidade |
+|---|---|
+| `historyService.ts` | Histórico de cotações e detecção de duplicidades |
+| `supplierCatalogService.ts` | Normalização de catálogos de fornecedores |
+| `parseNFe.ts` | Parser de XML de NF-e (extração sem IA) |
+| `parseQuoteLocal.ts` | Parser de arquivos locais de cotação |
 
 ### Notificações e Logs (`notifications_and_logs/`)
 | Arquivo | Responsabilidade |
 |---|---|
 | `loggerService.ts` | Log central com buffer em memória e persistência Firestore |
 
-### Módulos Dedicados
+### Estoque (`inventory_count/`)
 | Arquivo | Responsabilidade |
 |---|---|
-| `inventory_count/` | Persistência e cálculo de contagem física |
-| `category_manager/` | Lógica da árvore de categorias |
-| `compras/` | Serviços e utilitários de compras e cotações |
+| `inventoryExportService.ts` | Exportação e relatórios de contagem física |
 
-### Utilitários (compras/)
+### Categorias (`category_manager/`)
 | Arquivo | Responsabilidade |
 |---|---|
-| `historyService.ts` | Histórico de cotações e duplicidades |
-| `supplierCatalogService.ts` | Normalização de catálogos de fornecedores |
-| `parseNFe.ts` | Parser de XML de NF-e |
-| `parseQuoteLocal.ts` | Parser de arquivos locais de cotação |
+| `categoryService.ts` | Lógica de persistência e árvore de categorias |
 
-### Utilitários Gerais
+### Gerais
 | Arquivo | Responsabilidade |
 |---|---|
-| `firebaseService.ts` | Integração Firestore (carregar/salvar dados) |
-| `geminiService.ts` | Chamadas ao Gemini |
+| `firebaseService.ts` | Integração Firestore (carregar/salvar dados de usuário) |
+| `geminiService.ts` | Chamadas ao Gemini (parse PDF/imagem de cotações) |
+
+---
+
+## Hooks (`/hooks`)
+
+| Arquivo | Responsabilidade |
+|---|---|
+| `useFileProcessor.ts` | Decide rota de parse (XML → parseNFe / PDF+img → Gemini), aplica packRules |
+
+---
 
 ## Firestore Keys (`users/{userId}/data/{key}`)
 
@@ -99,3 +133,4 @@ Este documento serve como mapa de referência para a localização de todos os c
 | `globalPackRules` | Regras globais de conversão caixa/unidade |
 | `globalNamingRules` | Regras globais de nomenclatura |
 | `error_logs` | Logs de erro persistidos em produção |
+| `purchaseOrders` | Pedidos de compra (kanban) |

@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { useFileProcessor } from '../../hooks/useFileProcessor';
 import EditOrderModal from '../EditOrderModal';
+import ConfirmDialog from '../shared/ConfirmDialog';
 
 interface OrderManagerProps {
   suppliers: Supplier[];
@@ -133,6 +134,8 @@ const OrderManager: React.FC<OrderManagerProps> = ({
   // SELEÇÃO & BULK ACTIONS
   const [selectedOrderIds, setSelectedOrderIds] = useState<Set<string>>(new Set());
   const [expandedOrderId, setExpandedOrderId] = useState<string | null>(null);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [viewingOrder, setViewingOrder] = useState<PurchaseOrder | null>(null);
 
   // MODAIS PADRÕES
   const [showCancelModal, setShowCancelModal] = useState(false);
@@ -275,13 +278,16 @@ const OrderManager: React.FC<OrderManagerProps> = ({
     });
   };
 
+  const confirmDelete = () => {
+    setPurchaseOrders(prev => prev.filter(o => !selectedOrderIds.has(o.id)));
+    setSelectedOrderIds(new Set());
+    setShowDeleteConfirm(false);
+  };
+
   const handleBulkAction = (action: 'enter_system' | 'check' | 'delete') => {
     if (action === 'delete') {
-       if (confirm('Tem certeza que deseja deletar os pedidos selecionados? Essa ação não pode ser desfeita.')) {
-         setPurchaseOrders(prev => prev.filter(o => !selectedOrderIds.has(o.id)));
-         setSelectedOrderIds(new Set());
-       }
-       return;
+      setShowDeleteConfirm(true);
+      return;
     }
     
     const targetStatus: PurchaseOrderStatus = action === 'enter_system' ? 'entered_system' : 'received';
@@ -593,22 +599,22 @@ const OrderManager: React.FC<OrderManagerProps> = ({
 
         {/* EXPANDED ÁREA */}
         {isExpanded && (
-          <div className="pl-12 pr-4 pb-4 pt-2 space-y-3 cursor-default border-t border-slate-800/40" onClick={e => e.stopPropagation()}>
+          <div className="px-4 pb-4 pt-2 space-y-3 cursor-default border-t border-slate-800/40" onClick={e => e.stopPropagation()}>
             <div className="bg-slate-950/50 rounded-lg overflow-hidden border border-slate-800">
               <table className="w-full text-xs">
                 <thead>
                   <tr className="border-b border-slate-800 bg-slate-900/50">
                     <th className="text-left p-2 text-slate-500 font-medium">Produto</th>
-                    <th className="text-center p-2 text-slate-500 font-medium w-16">Qtd Lotes</th>
+                    <th className="text-center p-2 text-slate-500 font-medium w-16">Qtd</th>
                     <th className="text-right p-2 text-slate-500 font-medium w-20">Valor Lote</th>
                     <th className="text-right p-2 text-slate-500 font-medium w-24">Total</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {order.items.map((item, i) => (
+                  {order.items.slice(0, 3).map((item, i) => (
                     <tr key={i} className="border-b border-slate-800/50 last:border-0 hover:bg-slate-800/20">
                       <td className="p-2 text-slate-300">
-                         {item.productName} 
+                         {item.productName}
                          <span className="text-[10px] text-slate-600 ml-2">(cx {item.packQuantity})</span>
                       </td>
                       <td className="p-2 text-center text-white font-bold">{item.quantityToBuy}</td>
@@ -616,6 +622,18 @@ const OrderManager: React.FC<OrderManagerProps> = ({
                       <td className="p-2 text-right text-amber-400 font-semibold">{fmtCurrency(item.totalCost)}</td>
                     </tr>
                   ))}
+                  {order.items.length > 3 && (
+                    <tr>
+                      <td colSpan={4} className="p-2 text-center">
+                        <button
+                          onClick={() => setViewingOrder(order)}
+                          className="text-xs text-slate-500 hover:text-amber-400 transition-colors"
+                        >
+                          Mais {order.items.length - 3} produto(s) — <span className="underline">ver mais...</span>
+                        </button>
+                      </td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
             </div>
@@ -739,7 +757,7 @@ const OrderManager: React.FC<OrderManagerProps> = ({
 
       {/* ── BULK ACTIONS FLOATING BAR ── */}
       {selectedOrderIds.size > 0 && (
-        <div className="absolute top-28 left-1/2 -translate-x-1/2 z-30 bg-slate-800 border border-slate-600 rounded-full shadow-2xl px-4 py-2 flex items-center gap-4 animate-in slide-in-from-top-10">
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 bg-slate-800 border border-slate-600 rounded-full shadow-2xl px-4 py-2 flex items-center gap-4 animate-in slide-in-from-bottom-4">
            <span className="text-amber-400 font-bold text-sm">{selectedOrderIds.size} selecionados</span>
            <div className="w-px h-4 bg-slate-600"></div>
            <button onClick={() => handleBulkAction('check')} className="text-xs text-slate-200 font-semibold hover:text-white px-2 transition-colors">Marcar Conferido</button>
@@ -1125,14 +1143,36 @@ const OrderManager: React.FC<OrderManagerProps> = ({
         </div>
       )}
       
-      {/* ── MODALS (Conferir Carga) ── */}
+      {/* ── MODAL: Visualizar pedido completo (read-only) ── */}
+      {viewingOrder && (
+        <EditOrderModal
+          order={viewingOrder}
+          readOnly
+          onClose={() => setViewingOrder(null)}
+          onSave={() => {}}
+          onConfer={(o) => { setViewingOrder(null); setCheckingOrder(o); }}
+        />
+      )}
+
+      {/* ── MODAL: Conferir Carga ── */}
       {checkingOrder && (
-        <EditOrderModal 
+        <EditOrderModal
           order={checkingOrder}
           onClose={() => setCheckingOrder(null)}
           onSave={handleSaveCheck}
         />
       )}
+
+      {/* ── MODAL: Confirmar exclusão ── */}
+      <ConfirmDialog
+        isOpen={showDeleteConfirm}
+        title="Deletar pedidos?"
+        message={`Você está prestes a deletar ${selectedOrderIds.size} pedido(s). Essa ação não pode ser desfeita.`}
+        confirmLabel="Deletar"
+        variant="danger"
+        onConfirm={confirmDelete}
+        onCancel={() => setShowDeleteConfirm(false)}
+      />
 
     </div>
   );

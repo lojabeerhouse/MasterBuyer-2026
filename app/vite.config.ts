@@ -8,9 +8,7 @@ export default defineConfig(({ mode, command }) => {
 
   return {
     plugins: [react()],
-    // Se estivermos rodando localmente (serve), usamos a raiz '/'.
-    // Se estivermos gerando a build para o GitHub (build), usamos a subpasta.
-    base: command === 'serve' ? '/' : '/MasterBuyer-2026/',
+    base: process.env.DEPLOY_TARGET === 'github' ? '/MasterBuyer-2026/' : '/',
 
     // Aqui criamos a "ponte" para o seu código atual
     define: {

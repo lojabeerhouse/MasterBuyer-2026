@@ -1,14 +1,16 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { X, AlertTriangle, CheckCircle2, PackageCheck } from 'lucide-react';
+import { X, AlertTriangle, CheckCircle2, PackageCheck, FileText } from 'lucide-react';
 import { PurchaseOrder, CartItem } from '../types';
 
 interface EditOrderModalProps {
   order: PurchaseOrder;
   onClose: () => void;
   onSave: (updatedItems: CartItem[], note: string, originalItems: CartItem[]) => void;
+  readOnly?: boolean;
+  onConfer?: (order: PurchaseOrder) => void;
 }
 
-export default function EditOrderModal({ order, onClose, onSave }: EditOrderModalProps) {
+export default function EditOrderModal({ order, onClose, onSave, readOnly = false, onConfer }: EditOrderModalProps) {
   // Trabalharemos com uma cópia mutável dos itens atuais
   const [editableItems, setEditableItems] = useState<CartItem[]>([]);
   const [note, setNote] = useState('');
@@ -56,11 +58,11 @@ export default function EditOrderModal({ order, onClose, onSave }: EditOrderModa
         {/* Header */}
         <div className="p-4 border-b border-slate-800 flex items-center justify-between shrink-0 bg-slate-900/50">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-blue-600/10 border border-blue-600/30 flex items-center justify-center shrink-0">
-              <PackageCheck className="w-5 h-5 text-blue-400"/>
+            <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${readOnly ? 'bg-slate-700/30 border border-slate-700' : 'bg-blue-600/10 border border-blue-600/30'}`}>
+              {readOnly ? <FileText className="w-5 h-5 text-slate-400"/> : <PackageCheck className="w-5 h-5 text-blue-400"/>}
             </div>
             <div>
-              <h3 className="font-bold text-white text-lg">Conferência de Carga</h3>
+              <h3 className="font-bold text-white text-lg">{readOnly ? 'Pedido Completo' : 'Conferência de Carga'}</h3>
               <p className="text-xs text-slate-400">Fornecedor: <strong className="text-slate-300">{order.supplierName}</strong></p>
             </div>
           </div>
@@ -80,7 +82,7 @@ export default function EditOrderModal({ order, onClose, onSave }: EditOrderModa
                     <th className="p-3 text-slate-400 font-semibold">Produto</th>
                     <th className="p-3 text-slate-400 font-semibold text-center border-l border-slate-800/50">Qtd Pedida<br/><span className="text-[9px] text-slate-500">(App)</span></th>
                     <th className="p-3 text-slate-400 font-semibold text-center border-l border-slate-800/50 bg-purple-900/10">Qtd Nota<br/><span className="text-[9px] text-purple-400">(XML)</span></th>
-                    <th className="p-3 text-slate-200 font-bold text-center border-l border-slate-800/50 bg-blue-900/20">FÍSICO<br/><span className="text-[9px] text-blue-400">(Recebido)</span></th>
+                    <th className="p-3 text-slate-200 font-bold text-center border-l border-slate-800/50 bg-blue-900/20">{readOnly ? 'Qtd' : <span>FÍSICO<br/><span className="text-[9px] text-blue-400">(Recebido)</span></span>}</th>
                     <th className="p-3 text-slate-400 font-semibold text-right border-l border-slate-800/50">Valor Unit.</th>
                     <th className="p-3 text-slate-400 font-semibold text-right border-l border-slate-800/50">Total</th>
                   </tr>
@@ -108,16 +110,20 @@ export default function EditOrderModal({ order, onClose, onSave }: EditOrderModa
                           {invoiced}
                         </td>
                         
-                        {/* Qtd FÍSICA (Editável) */}
+                        {/* Qtd FÍSICA (Editável) ou leitura */}
                         <td className="p-2 border-l border-slate-800/50 bg-blue-900/10">
                           <div className="flex items-center justify-center">
-                            <input 
-                              type="number" 
-                              min="0"
-                              value={item.quantityToBuy} 
-                              onChange={(e) => handleUpdateItem(i, 'quantityToBuy', Number(e.target.value))}
-                              className={`w-16 bg-slate-950 border rounded text-center py-1 text-sm font-bold focus:outline-none focus:border-blue-500 ${isDiffFromInvoice ? 'border-amber-500 text-amber-400' : 'border-slate-700 text-blue-400'}`}
-                            />
+                            {readOnly ? (
+                              <span className="text-sm font-bold text-slate-300">{item.quantityToBuy}</span>
+                            ) : (
+                              <input
+                                type="number"
+                                min="0"
+                                value={item.quantityToBuy}
+                                onChange={(e) => handleUpdateItem(i, 'quantityToBuy', Number(e.target.value))}
+                                className={`w-16 bg-slate-950 border rounded text-center py-1 text-sm font-bold focus:outline-none focus:border-blue-500 ${isDiffFromInvoice ? 'border-amber-500 text-amber-400' : 'border-slate-700 text-blue-400'}`}
+                              />
+                            )}
                           </div>
                         </td>
 
@@ -145,7 +151,7 @@ export default function EditOrderModal({ order, onClose, onSave }: EditOrderModa
             </div>
           </div>
 
-          {hasDiscrepancy ? (
+          {!readOnly && (hasDiscrepancy ? (
             <div className="bg-amber-950/20 border border-amber-900/50 rounded-xl p-4 animate-in fade-in slide-in-from-bottom-4">
               <div className="flex items-center gap-2 mb-3">
                 <AlertTriangle className="w-5 h-5 text-amber-500"/>
@@ -165,32 +171,41 @@ export default function EditOrderModal({ order, onClose, onSave }: EditOrderModa
               <CheckCircle2 className="w-5 h-5"/>
               <span className="text-sm font-semibold">Tudo batendo perfeitamente com a nota.</span>
             </div>
-          )}
+          ))}
 
         </div>
 
         {/* Footer */}
         <div className="p-4 border-t border-slate-800 bg-slate-900/80 flex items-center justify-between shrink-0 rounded-b-2xl">
           <div className="flex flex-col">
-            <span className="text-xs text-slate-500 uppercase font-bold tracking-wider">Total Conferido</span>
+            <span className="text-xs text-slate-500 uppercase font-bold tracking-wider">{readOnly ? 'Total do Pedido' : 'Total Conferido'}</span>
             <div className="flex items-end gap-3">
               <span className="text-2xl font-bold text-white leading-none">{fmtCurrency(currentTotal)}</span>
-              {diffTotal !== 0 && (
+              {!readOnly && diffTotal !== 0 && (
                 <span className={`text-sm font-bold mb-0.5 ${diffTotal > 0 ? 'text-red-400' : 'text-emerald-400'}`}>
                   {diffTotal > 0 ? '+' : ''}{fmtCurrency(diffTotal)}
                 </span>
               )}
             </div>
           </div>
-          
+
           <div className="flex items-center gap-3">
             <button onClick={onClose} className="px-5 py-2.5 rounded-xl text-slate-300 font-semibold hover:bg-slate-800 transition-colors">
-              Cancelar
+              {readOnly ? 'Fechar' : 'Cancelar'}
             </button>
-            <button onClick={handleSave} className="flex items-center gap-2 px-6 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl font-bold shadow-lg shadow-blue-900/20 transition-all">
-              <PackageCheck className="w-5 h-5"/>
-              Salvar Conferência
-            </button>
+            {readOnly ? (
+              onConfer && !['cancelled', 'fully_checked'].includes(order.status) && (
+                <button onClick={() => onConfer(order)} className="flex items-center gap-2 px-6 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl font-bold shadow-lg shadow-blue-900/20 transition-all">
+                  <PackageCheck className="w-5 h-5"/>
+                  Conferir Carga
+                </button>
+              )
+            ) : (
+              <button onClick={handleSave} className="flex items-center gap-2 px-6 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl font-bold shadow-lg shadow-blue-900/20 transition-all">
+                <PackageCheck className="w-5 h-5"/>
+                Salvar Conferência
+              </button>
+            )}
           </div>
         </div>
 
