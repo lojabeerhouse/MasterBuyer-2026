@@ -241,6 +241,32 @@ export interface MasterProduct {
   productionType?: string; // "Tipo Produção"
   condition?: string; // "Condição do Produto"
   freeShipping?: string; // "Frete Grátis"
+  
+  // Audit Fields
+  lastUpdatedAt?: string;      // ISO 8601 — data/hora da última alteração
+  lastUpdatedBy?: string;      // uid ou displayName do usuário que alterou
+  lastUpdateSource?: 'import' | 'manual_edit' | 'ai_edit' | 'inventory_sync'; // origem
+}
+
+// ─── AUDIT SYSTEM ───────────────────────────────────────────────────────────
+
+export interface ProductAuditEntry {
+  timestamp: string;          // ISO 8601 local
+  userId: string;             // uid do usuário
+  userDisplay: string;        // displayName ou email
+  source: 'import' | 'manual_edit' | 'ai_edit' | 'inventory_sync';
+  fields: {
+    field: string;            // ex: 'priceCost'
+    label: string;            // ex: 'Custo'
+    from: string | number;
+    to:   string | number;
+  }[];
+}
+
+export interface ProductAuditLog {
+  productId: string;
+  sku: string;
+  changes: ProductAuditEntry[];
 }
 
 // ─── NOTIFICATION SYSTEM ────────────────────────────────────────────────────

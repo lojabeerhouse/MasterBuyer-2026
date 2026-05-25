@@ -3,6 +3,7 @@ import {
   Sparkles, CheckCircle, Trash2, X, CheckSquare, Loader2,
   BoxSelect, Coins,
 } from 'lucide-react';
+import { useSidebar } from '../contexts/RightSidebarContext';
 
 // ─── Props ────────────────────────────────────────────────────────────────────
 
@@ -18,17 +19,9 @@ export interface QuoteActionsPanelProps {
   onSetStrategyUnit: () => void;
 }
 
-// ─── Component ────────────────────────────────────────────────────────────────
+// ─── Collapsed icon-only view ─────────────────────────────────────────────────
 
-/**
- * QuoteActionsPanel
- *
- * Painel de ações para o modal de cotação. É injetado no RightSidebarContext
- * pelo QuoteDetailModal ao montar, e removido ao desmontar/fechar.
- * É completamente desacoplado do modal — recebe apenas callbacks e estado
- * primitivo via props.
- */
-const QuoteActionsPanel: React.FC<QuoteActionsPanelProps> = ({
+const CollapsedPanel: React.FC<QuoteActionsPanelProps> = ({
   selectedCount,
   isBatchProcessing,
   onIdentifyWithAI,
@@ -39,6 +32,95 @@ const QuoteActionsPanel: React.FC<QuoteActionsPanelProps> = ({
   onSetStrategyUnit,
 }) => {
   const hasSelection = selectedCount > 0;
+
+  return (
+    <div className="flex flex-col items-center gap-2 py-3 px-1">
+      <button
+        onClick={onIdentifyWithAI}
+        disabled={!hasSelection || isBatchProcessing}
+        className="relative p-2 rounded-lg bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 hover:bg-indigo-500/20 transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+        title="Identificar com IA"
+      >
+        {isBatchProcessing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+        {hasSelection && !isBatchProcessing && (
+          <span className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full bg-indigo-400" />
+        )}
+      </button>
+
+      <button
+        onClick={onVerifySelected}
+        disabled={!hasSelection}
+        className="relative p-2 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 hover:bg-emerald-500/20 transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+        title="Verificar Selecionados"
+      >
+        <CheckCircle className="w-4 h-4" />
+        {hasSelection && (
+          <span className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full bg-emerald-400" />
+        )}
+      </button>
+
+      <button
+        onClick={onDeleteSelected}
+        disabled={!hasSelection}
+        className="relative p-2 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 hover:bg-red-500/20 transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+        title="Excluir Selecionados"
+      >
+        <Trash2 className="w-4 h-4" />
+        {hasSelection && (
+          <span className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full bg-red-400" />
+        )}
+      </button>
+
+      {hasSelection && (
+        <button
+          onClick={onClearSelection}
+          className="p-2 rounded-lg text-slate-500 hover:text-white hover:bg-slate-800 transition-all"
+          title="Limpar Seleção"
+        >
+          <X className="w-4 h-4" />
+        </button>
+      )}
+
+      <div className="w-6 border-t border-slate-800/60 my-1" />
+
+      <button
+        onClick={onSetStrategyPack}
+        className="p-2 rounded-lg text-blue-400 hover:bg-slate-800 transition-all"
+        title="Atalho: Definir todos como Lote"
+      >
+        <BoxSelect className="w-4 h-4" />
+      </button>
+
+      <button
+        onClick={onSetStrategyUnit}
+        className="p-2 rounded-lg text-amber-400 hover:bg-slate-800 transition-all"
+        title="Atalho: Definir todos como Unitário"
+      >
+        <Coins className="w-4 h-4" />
+      </button>
+    </div>
+  );
+};
+
+// ─── Component ────────────────────────────────────────────────────────────────
+
+const QuoteActionsPanel: React.FC<QuoteActionsPanelProps> = (props) => {
+  const { isCollapsed } = useSidebar();
+  const {
+    selectedCount,
+    isBatchProcessing,
+    onIdentifyWithAI,
+    onVerifySelected,
+    onDeleteSelected,
+    onClearSelection,
+    onSetStrategyPack,
+    onSetStrategyUnit,
+  } = props;
+  const hasSelection = selectedCount > 0;
+
+  if (isCollapsed) {
+    return <CollapsedPanel {...props} />;
+  }
 
   return (
     <div className="flex flex-col h-full">

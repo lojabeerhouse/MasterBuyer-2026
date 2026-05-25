@@ -1,7 +1,7 @@
 
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { MasterProduct, CategoryTree, CategoryNode } from '../types';
-import { Database, Search, AlertCircle, ArrowUpDown, ArrowUp, ArrowDown, Link as LinkIcon, RefreshCw, CircleHelp, X, Download, Settings2, Image, Pencil, Save, Sparkles, Send, XCircle, Bell, CheckCircle2, Check, Upload, FileText, LayoutGrid, Tag, ChevronDown } from 'lucide-react';
+import { Database, Search, AlertCircle, ArrowUpDown, ArrowUp, ArrowDown, Link as LinkIcon, RefreshCw, CircleHelp, X, Download, Settings2, Image, Pencil, Save, Sparkles, Send, XCircle, Bell, CheckCircle2, Check, Upload, FileText, LayoutGrid, Tag, ChevronDown, Undo2 } from 'lucide-react';
 import { interpretBulkEditCommand, batchSuggestNCM } from '../services/geminiService';
 import { useCheckboxSelection } from './shared/useCheckboxSelection';
 import { buildPath, getDescendantIds } from '../services/category_manager/categoryService';
@@ -107,8 +107,122 @@ const ProductDatabase: React.FC<ProductDatabaseProps> = ({ masterProducts = [], 
 
     // Import State
     const [pendingProducts, setPendingProducts] = useState<MasterProduct[] | null>(null);
+    const [activeDiffTab, setActiveDiffTab] = useState<'new' | 'updated' | 'ignored'>('new');
+    const [backupProducts, setBackupProducts] = useState<MasterProduct[] | null>(() => {
+        try {
+            const saved = localStorage.getItem('beerhouse_masterProducts_backup');
+            return saved ? JSON.parse(saved) : null;
+        } catch (_) {
+            return null;
+        }
+    });
     const [showConfirmModal, setShowConfirmModal] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
+
+    interface MergeDiff {
+        newItems: MasterProduct[];
+        updatedItems: {
+            original: MasterProduct;
+            updated: MasterProduct;
+            changes: { field: string; label: string; from: any; to: any }[];
+        }[];
+        ignoredItems: MasterProduct[];
+    }
+
+    const calculatedDiff = useMemo<MergeDiff | null>(() => {
+        if (!pendingProducts || pendingProducts.length === 0) return null;
+
+        const existingBySku = new Map<string, MasterProduct>();
+        masterProducts.forEach(p => {
+            if (p.sku && p.sku.trim().toUpperCase() !== 'S/N') {
+                existingBySku.set(p.sku.trim().toUpperCase(), p);
+            }
+        });
+
+        const newItems: MasterProduct[] = [];
+        const updatedItems: MergeDiff['updatedItems'] = [];
+        const ignoredItems: MasterProduct[] = [];
+
+        pendingProducts.forEach(imported => {
+            const normSku = imported.sku ? imported.sku.trim().toUpperCase() : 'S/N';
+
+            if (normSku === 'S/N' || !existingBySku.has(normSku)) {
+                newItems.push({
+                    ...imported,
+                    id: imported.id || generateId()
+                });
+            } else {
+                const original = existingBySku.get(normSku)!;
+                const updatedProduct = { ...original };
+                const changes: MergeDiff['updatedItems'][number]['changes'] = [];
+
+                const fieldsToMerge: { field: keyof MasterProduct; label: string }[] = [
+                    { field: 'name', label: 'Produto' },
+                    { field: 'unit', label: 'Un.' },
+                    { field: 'ncm', label: 'NCM' },
+                    { field: 'priceSell', label: 'Venda' },
+                    { field: 'priceCost', label: 'Custo' },
+                    { field: 'stock', label: 'Estoque' },
+                    { field: 'supplier', label: 'Fornecedor' },
+                    { field: 'ean', label: 'EAN/GTIN' },
+                    { field: 'brand', label: 'Marca' },
+                    { field: 'category', label: 'Categoria' },
+                    { field: 'productGroup', label: 'Grupo Produtos' },
+                    { field: 'tags', label: 'Tags' },
+                    { field: 'department', label: 'Departamento' },
+                    { field: 'origin', label: 'Origem' },
+                    { field: 'status', label: 'Situação' },
+                    { field: 'observations', label: 'Obs' },
+                    { field: 'image', label: 'Img' },
+                    { field: 'externalLink', label: 'Link' },
+                    { field: 'expiryDate', label: 'Validade' },
+                    { field: 'netWeight', label: 'Peso Líq.' },
+                    { field: 'grossWeight', label: 'Peso Bruto' },
+                    { field: 'minStock', label: 'Est. Mín' },
+                    { field: 'maxStock', label: 'Est. Máx' },
+                    { field: 'width', label: 'Larg.' },
+                    { field: 'height', label: 'Alt.' },
+                    { field: 'depth', label: 'Prof.' },
+                    { field: 'location', label: 'Local.' }
+                ];
+
+                fieldsToMerge.forEach(({ field, label }) => {
+                    const impVal = imported[field];
+                    const origVal = original[field];
+
+                    if (impVal !== undefined && impVal !== '') {
+                        if (typeof impVal === 'number') {
+                            const oNum = origVal !== undefined ? Number(origVal) : 0;
+                            const iNum = Number(impVal);
+                            if (Math.abs(oNum - iNum) > 0.0001) {
+                                (updatedProduct as any)[field] = iNum;
+                                changes.push({ field, label, from: oNum, to: iNum });
+                            }
+                        } else {
+                            const oStr = String(origVal || '').trim();
+                            const iStr = String(impVal).trim();
+                            if (oStr !== iStr) {
+                                (updatedProduct as any)[field] = iStr;
+                                changes.push({ field, label, from: oStr || '-', to: iStr });
+                            }
+                        }
+                    }
+                });
+
+                if (changes.length > 0) {
+                    updatedItems.push({
+                        original,
+                        updated: updatedProduct,
+                        changes
+                    });
+                } else {
+                    ignoredItems.push(original);
+                }
+            }
+        });
+
+        return { newItems, updatedItems, ignoredItems };
+    }, [pendingProducts, masterProducts]);
 
     // Toasts
     const [toasts, setToasts] = useState<ToastNotification[]>([]);
@@ -400,11 +514,45 @@ const ProductDatabase: React.FC<ProductDatabaseProps> = ({ masterProducts = [], 
     };
 
     const handleConfirmImport = () => {
-        if (pendingProducts) {
-            setMasterProducts(pendingProducts);
-            addToast(`${pendingProducts.length} produtos importados com sucesso!`, 'success');
+        if (calculatedDiff) {
+            // 1. Criar backup do estado atual
+            setBackupProducts(masterProducts);
+            try {
+                localStorage.setItem('beerhouse_masterProducts_backup', JSON.stringify(masterProducts));
+            } catch (_) { }
+
+            // 2. Realizar o merge
+            const updatedMap = new Map<string, MasterProduct>();
+            calculatedDiff.updatedItems.forEach(item => {
+                updatedMap.set(item.original.id, item.updated);
+            });
+
+            const mergedProducts = [
+                ...masterProducts.map(p => {
+                    if (updatedMap.has(p.id)) {
+                        return updatedMap.get(p.id)!;
+                    }
+                    return p;
+                }),
+                ...calculatedDiff.newItems
+            ];
+
+            setMasterProducts(mergedProducts);
+            addToast(`${calculatedDiff.newItems.length} novos, ${calculatedDiff.updatedItems.length} atualizados de ${pendingProducts?.length || 0} produtos!`, 'success');
+
             setPendingProducts(null);
             setShowConfirmModal(false);
+        }
+    };
+
+    const handleRollback = () => {
+        if (backupProducts) {
+            setMasterProducts(backupProducts);
+            try {
+                localStorage.removeItem('beerhouse_masterProducts_backup');
+            } catch (_) { }
+            setBackupProducts(null);
+            addToast("Importação de produtos desfeita com sucesso!", "info");
         }
     };
 
@@ -702,7 +850,7 @@ const ProductDatabase: React.FC<ProductDatabaseProps> = ({ masterProducts = [], 
                 return 0;
             });
         }
-        return result.slice(0, 200);
+        return result.slice(0, 50);
     }, [masterProducts, debouncedSearch, sortConfig, visibleColumnIds, isEditMode, draftProducts, selectedCategoryId, categoryTree]);
 
     const totalStockValue = masterProducts.reduce((acc, curr) => acc + (curr.priceCost * curr.stock), 0);
@@ -792,49 +940,209 @@ const ProductDatabase: React.FC<ProductDatabaseProps> = ({ masterProducts = [], 
                     >
                         <Upload className="w-3.5 h-3.5" />
                     </button>
+
+                    {backupProducts && (
+                        <button
+                            onClick={handleRollback}
+                            className="bg-red-950 hover:bg-red-900 border border-red-800 text-red-400 p-1.5 px-2.5 rounded transition-all flex items-center gap-1.5 text-[11px] font-bold uppercase"
+                            title="Desfazer Última Importação (Rollback)"
+                        >
+                            <Undo2 className="w-3.5 h-3.5" />
+                            <span>Desfazer</span>
+                        </button>
+                    )}
                 </div>
 
                 {/* CONFIRM IMPORT MODAL (Seguindo Forcato-design) */}
                 {showConfirmModal && pendingProducts && (
                     <div className="fixed inset-0 z-[200] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-                        <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-2xl shadow-2xl overflow-hidden flex flex-col max-h-[80vh] animate-in zoom-in-95">
+                        <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-3xl shadow-2xl overflow-hidden flex flex-col max-h-[85vh] animate-in zoom-in-95">
                             <div className="p-4 border-b border-slate-800 flex items-center justify-between bg-slate-950/50">
                                 <div>
                                     <h3 className="font-bold text-white uppercase text-sm flex items-center gap-2">
-                                        <Database className="w-4 h-4 text-amber-500" /> Confirmar Importação
+                                        <Database className="w-4 h-4 text-amber-500" /> Confirmar Importação (Merge por SKU)
                                     </h3>
-                                    <p className="text-[10px] text-slate-500 font-bold uppercase mt-1">Atenção: A lista atual será substituída por {pendingProducts.length} itens.</p>
+                                    <p className="text-[10px] text-slate-400 font-bold uppercase mt-1">
+                                        Total: {pendingProducts.length} itens.
+                                        {calculatedDiff && (
+                                            <>
+                                                {" • "}<span className="text-green-400">{calculatedDiff.newItems.length} novos</span>
+                                                {" • "}<span className="text-amber-400">{calculatedDiff.updatedItems.length} atualizações</span>
+                                                {" • "}<span className="text-slate-400">{calculatedDiff.ignoredItems.length} sem alterações</span>
+                                            </>
+                                        )}
+                                    </p>
                                 </div>
                                 <button onClick={() => setShowConfirmModal(false)} className="text-slate-500 hover:text-white"><X className="w-5 h-5" /></button>
                             </div>
 
-                            <div className="flex-1 overflow-auto p-4 custom-scrollbar bg-slate-950">
-                                <table className="w-full text-left text-[11px] border-collapse">
-                                    <thead className="bg-slate-900 sticky top-0 text-slate-500 uppercase font-bold">
-                                        <tr>
-                                            <th className="p-2 px-3 border-b border-slate-800">SKU</th>
-                                            <th className="p-2 px-3 border-b border-slate-800">Produto</th>
-                                            <th className="p-2 px-3 border-b border-slate-800 text-right">Custo</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody className="divide-y divide-slate-800/40">
-                                        {pendingProducts.slice(0, 50).map((p, i) => (
-                                            <tr key={i} className="hover:bg-slate-900/50">
-                                                <td className="p-2 px-3 font-mono text-slate-500">{p.sku}</td>
-                                                <td className="p-2 px-3 text-slate-200 font-medium">{p.name}</td>
-                                                <td className="p-2 px-3 text-right text-slate-400">R$ {p.priceCost.toFixed(2)}</td>
-                                            </tr>
-                                        ))}
-                                        {pendingProducts.length > 50 && (
-                                            <tr>
-                                                <td colSpan={3} className="p-4 text-center text-slate-600 italic">... e mais {pendingProducts.length - 50} itens.</td>
-                                            </tr>
-                                        )}
-                                    </tbody>
-                                </table>
+                            {/* Tabs Header */}
+                            <div className="flex bg-slate-900/80 border-b border-slate-800 px-4 py-2 gap-2 shrink-0">
+                                <button
+                                    onClick={() => setActiveDiffTab('new')}
+                                    className={`px-3 py-1.5 rounded text-xs font-bold uppercase transition-all flex items-center gap-2 ${activeDiffTab === 'new'
+                                        ? 'bg-green-950/50 border border-green-800 text-green-400'
+                                        : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'
+                                        }`}
+                                >
+                                    <span>Novos</span>
+                                    <span className="bg-green-900/40 px-1.5 py-0.5 rounded text-[10px] text-green-400">
+                                        {calculatedDiff?.newItems.length || 0}
+                                    </span>
+                                </button>
+                                <button
+                                    onClick={() => setActiveDiffTab('updated')}
+                                    className={`px-3 py-1.5 rounded text-xs font-bold uppercase transition-all flex items-center gap-2 ${activeDiffTab === 'updated'
+                                        ? 'bg-amber-950/50 border border-amber-800 text-amber-400'
+                                        : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'
+                                        }`}
+                                >
+                                    <span>Atualizados</span>
+                                    <span className="bg-amber-900/40 px-1.5 py-0.5 rounded text-[10px] text-amber-400">
+                                        {calculatedDiff?.updatedItems.length || 0}
+                                    </span>
+                                </button>
+                                <button
+                                    onClick={() => setActiveDiffTab('ignored')}
+                                    className={`px-3 py-1.5 rounded text-xs font-bold uppercase transition-all flex items-center gap-2 ${activeDiffTab === 'ignored'
+                                        ? 'bg-slate-800/50 border border-slate-700 text-slate-300'
+                                        : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'
+                                        }`}
+                                >
+                                    <span>Sem Alteração</span>
+                                    <span className="bg-slate-800/40 px-1.5 py-0.5 rounded text-[10px] text-slate-400">
+                                        {calculatedDiff?.ignoredItems.length || 0}
+                                    </span>
+                                </button>
                             </div>
 
-                            <div className="p-4 border-t border-slate-800 bg-slate-900 flex justify-end gap-3">
+                            {/* Tab Content */}
+                            {activeDiffTab === 'new' && (
+                                <div className="flex-1 overflow-auto p-4 custom-scrollbar bg-slate-950">
+                                    {!calculatedDiff || calculatedDiff.newItems.length === 0 ? (
+                                        <div className="text-center text-slate-500 py-12 text-xs font-bold uppercase">
+                                            Nenhum produto novo nesta importação.
+                                        </div>
+                                    ) : (
+                                        <table className="w-full text-left text-[11px] border-collapse">
+                                            <thead className="bg-slate-900 sticky top-0 text-slate-500 uppercase font-bold z-10">
+                                                <tr>
+                                                    <th className="p-2 px-3 border-b border-slate-800">SKU</th>
+                                                    <th className="p-2 px-3 border-b border-slate-800">Produto</th>
+                                                    <th className="p-2 px-3 border-b border-slate-800 text-right w-24">Custo</th>
+                                                    <th className="p-2 px-3 border-b border-slate-800 text-right w-24">Venda</th>
+                                                    <th className="p-2 px-3 border-b border-slate-800 text-right w-20">Estoque</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-slate-800/40">
+                                                {calculatedDiff.newItems.slice(0, 100).map((p, i) => (
+                                                    <tr key={i} className="hover:bg-slate-900/50">
+                                                        <td className="p-2 px-3 font-mono text-green-400 font-bold">{p.sku}</td>
+                                                        <td className="p-2 px-3 text-slate-200 font-medium">{p.name}</td>
+                                                        <td className="p-2 px-3 text-right text-slate-400">R$ {p.priceCost.toFixed(2)}</td>
+                                                        <td className="p-2 px-3 text-right text-slate-400">R$ {p.priceSell.toFixed(2)}</td>
+                                                        <td className="p-2 px-3 text-right text-slate-400">{p.stock}</td>
+                                                    </tr>
+                                                ))}
+                                                {calculatedDiff.newItems.length > 100 && (
+                                                    <tr>
+                                                        <td colSpan={5} className="p-4 text-center text-slate-600 italic">... e mais {calculatedDiff.newItems.length - 100} itens.</td>
+                                                    </tr>
+                                                )}
+                                            </tbody>
+                                        </table>
+                                    )}
+                                </div>
+                            )}
+
+                            {activeDiffTab === 'updated' && (
+                                <div className="flex-1 overflow-auto p-4 custom-scrollbar bg-slate-950">
+                                    {!calculatedDiff || calculatedDiff.updatedItems.length === 0 ? (
+                                        <div className="text-center text-slate-500 py-12 text-xs font-bold uppercase">
+                                            Nenhuma atualização pendente nos produtos existentes.
+                                        </div>
+                                    ) : (
+                                        <table className="w-full text-left text-[11px] border-collapse">
+                                            <thead className="bg-slate-900 sticky top-0 text-slate-500 uppercase font-bold z-10">
+                                                <tr>
+                                                    <th className="p-2 px-3 border-b border-slate-800 w-24">SKU</th>
+                                                    <th className="p-2 px-3 border-b border-slate-800 w-48">Produto</th>
+                                                    <th className="p-2 px-3 border-b border-slate-800">Alterações Detectadas (Antes ➔ Depois)</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-slate-800/40">
+                                                {calculatedDiff.updatedItems.slice(0, 100).map((item, i) => (
+                                                    <tr key={i} className="hover:bg-slate-900/50 align-top">
+                                                        <td className="p-2 px-3 font-mono text-amber-400 font-bold">{item.original.sku}</td>
+                                                        <td className="p-2 px-3 text-slate-200 font-medium">
+                                                            <div className="truncate max-w-[200px]" title={item.original.name}>{item.original.name}</div>
+                                                        </td>
+                                                        <td className="p-2 px-3">
+                                                            <div className="flex flex-wrap gap-1.5 py-0.5">
+                                                                {item.changes.map((c, idx) => (
+                                                                    <span key={idx} className="inline-flex items-center gap-1 bg-amber-950/20 border border-amber-900/40 rounded px-2 py-0.5 text-[10px] text-amber-300">
+                                                                        <strong className="text-amber-400/80">{c.label}:</strong>
+                                                                        <span className="text-slate-500 line-through">
+                                                                            {c.field.toLowerCase().includes('price') || c.field === 'priceCost' || c.field === 'priceSell' ? `R$ ${Number(c.from).toFixed(2)}` : c.from}
+                                                                        </span>
+                                                                        <span className="text-slate-400 font-bold">➔</span>
+                                                                        <span className="text-amber-200 font-bold">
+                                                                            {c.field.toLowerCase().includes('price') || c.field === 'priceCost' || c.field === 'priceSell' ? `R$ ${Number(c.to).toFixed(2)}` : c.to}
+                                                                        </span>
+                                                                    </span>
+                                                                ))}
+                                                            </div>
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                                {calculatedDiff.updatedItems.length > 100 && (
+                                                    <tr>
+                                                        <td colSpan={3} className="p-4 text-center text-slate-600 italic">... e mais {calculatedDiff.updatedItems.length - 100} itens.</td>
+                                                    </tr>
+                                                )}
+                                            </tbody>
+                                        </table>
+                                    )}
+                                </div>
+                            )}
+
+                            {activeDiffTab === 'ignored' && (
+                                <div className="flex-1 overflow-auto p-4 custom-scrollbar bg-slate-950">
+                                    {!calculatedDiff || calculatedDiff.ignoredItems.length === 0 ? (
+                                        <div className="text-center text-slate-500 py-12 text-xs font-bold uppercase">
+                                            Nenhum produto idêntico ignorado.
+                                        </div>
+                                    ) : (
+                                        <table className="w-full text-left text-[11px] border-collapse text-slate-400">
+                                            <thead className="bg-slate-900 sticky top-0 text-slate-500 uppercase font-bold z-10">
+                                                <tr>
+                                                    <th className="p-2 px-3 border-b border-slate-800">SKU</th>
+                                                    <th className="p-2 px-3 border-b border-slate-800">Produto</th>
+                                                    <th className="p-2 px-3 border-b border-slate-800 text-right w-24">Custo</th>
+                                                    <th className="p-2 px-3 border-b border-slate-800 text-right w-24">Venda</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-slate-800/40">
+                                                {calculatedDiff.ignoredItems.slice(0, 50).map((p, i) => (
+                                                    <tr key={i} className="hover:bg-slate-900/50 opacity-60">
+                                                        <td className="p-2 px-3 font-mono text-slate-500">{p.sku}</td>
+                                                        <td className="p-2 px-3 text-slate-400">{p.name}</td>
+                                                        <td className="p-2 px-3 text-right text-slate-500">R$ {p.priceCost.toFixed(2)}</td>
+                                                        <td className="p-2 px-3 text-right text-slate-500">R$ {p.priceSell.toFixed(2)}</td>
+                                                    </tr>
+                                                ))}
+                                                {calculatedDiff.ignoredItems.length > 50 && (
+                                                    <tr>
+                                                        <td colSpan={4} className="p-4 text-center text-slate-600 italic">... e mais {calculatedDiff.ignoredItems.length - 50} itens.</td>
+                                                    </tr>
+                                                )}
+                                            </tbody>
+                                        </table>
+                                    )}
+                                </div>
+                            )}
+
+                            <div className="p-4 border-t border-slate-800 bg-slate-900 flex justify-end gap-3 shrink-0">
                                 <button
                                     onClick={() => setShowConfirmModal(false)}
                                     className="px-4 py-2 text-xs font-bold uppercase text-slate-400 hover:text-white transition-colors"
@@ -845,7 +1153,7 @@ const ProductDatabase: React.FC<ProductDatabaseProps> = ({ masterProducts = [], 
                                     onClick={handleConfirmImport}
                                     className="px-6 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded text-xs font-bold uppercase shadow-lg shadow-amber-900/20 transition-all flex items-center gap-2"
                                 >
-                                    <CheckCircle2 className="w-4 h-4" /> Confirmar Importação
+                                    <CheckCircle2 className="w-4 h-4" /> Confirmar Merge
                                 </button>
                             </div>
                         </div>
@@ -982,37 +1290,6 @@ const ProductDatabase: React.FC<ProductDatabaseProps> = ({ masterProducts = [], 
                     </div>
                 </div>
 
-                {/* AI BULK EDIT BAR (Seguindo Forcato-design) */}
-                {selectedIds.size > 0 && (
-                    <div className="bg-slate-950/80 border-b border-amber-600/30 p-2 flex items-center gap-3 shrink-0 animate-in slide-in-from-top-1">
-                        <div className="flex items-center gap-2 text-amber-500 font-bold text-[10px] uppercase bg-amber-950/20 px-3 py-1 rounded border border-amber-600/20">
-                            <Sparkles className="w-3 h-3" />
-                            IA Editor ({selectedIds.size})
-                        </div>
-                        <div className="flex-1 flex gap-2">
-                            <input
-                                type="text"
-                                value={aiCommand}
-                                onChange={(e) => setAiCommand(e.target.value)}
-                                onKeyDown={(e) => e.key === 'Enter' && handleAiBulkEdit()}
-                                placeholder="Mudar NCM para 1234.56.78..."
-                                className="w-full bg-slate-900 border border-slate-800 rounded px-3 py-1.5 text-xs text-white focus:border-amber-600 focus:outline-none"
-                                autoFocus
-                            />
-                            <button
-                                onClick={handleAiBulkEdit}
-                                disabled={!aiCommand.trim() || isAiProcessing}
-                                className="bg-amber-600 hover:bg-amber-500 text-white px-3 py-1.5 rounded text-[10px] font-bold uppercase disabled:opacity-50 transition-all flex items-center gap-2"
-                            >
-                                {isAiProcessing ? 'Executando...' : 'Aplicar'}
-                            </button>
-                        </div>
-                        <button onClick={clearSelection} className="p-1.5 text-slate-500 hover:text-white transition-colors" title="Limpar Seleção">
-                            <XCircle className="w-4 h-4" />
-                        </button>
-                    </div>
-                )}
-
                 <div className="flex-1 overflow-auto custom-scrollbar">
                     <table className="w-full text-left text-[12px] border-collapse">
                         <thead className="bg-slate-950/80 text-slate-500 uppercase text-[10px] font-bold sticky top-0 z-[10] backdrop-blur-sm shadow-sm">
@@ -1083,6 +1360,36 @@ const ProductDatabase: React.FC<ProductDatabaseProps> = ({ masterProducts = [], 
                     </div>
                 </div>
             </div>
+            {/* AI BULK EDIT BAR (Seguindo Forcato-design) */}
+            {selectedIds.size > 0 && (
+                <div className="bg-slate-950/80 border-b border-amber-600/30 p-2 flex items-center gap-3 shrink-0 animate-in slide-in-from-top-1">
+                    <div className="flex items-center gap-2 text-amber-500 font-bold text-[10px] uppercase bg-amber-950/20 px-3 py-1 rounded border border-amber-600/20">
+                        <Sparkles className="w-3 h-3" />
+                        IA Editor ({selectedIds.size})
+                    </div>
+                    <div className="flex-1 flex gap-2">
+                        <input
+                            type="text"
+                            value={aiCommand}
+                            onChange={(e) => setAiCommand(e.target.value)}
+                            onKeyDown={(e) => e.key === 'Enter' && handleAiBulkEdit()}
+                            placeholder="Mudar NCM para 1234.56.78..."
+                            className="w-full bg-slate-900 border border-slate-800 rounded px-3 py-1.5 text-xs text-white focus:border-amber-600 focus:outline-none"
+                            autoFocus
+                        />
+                        <button
+                            onClick={handleAiBulkEdit}
+                            disabled={!aiCommand.trim() || isAiProcessing}
+                            className="bg-amber-600 hover:bg-amber-500 text-white px-3 py-1.5 rounded text-[10px] font-bold uppercase disabled:opacity-50 transition-all flex items-center gap-2"
+                        >
+                            {isAiProcessing ? 'Executando...' : 'Aplicar'}
+                        </button>
+                    </div>
+                    <button onClick={clearSelection} className="p-1.5 text-slate-500 hover:text-white transition-colors" title="Limpar Seleção">
+                        <XCircle className="w-4 h-4" />
+                    </button>
+                </div>
+            )}
         </div>
     );
 };

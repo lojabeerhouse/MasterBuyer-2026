@@ -11,14 +11,19 @@ function getFingerprint<T>(data: T[]): string {
   const last  = (data[data.length - 1] as any)?.sku || (data[data.length - 1] as any)?.id || '';
   let catChecksum = 0;
   let stockChecksum = 0;
+  let costChecksum = 0;
+  let nameChecksum = 0;
   for (const item of data) {
     const catId = (item as any).categoryId || '';
     for (let i = 0; i < catId.length; i++) {
       catChecksum = (catChecksum * 31 + catId.charCodeAt(i)) & 0xffffffff;
     }
     stockChecksum = (stockChecksum * 31 + ((item as any).stock ?? 0)) & 0xffffffff;
+    costChecksum = (costChecksum * 31 + (((item as any).priceCost ?? 0) * 100 | 0)) & 0xffffffff;
+    const n = ((item as any).name || '');
+    nameChecksum = (nameChecksum * 31 + (n.length > 0 ? n.charCodeAt(0) : 0) + (n.length > 4 ? n.charCodeAt(4) : 0)) & 0xffffffff;
   }
-  return `${data.length}:${first}:${last}:${catChecksum}:${stockChecksum}`;
+  return `${data.length}:${first}:${last}:${catChecksum}:${stockChecksum}:${costChecksum}:${nameChecksum}`;
 }
 
 export async function saveChunkedData<T>(userId: string, key: string, data: T[]): Promise<void> {

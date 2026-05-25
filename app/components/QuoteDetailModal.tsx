@@ -93,7 +93,7 @@ const QuoteDetailModal: React.FC<QuoteDetailModalProps> = ({
   const computedSuggestionIdxs = useRef<Set<number>>(new Set());
 
   // ── Sidebar Context ───────────────────────────────────────────────────
-  const { setSidebarContent, clearSidebar } = useSidebar();
+  const { setSidebarContent, clearSidebar, setCollapsed, setBadgeCount } = useSidebar();
 
   // Reset selection and lazy suggestions when batch id changes
   useEffect(() => {
@@ -308,10 +308,18 @@ const QuoteDetailModal: React.FC<QuoteDetailModalProps> = ({
 
   const clearSelection = () => setSelectedPendingItems(new Set());
 
+  // ── Colapsar sidebar ao montar o modal e restaurar ao desmontar ─────────────
+  useEffect(() => {
+    setCollapsed(true);
+    return () => { setCollapsed(false); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // ── Injetar / sincronizar painel na sidebar global ───────────────────────────
   // Atualiza o conteúdo da sidebar sempre que o estado relevante muda.
   // O cleanup do useEffect garante que a sidebar é limpa ao desmontar o modal.
   useEffect(() => {
+    setBadgeCount(selectedPendingItems.size);
     setSidebarContent(
       <QuoteActionsPanel
         selectedCount={selectedPendingItems.size}
