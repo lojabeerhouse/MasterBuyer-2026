@@ -1,10 +1,12 @@
 
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { MasterProduct, CategoryTree, CategoryNode } from '../types';
-import { Database, Search, AlertCircle, ArrowUpDown, ArrowUp, ArrowDown, Link as LinkIcon, RefreshCw, CircleHelp, X, Download, Settings2, Image, Pencil, Save, Sparkles, Send, XCircle, Bell, CheckCircle2, Check, Upload, FileText, LayoutGrid, Tag, ChevronDown, Undo2 } from 'lucide-react';
+import { Database, Search, AlertCircle, ArrowUpDown, ArrowUp, ArrowDown, Link as LinkIcon, RefreshCw, CircleHelp, X, Download, Settings2, Image, Pencil, Save, Sparkles, Send, XCircle, Bell, CheckCircle2, Check, Upload, FileText, LayoutGrid, Tag, ChevronDown, Undo2, ArrowRight, Package } from 'lucide-react';
 import { interpretBulkEditCommand, batchSuggestNCM } from '../services/geminiService';
 import { useCheckboxSelection } from './shared/useCheckboxSelection';
 import { buildPath, getDescendantIds } from '../services/category_manager/categoryService';
+import { appendAuditEntry, loadProductAuditLog } from '../services/auditService';
+import { ProductAuditEntry } from '../types';
 
 interface ProductDatabaseProps {
     masterProducts: MasterProduct[];
@@ -13,6 +15,8 @@ interface ProductDatabaseProps {
     setSheetUrl: React.Dispatch<React.SetStateAction<string>>;
     categoryTree?: CategoryTree;
     setIsDirty: (dirty: boolean) => void;
+    userId?: string;
+    userDisplay?: string;
 }
 
 // Internal interface to handle the temporary state before name resolution
@@ -76,6 +80,7 @@ const ALL_COLUMNS: ColumnDef[] = [
     { id: 'expiryDate', label: 'Validade', type: 'text', align: 'center', editable: true },
     { id: 'image', label: 'Img', type: 'image', align: 'center', editable: true },
     { id: 'externalLink', label: 'Link', type: 'link', align: 'center', editable: true },
+    { id: 'lastUpdatedAt', label: 'Última Atual.', type: 'text', align: 'center', editable: false },
 ];
 
 // Default visible columns matches the previous version
@@ -88,7 +93,7 @@ const SortIcon = ({ column, sortConfig }: { column: keyof MasterProduct | 'margi
     return sortConfig.direction === 'asc' ? <ArrowUp className="w-3 h-3 text-indigo-400" /> : <ArrowDown className="w-3 h-3 text-indigo-400" />;
 };
 
-const ProductDatabase: React.FC<ProductDatabaseProps> = ({ masterProducts = [], setMasterProducts, sheetUrl, setSheetUrl, categoryTree, setIsDirty }) => {
+const ProductDatabase: React.FC<ProductDatabaseProps> = ({ masterProducts = [], setMasterProducts, sheetUrl, setSheetUrl, categoryTree, setIsDirty, userId, userDisplay }) => {
     const [searchTerm, setSearchTerm] = useState('');
     const [debouncedSearch, setDebouncedSearch] = useState('');
     const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
@@ -104,6 +109,23 @@ const ProductDatabase: React.FC<ProductDatabaseProps> = ({ masterProducts = [], 
     // AI Edit State
     const [aiCommand, setAiCommand] = useState('');
     const [isAiProcessing, setIsAiProcessing] = useState(false);
+
+    // Audit State
+    const [historyProduct, setHistoryProduct] = useState<MasterProduct | null>(null);
+    const [historyLogs, setHistoryLogs] = useState<ProductAuditEntry[] | null>(null);
+
+    useEffect(() => {
+        let active = true;
+        if (historyProduct && userId) {
+            setHistoryLogs(null);
+            loadProductAuditLog(userId, historyProduct.id).then(logs => {
+                if (active) setHistoryLogs(logs);
+            });
+        } else {
+            setHistoryLogs(null);
+        }
+        return () => { active = false; };
+    }, [historyProduct, userId]);
 
     // Import State
     const [pendingProducts, setPendingProducts] = useState<MasterProduct[] | null>(null);
@@ -309,10 +331,55 @@ const ProductDatabase: React.FC<ProductDatabaseProps> = ({ masterProducts = [], 
     };
 
     const handleSaveEdit = () => {
-        setMasterProducts(draftProducts);
+        const now = new Date().toISOString();
+        let changedCount = 0;
+        
+        const finalProducts = draftProducts.map(draftP => {
+            const original = masterProducts.find(m => m.id === draftP.id);
+            if (!original) return draftP;
+            
+            const changes: any[] = [];
+            ALL_COLUMNS.forEach(col => {
+                if (col.id !== 'margin' && col.id !== 'lastUpdatedAt' && col.editable) {
+                    const from = original[col.id];
+                    const to = draftP[col.id];
+                    if (from !== to) {
+                        changes.push({ field: col.id, label: col.label, from: from || '-', to: to || '-' });
+                    }
+                }
+            });
+            
+            if (changes.length > 0) {
+                changedCount++;
+                const audited = {
+                    ...draftP,
+                    lastUpdatedAt: now,
+                    lastUpdatedBy: userDisplay || userId || 'Sistema',
+                    lastUpdateSource: 'manual_edit' as const
+                };
+                
+                if (userId) {
+                    appendAuditEntry(userId, draftP.id, draftP.sku, {
+                        timestamp: now,
+                        userId,
+                        userDisplay: userDisplay || 'Sistema',
+                        source: 'manual_edit',
+                        fields: changes
+                    });
+                }
+                return audited;
+            }
+            return draftP;
+        });
+
+        setMasterProducts(finalProducts);
         setIsEditMode(false);
         setIsDirty(false);
-        addToast("Alterações salvas com sucesso!", "success");
+        if (changedCount > 0) {
+            addToast(`Alterações salvas com sucesso em ${changedCount} produtos!`, "success");
+        } else {
+            addToast("Nenhuma alteração detectada.", "info");
+        }
     };
 
     const handleCancelEdit = () => {
@@ -530,11 +597,49 @@ const ProductDatabase: React.FC<ProductDatabaseProps> = ({ masterProducts = [], 
             const mergedProducts = [
                 ...masterProducts.map(p => {
                     if (updatedMap.has(p.id)) {
-                        return updatedMap.get(p.id)!;
+                        const updatedProduct = updatedMap.get(p.id)!;
+                        const now = new Date().toISOString();
+                        const auditedProduct = {
+                            ...updatedProduct,
+                            lastUpdatedAt: now,
+                            lastUpdatedBy: userDisplay || userId || 'Sistema',
+                            lastUpdateSource: 'import' as const
+                        };
+                        if (userId) {
+                            const diffItem = calculatedDiff.updatedItems.find(i => i.original.id === p.id);
+                            if (diffItem) {
+                                appendAuditEntry(userId, p.id, p.sku, {
+                                    timestamp: now,
+                                    userId,
+                                    userDisplay: userDisplay || 'Sistema',
+                                    source: 'import',
+                                    fields: diffItem.changes
+                                });
+                            }
+                        }
+                        return auditedProduct;
                     }
                     return p;
                 }),
-                ...calculatedDiff.newItems
+                ...calculatedDiff.newItems.map(p => {
+                    const now = new Date().toISOString();
+                    const auditedProduct = {
+                        ...p,
+                        lastUpdatedAt: now,
+                        lastUpdatedBy: userDisplay || userId || 'Sistema',
+                        lastUpdateSource: 'import' as const
+                    };
+                    if (userId) {
+                        appendAuditEntry(userId, p.id, p.sku, {
+                            timestamp: now,
+                            userId,
+                            userDisplay: userDisplay || 'Sistema',
+                            source: 'import',
+                            fields: [{ field: 'new', label: 'Produto Novo', from: '-', to: 'Criado via Importação' }]
+                        });
+                    }
+                    return auditedProduct;
+                })
             ];
 
             setMasterProducts(mergedProducts);
@@ -737,9 +842,29 @@ const ProductDatabase: React.FC<ProductDatabaseProps> = ({ masterProducts = [], 
                 const ncmResults = await batchSuggestNCM(itemsToLookup);
                 const ncmMap = new Map(ncmResults.map(r => [r.id, r.ncm]));
 
+                const now = new Date().toISOString();
                 setMasterProducts(prev => prev.map(p => {
                     if (ncmMap.has(p.id)) {
-                        return { ...p, ncm: ncmMap.get(p.id)! };
+                        const newNcm = ncmMap.get(p.id)!;
+                        if (p.ncm !== newNcm) {
+                            const audited = {
+                                ...p,
+                                ncm: newNcm,
+                                lastUpdatedAt: now,
+                                lastUpdatedBy: userDisplay || userId || 'Sistema',
+                                lastUpdateSource: 'ai_edit' as const
+                            };
+                            if (userId) {
+                                appendAuditEntry(userId, p.id, p.sku, {
+                                    timestamp: now,
+                                    userId,
+                                    userDisplay: userDisplay || 'Sistema',
+                                    source: 'ai_edit',
+                                    fields: [{ field: 'ncm', label: 'NCM', from: p.ncm || '-', to: newNcm }]
+                                });
+                            }
+                            return audited;
+                        }
                     }
                     return p;
                 }));
@@ -748,9 +873,26 @@ const ProductDatabase: React.FC<ProductDatabaseProps> = ({ masterProducts = [], 
 
             } else {
                 // STANDARD FIELD UPDATE
+                const now = new Date().toISOString();
                 setMasterProducts(prev => prev.map(p => {
-                    if (selectedIds.has(p.id)) {
-                        return { ...p, [result.field!]: result.value };
+                    if (selectedIds.has(p.id) && p[result.field!] !== result.value) {
+                        const audited = {
+                            ...p,
+                            [result.field!]: result.value,
+                            lastUpdatedAt: now,
+                            lastUpdatedBy: userDisplay || userId || 'Sistema',
+                            lastUpdateSource: 'ai_edit' as const
+                        };
+                        if (userId) {
+                            appendAuditEntry(userId, p.id, p.sku, {
+                                timestamp: now,
+                                userId,
+                                userDisplay: userDisplay || 'Sistema',
+                                source: 'ai_edit',
+                                fields: [{ field: result.field!, label: ALL_COLUMNS.find(c => c.id === result.field)?.label || result.field!, from: p[result.field!] || '-', to: result.value }]
+                            });
+                        }
+                        return audited;
                     }
                     return p;
                 }));
@@ -806,6 +948,50 @@ const ProductDatabase: React.FC<ProductDatabaseProps> = ({ masterProducts = [], 
         }
         if (colId === 'externalLink') {
             return product.externalLink ? <a href={product.externalLink} target="_blank" rel="noreferrer" className="text-indigo-400 hover:text-white flex items-center justify-center"><LinkIcon className="w-4 h-4" /></a> : <span className="text-slate-600 text-center block">-</span>;
+        }
+        if (colId === 'lastUpdatedAt') {
+            if (!product.lastUpdatedAt) return <span className="text-slate-600 text-center block">-</span>;
+            const dateStr = new Date(product.lastUpdatedAt).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+            let icon = null;
+            if (product.lastUpdateSource === 'import') icon = <Upload className="w-3 h-3 text-amber-400" />;
+            else if (product.lastUpdateSource === 'manual_edit') icon = <Pencil className="w-3 h-3 text-blue-400" />;
+            else if (product.lastUpdateSource === 'ai_edit') icon = <Sparkles className="w-3 h-3 text-purple-400" />;
+            else if (product.lastUpdateSource === 'inventory_sync') icon = <Package className="w-3 h-3 text-green-400" />;
+            
+            return (
+                <div className="flex items-center gap-1.5 justify-center text-slate-300 text-xs">
+                    {icon}
+                    <span>{dateStr}</span>
+                </div>
+            );
+        }
+        if (colId === 'sku') {
+            const val = product[colId];
+            let badge = null;
+            if (product.lastUpdatedAt) {
+                const updatedTime = new Date(product.lastUpdatedAt).getTime();
+                const isRecent = (Date.now() - updatedTime) < 24 * 60 * 60 * 1000;
+                if (isRecent) {
+                    badge = (
+                        <span className={`ml-2 px-1 py-[1px] rounded text-[8px] font-bold uppercase tracking-wider ${product.lastUpdateSource === 'import' ? 'bg-amber-900/50 text-amber-400 border border-amber-800/50' : 'bg-blue-900/50 text-blue-400 border border-blue-800/50'}`}>
+                            {product.lastUpdateSource === 'import' ? 'IMP' : product.lastUpdateSource === 'ai_edit' ? 'IA' : 'UPD'}
+                        </span>
+                    );
+                }
+            }
+            return (
+                <div className="flex items-center gap-2">
+                    <button 
+                        onClick={(e) => { e.stopPropagation(); setHistoryProduct(product); }}
+                        className="text-slate-500 hover:text-amber-400 transition-colors"
+                        title="Ver histórico de alterações"
+                    >
+                        <FileText className="w-3.5 h-3.5" />
+                    </button>
+                    <span>{val || '-'}</span>
+                    {badge}
+                </div>
+            );
         }
 
         const val = product[colId];
@@ -1388,6 +1574,80 @@ const ProductDatabase: React.FC<ProductDatabaseProps> = ({ masterProducts = [], 
                     <button onClick={clearSelection} className="p-1.5 text-slate-500 hover:text-white transition-colors" title="Limpar Seleção">
                         <XCircle className="w-4 h-4" />
                     </button>
+                </div>
+            )}
+
+            {/* AUDIT HISTORY DRAWER */}
+            {historyProduct && (
+                <div className="fixed inset-0 z-50 flex justify-end bg-black/60 backdrop-blur-sm">
+                    <div className="w-[450px] bg-[#0e0b08] border-l border-amber-900/30 flex flex-col animate-in slide-in-from-right duration-300">
+                        <div className="p-4 border-b border-amber-900/30 flex justify-between items-start bg-slate-900/50">
+                            <div>
+                                <h3 className="font-display font-bold text-lg text-amber-500">Histórico do Produto</h3>
+                                <p className="text-xs text-slate-400 font-mono mt-1">{historyProduct.sku} - {historyProduct.name}</p>
+                            </div>
+                            <button onClick={() => setHistoryProduct(null)} className="p-1 text-slate-400 hover:text-white rounded-full hover:bg-slate-800 transition-colors">
+                                <X className="w-5 h-5" />
+                            </button>
+                        </div>
+                        <div className="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar">
+                            {!historyLogs ? (
+                                <div className="text-center text-slate-500 py-10 flex flex-col items-center gap-3">
+                                    <RefreshCw className="w-6 h-6 animate-spin text-amber-600" />
+                                    <span className="text-xs">Carregando histórico...</span>
+                                </div>
+                            ) : historyLogs.length === 0 ? (
+                                <div className="text-center text-slate-500 py-10 flex flex-col items-center gap-3">
+                                    <FileText className="w-8 h-8 opacity-20" />
+                                    <span className="text-xs">Nenhum registro de alteração encontrado.</span>
+                                </div>
+                            ) : (
+                                historyLogs.map((log, i) => {
+                                    const dateStr = new Date(log.timestamp).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+                                    let icon = <FileText className="w-4 h-4 text-slate-400" />;
+                                    let typeColor = 'text-slate-400';
+                                    let typeBg = 'bg-slate-900';
+                                    let typeLabel = 'Edição';
+                                    
+                                    if (log.source === 'import') { icon = <Upload className="w-4 h-4 text-amber-400" />; typeColor = 'text-amber-400'; typeBg = 'bg-amber-900/30'; typeLabel = 'Importação CSV'; }
+                                    else if (log.source === 'manual_edit') { icon = <Pencil className="w-4 h-4 text-blue-400" />; typeColor = 'text-blue-400'; typeBg = 'bg-blue-900/30'; typeLabel = 'Edição Manual'; }
+                                    else if (log.source === 'ai_edit') { icon = <Sparkles className="w-4 h-4 text-purple-400" />; typeColor = 'text-purple-400'; typeBg = 'bg-purple-900/30'; typeLabel = 'IA bulk edit'; }
+                                    else if (log.source === 'inventory_sync') { icon = <Package className="w-4 h-4 text-green-400" />; typeColor = 'text-green-400'; typeBg = 'bg-green-900/30'; typeLabel = 'Sincronização'; }
+
+                                    return (
+                                        <div key={i} className="bg-slate-900 rounded border border-slate-800 overflow-hidden">
+                                            <div className={`px-3 py-2 border-b border-slate-800 flex justify-between items-center ${typeBg}`}>
+                                                <div className="flex items-center gap-2">
+                                                    {icon}
+                                                    <span className={`text-xs font-bold uppercase tracking-wider ${typeColor}`}>{typeLabel}</span>
+                                                </div>
+                                                <div className="text-[10px] text-slate-400 flex flex-col items-end">
+                                                    <span>{dateStr}</span>
+                                                    <span className="opacity-70">{log.userDisplay}</span>
+                                                </div>
+                                            </div>
+                                            <div className="p-3 bg-slate-900/50">
+                                                {log.fields.length > 0 ? (
+                                                    <ul className="space-y-1.5">
+                                                        {log.fields.map((f, fi) => (
+                                                            <li key={fi} className="text-xs flex gap-2">
+                                                                <span className="text-slate-500 min-w-[80px] font-medium">{f.label}:</span>
+                                                                <span className="text-red-400/80 line-through truncate max-w-[100px]" title={String(f.from)}>{f.from}</span>
+                                                                <ArrowRight className="w-3 h-3 text-slate-600 shrink-0 mt-0.5" />
+                                                                <span className="text-green-400 truncate flex-1" title={String(f.to)}>{f.to}</span>
+                                                            </li>
+                                                        ))}
+                                                    </ul>
+                                                ) : (
+                                                    <span className="text-xs text-slate-500 italic">Sem detalhes de campos alterados.</span>
+                                                )}
+                                            </div>
+                                        </div>
+                                    );
+                                })
+                            )}
+                        </div>
+                    </div>
                 </div>
             )}
         </div>

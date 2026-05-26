@@ -4,6 +4,7 @@ import { auth, googleProvider } from './firebaseConfig';
 import { saveUserData, loadUserData, saveChunkedData, loadChunkedData } from './services/firebaseService';
 import { loadNotifications, saveNotifications, processBatchIntoHistory, resolveDuplicate, normalizeProductKey, loadPriceHistory, savePriceHistory } from './services/compras/historyService';
 import { initLogger, addLogListener } from './services/notifications_and_logs/loggerService';
+import { appendAuditEntry } from './services/auditService';
 
 
 import { loadAllCatalogs, processBatchIntoCatalog, saveCatalog, normForMapping, makeProductId } from './services/compras/supplierCatalogService';
@@ -546,15 +547,39 @@ const App: React.FC = () => {
   }, []);
 
   const handleUpdateProductStocks = useCallback((stockUpdates: Record<string, number>) => {
+    const now = new Date().toISOString();
+    const userDisplay = userProfile?.displayName || user?.displayName || user?.email || 'Sistema';
+
     setMasterProducts(prev =>
-      prev.map(p => stockUpdates[p.id] !== undefined ? { ...p, stock: stockUpdates[p.id] } : p)
+      prev.map(p => {
+        if (stockUpdates[p.id] !== undefined && p.stock !== stockUpdates[p.id]) {
+          const audited = {
+            ...p,
+            stock: stockUpdates[p.id],
+            lastUpdatedAt: now,
+            lastUpdatedBy: userDisplay,
+            lastUpdateSource: 'inventory_sync' as const
+          };
+          if (uid) {
+            appendAuditEntry(uid, p.id, p.sku, {
+              timestamp: now,
+              userId: uid,
+              userDisplay,
+              source: 'inventory_sync',
+              fields: [{ field: 'stock', label: 'Estoque', from: p.stock || 0, to: stockUpdates[p.id] }]
+            });
+          }
+          return audited;
+        }
+        return p;
+      })
     );
     setInventoryCount(prev => {
       const next = { ...prev };
       Object.keys(stockUpdates).forEach(id => delete next[id]);
       return next;
     });
-  }, []);
+  }, [uid, user, userProfile]);
 
   // --- ARQUIVAMENTO AUTOMÁTICO DE COTAÇÕES ANTIGAS ---
   useEffect(() => {
@@ -1395,6 +1420,8 @@ const App: React.FC = () => {
             sheetUrl={dbSheetUrl} setSheetUrl={setDbSheetUrl}
             categoryTree={categoryTree}
             setIsDirty={setIsDirty}
+            userId={uid}
+            userDisplay={userProfile?.displayName || user?.displayName || user?.email || undefined}
           />
         )}
         {activeTab === 'suppliers' && (

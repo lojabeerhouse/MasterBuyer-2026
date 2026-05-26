@@ -19,24 +19,33 @@ export const parseQuoteContent = async (
     1. 'packQuantity' is the number of units inside the box/case.
     2. DO NOT CONFUSE LIQUID/WEIGHT MEASUREMENTS WITH QUANTITY.
        - "Cerveja 350ml" -> packQuantity is 1 (unless "cx 12" is specified).
-       - "Refr 2L" -> packQuantity is 1.
-       - "Arroz 5kg" -> packQuantity is 1.
-    3. ONLY extract 'packQuantity' > 1 if explicit keywords exist: "Cx", "Caixa", "Fdo", "Fardo", "Pack", "C/12", "C/24", "X12".
+       - "Refr 2L" -> packQuantity is not the "2L" in this example.
+       - "Arroz 5kg" -> packQuantity is not the "5kg" in this example.
+    3. ONLY extract 'packQuantity' > 1 if explicit keywords exist: "Cx", "Caixa", "Fd", "Fardo", "Pack", "C/12", "C/24", "X12", "C18".
     4. If unsure or if it looks like a single unit, default 'packQuantity' to 1.
     5. READ THE ENTIRE DOCUMENT. Do not stop after the first few pages.
     6. Extract 'documentDate': the emission/issue date of the document (NOT a delivery/forecast date). Format: YYYY-MM-DD. Leave empty string if not found.
     7. CRITICAL: 'quantityBought' is the total AMOUNT OF PACKAGES OR UNITS bought/ordered on the invoice. Example: If they bought 2 boxes, 'quantityBought' = 2. If it's just a price list with no quantities bought, default to 1.
+    8. CRITICAL: 'priceMode' — classify the detected price:
+       - "pack"    → price clearly refers to the full box/case (e.g. document says "caixa R$35,00").
+       - "unit"    → price clearly refers to a single unit (e.g. document says "un R$2,90").
+       - "unknown" → you cannot determine with certainty which one it is. USE THIS FREELY — it is ALWAYS better to return "unknown" than to guess wrong.
+    9. 'price' — the price EXACTLY as it appears in the document. Do NOT divide or multiply. Preserve the raw value.
+    10. 'unitPrice' — calculate ONLY if priceMode is "pack" (= price / packQuantity). If priceMode is "unit" or "unknown", set unitPrice equal to price.
+    11. 'rawLine' — the exact original line or cell from the document where this item was found (for traceability).
 
     OUTPUT SCHEMA (Object):
     - documentDate: string (ISO date YYYY-MM-DD of document emission, or "" if not found)
     - items: array of product objects:
       - sku: string (Code/ID)
       - name: string (Product Description)
-      - price: number (Listed Price - usually the price of the PACK if it's a wholesale list)
+      - price: number (Raw price as found in document — no math applied)
       - unit: string (Unit type: un, cx, kg)
       - packQuantity: number (Items per pack. Default 1)
-      - unitPrice: number (Calculated price per single unit. If price is for pack, unitPrice = price / packQuantity)
+      - unitPrice: number (price if priceMode is unit/unknown; price/packQuantity if priceMode is pack)
       - quantityBought: number (How many packs/units were purchased. Default 1 if missing)
+      - priceMode: string ("pack", "unit", or "unknown")
+      - rawLine: string (Original line/cell from document)
 
     Return RAW JSON only.
   `;
@@ -80,13 +89,15 @@ export const parseQuoteContent = async (
                 properties: {
                   sku: { type: Type.STRING, description: "Code" },
                   name: { type: Type.STRING, description: "Name" },
-                  price: { type: Type.NUMBER, description: "Price" },
+                  price: { type: Type.NUMBER, description: "Raw price as found in document" },
                   unit: { type: Type.STRING, description: "Unit" },
                   packQuantity: { type: Type.NUMBER, description: "Qty" },
                   unitPrice: { type: Type.NUMBER, description: "Unit Price" },
-                  quantityBought: { type: Type.NUMBER, description: "Qty Bought" }
+                  quantityBought: { type: Type.NUMBER, description: "Qty Bought" },
+                  priceMode: { type: Type.STRING, description: "pack | unit | unknown" },
+                  rawLine: { type: Type.STRING, description: "Original line from document" }
                 },
-                required: ["name", "price", "packQuantity", "unitPrice"]
+                required: ["name", "price", "packQuantity", "unitPrice", "priceMode"]
               }
             }
           },
@@ -101,13 +112,24 @@ export const parseQuoteContent = async (
     // Clean Markdown if present
     text = text.replace(/^```json\s*/, "").replace(/^```\s*/, "").replace(/```$/, "");
 
-    const parseItems = (rawItems: ProductQuote[]): ProductQuote[] =>
-      rawItems.map(item => ({
-        ...item,
-        sku: item.sku || 'S/N',
-        quantityBought: item.quantityBought ?? 1,
-        isVerified: item.packQuantity > 1
-      }));
+    const parseItems = (rawItems: any[]): ProductQuote[] =>
+      rawItems.map(item => {
+        const priceMode = item.priceMode === 'pack' || item.priceMode === 'unit'
+          ? item.priceMode
+          : 'unknown';
+        return {
+          sku: item.sku || 'S/N',
+          name: item.name,
+          price: item.price,
+          unit: item.unit || 'un',
+          packQuantity: item.packQuantity ?? 1,
+          unitPrice: item.unitPrice ?? item.price,
+          quantityBought: item.quantityBought ?? 1,
+          priceStrategy: priceMode as 'pack' | 'unit' | 'unknown',
+          rawLine: item.rawLine ?? undefined,
+          isVerified: priceMode !== 'unknown' && (item.packQuantity ?? 1) > 1,
+        };
+      });
 
     const parseDateStr = (dateStr?: string): number | undefined => {
       if (!dateStr) return undefined;

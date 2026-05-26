@@ -1,8 +1,8 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { Supplier, QuoteBatch, ProductQuote, PackRule, BusinessHours, BusinessDayHours, ProductMapping, MasterProduct, PriceValidityConfig } from '../../types';
-import { Upload, Trash2, FileText, CheckCircle, AlertCircle, Loader2, Plus, Ban, Eye, Package, Pencil, Save, X, Maximize2, XCircle, RefreshCw, HardDrive, Download, Coins, BoxSelect, Sparkles, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, AlertTriangle, Check, CheckSquare, Square, Undo2, Timer, Search, Files, FilePlus, Settings, Bot, FileStack, Scissors, MessageCircle, MapPin, Truck, Calendar, Clock, Phone, ArrowUpDown, SortAsc, SortDesc, Archive } from 'lucide-react';
+import { Upload, Trash2, FileText, CheckCircle, AlertCircle, Loader2, Plus, Ban, Eye, Package, Pencil, Save, X, Maximize2, XCircle, RefreshCw, HardDrive, Download, Coins, BoxSelect, Sparkles, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, AlertTriangle, Check, CheckSquare, Square, Undo2, Timer, Search, Files, FilePlus, Settings, Bot, MessageCircle, MapPin, Truck, Calendar, Clock, Phone, ArrowUpDown, SortAsc, SortDesc, Archive } from 'lucide-react';
 import QuoteDetailModal from '../QuoteDetailModal';
-import { parseQuoteContent, extractCatalogRawData, RawCatalogItem } from '../../services/geminiService';
+import { parseQuoteContent } from '../../services/geminiService';
 import { parseQuoteLocal } from '../../services/compras/parseQuoteLocal';
 import { isNFeXml, parseNFeFile } from '../../services/compras/parseNFe';
 import { useFileProcessor, applyRulesToQuotes, filterBlacklisted, recalculateItem } from '../../hooks/useFileProcessor';
@@ -52,6 +52,134 @@ interface SupplierManagerProps {
   priceValidityConfig?: PriceValidityConfig;
   setPriceValidityConfig?: React.Dispatch<React.SetStateAction<PriceValidityConfig>>;
 }
+
+// ─── QuoteCard ────────────────────────────────────────────────────────────────
+
+interface QuoteCardProps {
+  quote: QuoteBatch;
+  supplierId: string;
+  onViewRaw: (content: string, fileName: string, supplierId: string) => void;
+  onDownloadCsv: (quote: QuoteBatch) => void;
+  onRemove: (supplierId: string, quoteId: string) => void;
+  onOpen: (quote: QuoteBatch) => void;
+  onDownloadArchived: (quote: QuoteBatch) => void;
+}
+
+const QuoteCard = React.memo<QuoteCardProps>(({ quote, supplierId, onViewRaw, onDownloadCsv, onRemove, onOpen, onDownloadArchived }) => {
+  if (quote.archivedCsv) {
+    return (
+      <div className="flex items-center gap-3 px-3 py-2 bg-slate-900/50 border border-slate-800 rounded text-xs text-slate-500 group hover:border-slate-700 transition-all">
+        <Archive className="w-3.5 h-3.5 text-slate-600 shrink-0" />
+        <span className="text-slate-500 truncate flex-1">
+          {quote.sourceType === 'file' ? quote.fileName : 'Texto Colado'}
+        </span>
+        <span className="text-slate-600 whitespace-nowrap">
+          {new Date(quote.timestamp).toLocaleDateString('pt-BR')}
+        </span>
+        <span className="text-slate-600 whitespace-nowrap">
+          {quote.archivedItemCount ?? '?'} itens
+        </span>
+        <span className="text-slate-700 text-[10px] whitespace-nowrap italic">Arquivado</span>
+        <button onClick={() => onDownloadArchived(quote)} title="Baixar CSV" className="text-slate-600 hover:text-blue-400 p-0.5 opacity-0 group-hover:opacity-100 transition-all">
+          <Download className="w-3.5 h-3.5" />
+        </button>
+        <button onClick={() => onRemove(supplierId, quote.id)} title="Apagar" className="text-slate-600 hover:text-red-400 p-0.5 opacity-0 group-hover:opacity-100 transition-all">
+          <Trash2 className="w-3.5 h-3.5" />
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="bg-slate-900 border border-slate-700 rounded p-4 relative group hover:border-amber-500/30 transition-all">
+      <div className="absolute top-2 right-2 flex items-center gap-1">
+        {quote.rawContent && (
+          <button
+            onClick={(e) => { e.stopPropagation(); onViewRaw(quote.rawContent!, quote.fileName ?? 'texto', supplierId); }}
+            className="text-slate-600 hover:text-amber-400 p-1"
+            title="Ver texto bruto"
+          >
+            <FileText className="w-4 h-4" />
+          </button>
+        )}
+        {quote.status === 'completed' && (
+          <button onClick={() => onDownloadCsv(quote)} className="text-slate-600 hover:text-blue-400 p-1" title="Baixar CSV para re-uso">
+            <Download className="w-4 h-4" />
+          </button>
+        )}
+        <button
+          onClick={(e) => { e.stopPropagation(); onRemove(supplierId, quote.id); }}
+          className="text-slate-600 hover:text-red-400 p-1"
+          title="Apagar Cotação"
+        >
+          <Trash2 className="w-4 h-4" />
+        </button>
+      </div>
+
+      <div className="flex items-start gap-3">
+        <div className="mt-1">
+          {quote.status === 'analyzing' && <Loader2 className="w-5 h-5 text-amber-500 animate-spin" />}
+          {quote.status === 'completed' && <CheckCircle className="w-5 h-5 text-green-500" />}
+          {quote.status === 'error' && <AlertCircle className="w-5 h-5 text-red-500" />}
+        </div>
+        <div className="flex-1">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="font-medium text-slate-200">
+              {quote.sourceType === 'file' ? `Arquivo: ${quote.fileName}` : 'Texto Colado'}
+            </span>
+            <span className="text-xs text-slate-500">
+              {new Date(quote.timestamp).toLocaleString('pt-BR')}
+            </span>
+            {quote.uploadedAt && quote.uploadedAt !== quote.timestamp && (
+              <span className="text-[9px] text-slate-700">
+                upload: {new Date(quote.uploadedAt).toLocaleString('pt-BR')}
+              </span>
+            )}
+          </div>
+
+          {quote.status === 'completed' && (
+            <div className="mt-2">
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-sm text-slate-400">{quote.items.length} itens identificados.</p>
+                <button
+                  onClick={() => onOpen(quote)}
+                  className="text-xs flex items-center gap-1 text-amber-500 hover:text-amber-400 font-medium"
+                >
+                  <Maximize2 className="w-3 h-3" /> Ver Lista Completa
+                </button>
+              </div>
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-2 mt-2 opacity-80">
+                {quote.items.slice(0, 4).map((item, idx) => (
+                  <div key={idx} className="bg-slate-800 px-2 py-1.5 rounded border border-slate-700 text-xs flex justify-between items-center">
+                    <span className="font-medium text-slate-300 truncate mr-2 flex-1">{item.name}</span>
+                    <div className="text-right whitespace-nowrap">
+                      <span className="text-amber-500 font-bold block">R$ {item.unitPrice.toFixed(2)} un</span>
+                    </div>
+                  </div>
+                ))}
+                {quote.items.length > 4 && <span className="text-xs pt-1 text-slate-500 italic pl-1">...mais {quote.items.length - 4} itens (clique em ver lista)</span>}
+              </div>
+            </div>
+          )}
+          {quote.status === 'completed' && !quote.isSaved && (
+            <div className="flex items-center gap-2 px-3 py-2 bg-amber-950/70 border-t border-amber-900/50 rounded-b-lg">
+              <Clock className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+              <span className="text-xs font-bold text-amber-400 tracking-wide uppercase">
+                Cotação aguardando conferência —{' '}
+                <span className="font-semibold">Salve a lista para entrada no sistema</span>
+              </span>
+            </div>
+          )}
+          {quote.status === 'error' && (
+            <p className="text-red-400 text-sm mt-1">{quote.errorMessage}</p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}, (prev, next) => prev.quote === next.quote && prev.supplierId === next.supplierId);
+
+// ─── SupplierManager ──────────────────────────────────────────────────────────
 
 const SupplierManager: React.FC<SupplierManagerProps> = ({ suppliers, setSuppliers, globalPackRules, setGlobalPackRules, onBatchCompleted, uid, onBatchDateChange, productMappings, masterProducts, onAddMapping, onRemoveMapping, priceValidityConfig, setPriceValidityConfig }) => {
   const [newSupplierName, setNewSupplierName] = useState('');
@@ -105,11 +233,6 @@ const SupplierManager: React.FC<SupplierManagerProps> = ({ suppliers, setSupplie
   const [isQueueProcessing, setIsQueueProcessing] = useState(false);
   const [dragState, setDragState] = useState<'idle' | 'single' | 'multiple'>('idle');
 
-  // --- PRE-PROCESSOR STATE (CSV CONVERTER) ---
-  const [isPreProcessing, setIsPreProcessing] = useState(false);
-  const [preProcessResult, setPreProcessResult] = useState<string>('');
-  const preProcessInputRef = useRef<HTMLInputElement>(null);
-
   // --- ACTION UX STATES (BAN/DELETE) ---
   const [confirmAction, setConfirmAction] = useState<{
       type: 'ban' | 'delete';
@@ -125,9 +248,6 @@ const SupplierManager: React.FC<SupplierManagerProps> = ({ suppliers, setSupplie
 
   // Quote sort mode
   const [quoteSortMode, setQuoteSortMode] = useState<'quoteDate' | 'uploadDate'>('quoteDate');
-
-  // Pre-processor visibility
-  const [preProcessorOpen, setPreProcessorOpen] = useState(false);
 
   // Raw content viewer
   const [viewingRawContent, setViewingRawContent] = useState<{
@@ -153,112 +273,6 @@ const SupplierManager: React.FC<SupplierManagerProps> = ({ suppliers, setSupplie
       setSelectedPendingItems(new Set());
       setDetailsSearchTerm('');
   }, [viewingBatch?.id]);
-
-  // --- PRE-PROCESSOR LOGIC (CSV CONVERTER) ---
-  const handlePreProcess = async (e: React.ChangeEvent<HTMLInputElement>) => {
-      const file = e.target.files?.[0];
-      if (!file) return;
-
-      setIsPreProcessing(true);
-      setPreProcessResult('');
-
-      try {
-          const reader = new FileReader();
-          reader.onload = async () => {
-              const base64 = (reader.result as string).split(',')[1];
-              const mimeType = file.type;
-
-              // 1. Raw Extraction via AI
-              const rawItems: RawCatalogItem[] = await extractCatalogRawData(base64, mimeType);
-
-              // 2. Logic: Real Unit Price & Grouping
-              const processedMap = new Map<string, { baseName: string, packFactor: number, lotPrice: number, unitPrice: number, flavors: string[] }>();
-              const ungroupedItems: string[] = [];
-
-              rawItems.forEach(item => {
-                  // Pricing Rule:
-                  // Scenario A (Has Pack): Unit = Val1 / Factor
-                  // Scenario B (No Pack): Unit = Val2
-                  let realUnitPrice = 0;
-                  let lotPrice = item.val1;
-                  
-                  if (item.packFactor > 1) {
-                      realUnitPrice = item.val1 / item.packFactor;
-                  } else {
-                      realUnitPrice = item.val2;
-                      // If no pack detected, assume Lot Price is also Val2 for consistency unless Val1 exists and is different (rare case handled by Val2 priority)
-                  }
-
-                  const key = `${item.baseName}_${realUnitPrice.toFixed(2)}`;
-
-                  if (!processedMap.has(key)) {
-                      processedMap.set(key, {
-                          baseName: item.baseName,
-                          packFactor: item.packFactor,
-                          lotPrice: lotPrice,
-                          unitPrice: realUnitPrice,
-                          flavors: []
-                      });
-                  }
-                  
-                  const entry = processedMap.get(key)!;
-                  if (item.flavor) {
-                      entry.flavors.push(item.flavor);
-                  } else {
-                      // If no flavor, push a placeholder or just count it? 
-                      // If it's a base product without flavor, we treat it as is.
-                      entry.flavors.push('Original');
-                  }
-              });
-
-              // 3. Formatting Output
-              let outputLines: string[] = [];
-
-              processedMap.forEach((data) => {
-                  const uniqueFlavors = Array.from(new Set(data.flavors));
-                  
-                  // Grouping Rule: Trigger ONLY if >= 3 variations
-                  if (uniqueFlavors.length >= 3) {
-                      const header = `${data.baseName} SABORES [${uniqueFlavors.length}]; R$${data.lotPrice.toFixed(2).replace('.', ',')}; R$${data.unitPrice.toFixed(2).replace('.', ',')}; LOTE ${data.packFactor}`;
-                      const details = `sabores: ${uniqueFlavors.join('; ')}`;
-                      outputLines.push(header);
-                      outputLines.push(details);
-                  } else {
-                      // List individually if less than 3
-                      // We need to retrieve original items or reconstruct. 
-                      // Reconstruction from aggregated data for < 3:
-                      uniqueFlavors.forEach(flav => {
-                          const fullName = flav === 'Original' ? data.baseName : `${data.baseName} ${flav}`;
-                          const line = `${fullName}; R$${data.lotPrice.toFixed(2).replace('.', ',')}; R$${data.unitPrice.toFixed(2).replace('.', ',')}; LOTE ${data.packFactor}`;
-                          outputLines.push(line);
-                      });
-                  }
-              });
-
-              setPreProcessResult(outputLines.join('\n'));
-              setIsPreProcessing(false);
-          };
-          reader.readAsDataURL(file);
-      } catch (error) {
-          console.error(error);
-          setPreProcessResult("Erro ao processar arquivo.");
-          setIsPreProcessing(false);
-      }
-      
-      if (preProcessInputRef.current) preProcessInputRef.current.value = '';
-  };
-
-  const downloadPreProcessCsv = () => {
-      if (!preProcessResult) return;
-      const blob = new Blob([preProcessResult], { type: 'text/csv;charset=utf-8;' });
-      const link = document.createElement("a");
-      const url = URL.createObjectURL(blob);
-      link.setAttribute("href", url);
-      link.setAttribute("download", "catalogo_processado.csv");
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-  };
 
   // --- NAMING RULES LOGIC (SEO STANDARDIZATION) ---
   // --- PACK RULES LOGIC ---
@@ -1051,7 +1065,17 @@ const SupplierManager: React.FC<SupplierManagerProps> = ({ suppliers, setSupplie
 
             {/* Preço unitário calculado */}
             <td className="px-2 py-1.5 text-right w-20">
-                <span className="font-bold text-amber-400 text-sm">R$ {item.unitPrice.toFixed(2)}</span>
+                <div className="flex items-center justify-end gap-1">
+                    {item.priceStrategy === 'unknown' && item.packQuantity > 1 && (
+                        <span
+                            className="text-amber-400 cursor-help flex-shrink-0"
+                            title="Preço ambíguo: não foi possível confirmar se é unitário ou do lote. Verifique manualmente."
+                        >
+                            <AlertTriangle className="w-3.5 h-3.5" />
+                        </span>
+                    )}
+                    <span className="font-bold text-amber-400 text-sm">R$ {item.unitPrice.toFixed(2)}</span>
+                </div>
             </td>
 
             {/* Ações */}
@@ -1074,6 +1098,60 @@ const SupplierManager: React.FC<SupplierManagerProps> = ({ suppliers, setSupplie
     );
   };
   const selectedSupplier = suppliers.find(s => s.id === activeTab);
+
+  // ── Callbacks estáveis para QuoteCard (evitam re-render dos cards não alterados)
+  const handleViewRaw = React.useCallback((content: string, fileName: string, supplierId: string) => {
+    setViewingRawContent({ content, fileName, supplierId });
+  }, []);
+
+  const handleOpenBatch = React.useCallback((quote: QuoteBatch) => {
+    setViewingBatch(quote);
+    setBatchSnapshot(JSON.parse(JSON.stringify(quote)));
+  }, []);
+
+  const handleRemoveQuote = React.useCallback((supplierId: string, quoteId: string) => {
+    if (window.confirm('Deseja apagar esta cotação?')) {
+      setSuppliers(prev => prev.map(s =>
+        s.id === supplierId ? { ...s, quotes: s.quotes.filter(q => q.id !== quoteId) } : s
+      ));
+    }
+  }, [setSuppliers]);
+
+  const handleDownloadCsv = React.useCallback((batch: QuoteBatch) => {
+    downloadQuoteAsCsv(batch);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const handleDownloadArchived = React.useCallback((batch: QuoteBatch) => {
+    downloadArchivedCsv(batch);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const filteredQuotes = useMemo(() => {
+    if (!selectedSupplier) return [];
+    return [...selectedSupplier.quotes]
+      .filter(q => {
+        if (!historySearchTerm) return true;
+        const tokens = historySearchTerm.toLowerCase().split(/\s+/).filter(t => t);
+        const name = (q.fileName || 'Texto Colado').toLowerCase();
+        const itemsContent = q.archivedCsv
+          ? q.archivedCsv.toLowerCase()
+          : q.items.map(i => i.name.toLowerCase()).join(' ');
+        return tokens.every(t => name.includes(t) || itemsContent.includes(t));
+      })
+      .sort((a, b) => {
+        if (quoteSortMode === 'uploadDate') {
+          return (b.uploadedAt ?? b.timestamp) - (a.uploadedAt ?? a.timestamp);
+        }
+        return b.timestamp - a.timestamp;
+      });
+  }, [selectedSupplier?.quotes, historySearchTerm, quoteSortMode]);
+
+  const filteredBlacklist = useMemo(() => {
+    if (!selectedSupplier?.blacklist) return [];
+    const term = blacklistSearchTerm.toLowerCase();
+    return selectedSupplier.blacklist.filter(item => item.toLowerCase().includes(term));
+  }, [selectedSupplier?.blacklist, blacklistSearchTerm]);
 
   const renderRulesModal = (isGlobal: boolean) => {
       const title = isGlobal ? "Regras de Embalagem GLOBAIS" : "Exceções de Embalagem (Deste Fornecedor)";
@@ -1409,7 +1487,7 @@ const SupplierManager: React.FC<SupplierManagerProps> = ({ suppliers, setSupplie
                       <p className="text-sm text-slate-400 mb-2">Itens abaixo são ignorados automaticamente ao importar cotações deste fornecedor.</p>
                       {(!selectedSupplier.blacklist || selectedSupplier.blacklist.length === 0) && <div className="text-center text-slate-500 py-8 italic border-2 border-dashed border-slate-800 rounded-lg">Nenhum item bloqueado.</div>}
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                          {selectedSupplier.blacklist?.filter(item => item.toLowerCase().includes(blacklistSearchTerm.toLowerCase())).map((item, idx) => (
+                          {filteredBlacklist.map((item, idx) => (
                               <div key={idx} className="flex items-center justify-between bg-slate-800 p-3 rounded border border-slate-700 hover:border-red-900/50 transition-colors">
                                   <span className="text-sm text-slate-300 truncate mr-2" title={item}>{item}</span>
                                   <button onClick={() => toggleBlacklist(item)} className="text-green-500 hover:text-white hover:bg-green-600 p-1.5 rounded transition-colors" title="Restaurar para lista de cotação"><Undo2 className="w-4 h-4"/></button>
@@ -1498,71 +1576,6 @@ const SupplierManager: React.FC<SupplierManagerProps> = ({ suppliers, setSupplie
       {/* Main Panel */}
       <div className="md:col-span-3 bg-slate-800 rounded-lg p-6 border border-slate-700 overflow-y-auto h-full relative">
         
-        {/* Pre-Processor Module — collapsible */}
-        {preProcessorOpen ? (
-          <div className="mb-6 bg-slate-900/50 rounded-lg border border-slate-700 border-dashed p-4 relative">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-slate-300 font-bold flex items-center gap-2 text-sm uppercase">
-                <Scissors className="w-4 h-4 text-pink-500" /> Pré-Processador de Catálogo (PDF/Imagem)
-              </h3>
-              <button
-                onClick={() => setPreProcessorOpen(false)}
-                className="text-slate-500 hover:text-white p-1 rounded hover:bg-slate-700 transition-colors"
-                title="Recolher pré-processador"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {/* Input Area */}
-              <div
-                onClick={() => preProcessInputRef.current?.click()}
-                className="border-2 border-dashed border-slate-600 rounded-lg p-6 flex flex-col items-center justify-center cursor-pointer hover:bg-slate-800 transition-colors h-40"
-              >
-                <input type="file" ref={preProcessInputRef} onChange={handlePreProcess} className="hidden" accept="image/*, application/pdf" />
-                {isPreProcessing ? (
-                  <div className="text-center">
-                    <Loader2 className="w-8 h-8 text-pink-500 animate-spin mx-auto mb-2" />
-                    <p className="text-xs text-pink-400 font-bold">Analisando imagem e agrupando sabores...</p>
-                  </div>
-                ) : (
-                  <div className="text-center text-slate-400">
-                    <FileStack className="w-8 h-8 mx-auto mb-2 opacity-50" />
-                    <p className="text-sm font-medium">Upload PDF ou Imagem</p>
-                    <p className="text-[10px] text-slate-500 mt-1">Converte para CSV e agrupa sabores (min 3).</p>
-                  </div>
-                )}
-              </div>
-              {/* Output Area */}
-              <div className="flex flex-col h-40">
-                <textarea
-                  className="flex-1 bg-slate-950 border border-slate-800 rounded p-2 text-xs font-mono text-green-400 resize-none focus:outline-none custom-scrollbar mb-2"
-                  placeholder="O resultado CSV aparecerá aqui..."
-                  value={preProcessResult}
-                  readOnly
-                />
-                <button
-                  onClick={downloadPreProcessCsv}
-                  disabled={!preProcessResult}
-                  className="w-full bg-pink-600 hover:bg-pink-700 disabled:opacity-50 disabled:bg-slate-700 text-white text-xs font-bold py-2 rounded flex items-center justify-center gap-2"
-                >
-                  <Download className="w-3 h-3" /> Baixar CSV Processado
-                </button>
-              </div>
-            </div>
-          </div>
-        ) : (
-          <div className="mb-6 flex justify-end">
-            <button
-              onClick={() => setPreProcessorOpen(true)}
-              title="Abrir Pré-Processador de Catálogo"
-              className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-pink-400 border border-slate-700 hover:border-pink-900/50 bg-slate-900/50 hover:bg-pink-950/20 px-3 py-1.5 rounded-lg transition-all"
-            >
-              <Scissors className="w-3.5 h-3.5" /> Pré-Processador
-            </button>
-          </div>
-        )}
-
         {selectedSupplier ? (
           <div className="space-y-6">
             <div className="flex justify-between items-center border-b border-slate-700 pb-4 sticky top-0 bg-slate-800 z-10">
@@ -1701,153 +1714,21 @@ const SupplierManager: React.FC<SupplierManagerProps> = ({ suppliers, setSupplie
                     Nenhuma cotação registrada. Faça upload, cole texto ou use um link.
                  </div>
                )}
-               {[...selectedSupplier.quotes]
-                 .filter(q => {
-                     if (!historySearchTerm) return true;
-                     const tokens = historySearchTerm.toLowerCase().split(/\s+/).filter(t => t);
-                     const name = (q.fileName || 'Texto Colado').toLowerCase();
-                     const itemsContent = q.archivedCsv 
-                       ? q.archivedCsv.toLowerCase() 
-                       : q.items.map(i => i.name.toLowerCase()).join(' ');
-
-                     return tokens.every(t => name.includes(t) || itemsContent.includes(t));
-                 })
-                 .sort((a, b) => {
-                     if (quoteSortMode === 'uploadDate') {
-                       return (b.uploadedAt ?? b.timestamp) - (a.uploadedAt ?? a.timestamp);
-                     }
-                     return b.timestamp - a.timestamp;
-                 })
-                 .map((quote) => {
-                   // Cotação arquivada → linha compacta
-                   if (quote.archivedCsv) {
-                     return (
-                       <div key={quote.id} className="flex items-center gap-3 px-3 py-2 bg-slate-900/50 border border-slate-800 rounded text-xs text-slate-500 group hover:border-slate-700 transition-all">
-                         <Archive className="w-3.5 h-3.5 text-slate-600 shrink-0" />
-                         <span className="text-slate-500 truncate flex-1">
-                           {quote.sourceType === 'file' ? quote.fileName : 'Texto Colado'}
-                         </span>
-                         <span className="text-slate-600 whitespace-nowrap">
-                           {new Date(quote.timestamp).toLocaleDateString('pt-BR')}
-                         </span>
-                         <span className="text-slate-600 whitespace-nowrap">
-                           {quote.archivedItemCount ?? '?'} itens
-                         </span>
-                         <span className="text-slate-700 text-[10px] whitespace-nowrap italic">Arquivado</span>
-                         <button onClick={() => downloadArchivedCsv(quote)} title="Baixar CSV" className="text-slate-600 hover:text-blue-400 p-0.5 opacity-0 group-hover:opacity-100 transition-all">
-                           <Download className="w-3.5 h-3.5" />
-                         </button>
-                         <button onClick={() => removeQuoteBatch(selectedSupplier.id, quote.id)} title="Apagar" className="text-slate-600 hover:text-red-400 p-0.5 opacity-0 group-hover:opacity-100 transition-all">
-                           <Trash2 className="w-3.5 h-3.5" />
-                         </button>
-                       </div>
-                     );
-                   }
-                   // Cotação normal → card completo
-                   return (
-                 <div key={quote.id} className="bg-slate-900 border border-slate-700 rounded p-4 relative group hover:border-amber-500/30 transition-all">
-                    <div className="absolute top-2 right-2 flex items-center gap-1">
-                        {quote.rawContent && (
-                            <button
-                                onClick={(e) => { e.stopPropagation(); setViewingRawContent({ content: quote.rawContent!, fileName: quote.fileName ?? 'texto', supplierId: selectedSupplier.id }); }}
-                                className="text-slate-600 hover:text-amber-400 p-1"
-                                title="Ver texto bruto"
-                            >
-                                <FileText className="w-4 h-4"/>
-                            </button>
-                        )}
-                        {quote.status === 'completed' && (
-                            <button
-                                onClick={() => downloadQuoteAsCsv(quote)}
-                                className="text-slate-600 hover:text-blue-400 p-1"
-                                title="Baixar CSV para re-uso"
-                            >
-                                <Download className="w-4 h-4"/>
-                            </button>
-                        )}
-                        <button
-                            onClick={(e) => { e.stopPropagation(); removeQuoteBatch(selectedSupplier.id, quote.id); }}
-                            className="text-slate-600 hover:text-red-400 p-1"
-                            title="Apagar Cotação"
-                        >
-                            <Trash2 className="w-4 h-4" />
-                        </button>
-                    </div>
-                    
-                    <div className="flex items-start gap-3">
-                        <div className="mt-1">
-                            {quote.status === 'analyzing' && <Loader2 className="w-5 h-5 text-amber-500 animate-spin" />}
-                            {quote.status === 'completed' && <CheckCircle className="w-5 h-5 text-green-500" />}
-                            {quote.status === 'error' && <AlertCircle className="w-5 h-5 text-red-500" />}
-                        </div>
-                        <div className="flex-1">
-                            <div className="flex items-center gap-2 flex-wrap">
-                                <span className="font-medium text-slate-200">
-                                    {quote.sourceType === 'file' ? `Arquivo: ${quote.fileName}` : 'Texto Colado'}
-                                </span>
-                                <span className="text-xs text-slate-500">
-                                    {new Date(quote.timestamp).toLocaleString('pt-BR')}
-                                </span>
-                                {quote.uploadedAt && quote.uploadedAt !== quote.timestamp && (
-                                    <span className="text-[9px] text-slate-700">
-                                        upload: {new Date(quote.uploadedAt).toLocaleString('pt-BR')}
-                                    </span>
-                                )}
-                            </div>
-                            
-                            {quote.status === 'completed' && (
-                                <div className="mt-2">
-                                    <div className="flex items-center justify-between mb-2">
-                                        <p className="text-sm text-slate-400">{quote.items.length} itens identificados.</p>
-                                        <button 
-                                            onClick={() => { setViewingBatch(quote); setBatchSnapshot(JSON.parse(JSON.stringify(quote))); }}
-                                            className="text-xs flex items-center gap-1 text-amber-500 hover:text-amber-400 font-medium"
-                                        >
-                                            <Maximize2 className="w-3 h-3" /> Ver Lista Completa
-                                        </button>
-                                    </div>
-
-                                    {/* Preview Limitada */}
-                                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-2 mt-2 opacity-80">
-                                        {quote.items.slice(0, 4).map((item, idx) => (
-                                            <div key={idx} className="bg-slate-800 px-2 py-1.5 rounded border border-slate-700 text-xs flex justify-between items-center">
-                                                <span className="font-medium text-slate-300 truncate mr-2 flex-1">{item.name}</span>
-                                                <div className="text-right whitespace-nowrap">
-                                                    <span className="text-amber-500 font-bold block">R$ {item.unitPrice.toFixed(2)} un</span>
-                                                </div>
-                                            </div>
-                                        ))}
-                                        {quote.items.length > 4 && <span className="text-xs pt-1 text-slate-500 italic pl-1">...mais {quote.items.length - 4} itens (clique em ver lista)</span>}
-                                    </div>
-                                </div>
-                            )}
-                            {quote.status === 'completed' && !quote.isSaved && (
-                                <div className="flex items-center gap-2 px-3 py-2 bg-amber-950/70 border-t border-amber-900/50 rounded-b-lg">
-                                    <Clock className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                                    <span className="text-xs font-bold text-amber-400 tracking-wide uppercase">
-                                        Cotação aguardando conferência —{' '}
-                                        <span className="font-semibold">Salve a lista para entrada no sistema</span>
-                                    </span>
-                                </div>
-                            )}
-                            {quote.status === 'error' && (
-                                <p className="text-red-400 text-sm mt-1">{quote.errorMessage}</p>
-                            )}
-                        </div>
-                    </div>
-                 </div>
-               ); // fim do card completo
-               })}
-               {historySearchTerm && selectedSupplier.quotes.filter(q => {
-                     const term = historySearchTerm.toLowerCase();
-                     const matchName = (q.fileName || 'Texto Colado').toLowerCase().includes(term);
-                     const matchItem = q.archivedCsv
-                       ? q.archivedCsv.toLowerCase().includes(term)
-                       : q.items.some(i => i.name.toLowerCase().includes(term));
-                     return matchName || matchItem;
-                 }).length === 0 && (
-                     <div className="text-center text-slate-500 text-sm py-4">Nenhuma cotação encontrada para "{historySearchTerm}"</div>
-                 )}
+               {filteredQuotes.map(quote => (
+                 <QuoteCard
+                   key={quote.id}
+                   quote={quote}
+                   supplierId={selectedSupplier.id}
+                   onViewRaw={handleViewRaw}
+                   onDownloadCsv={handleDownloadCsv}
+                   onRemove={handleRemoveQuote}
+                   onOpen={handleOpenBatch}
+                   onDownloadArchived={handleDownloadArchived}
+                 />
+               ))}
+               {historySearchTerm && filteredQuotes.length === 0 && (
+                   <div className="text-center text-slate-500 text-sm py-4">Nenhuma cotação encontrada para "{historySearchTerm}"</div>
+               )}
             </div>
 
           </div>

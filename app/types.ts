@@ -7,7 +7,8 @@ export interface ProductQuote {
   packQuantity: number; // How many units are in this price? (e.g., 1, 12, 18)
   unitPrice: number; // Calculated price per single unit
   quantityBought?: number; // Quantity bought in the invoice (in packs/units depending on context)
-  priceStrategy?: 'pack' | 'unit'; // 'pack' = price is total for the box; 'unit' = price is for single unit
+  priceStrategy?: 'pack' | 'unit' | 'unknown'; // 'pack' = price is total for the box; 'unit' = price is for single unit; 'unknown' = ambiguous, do not divide
+  rawLine?: string;   // linha original do documento (debug/rastreabilidade)
   isVerified?: boolean; // If true, the item is considered identified/ready
   isReprocessed?: boolean; // If true, rule was applied automatically, needs verification
   isNovelty?: boolean; // If true, user explicitly marked this as a new/unknown product from this supplier

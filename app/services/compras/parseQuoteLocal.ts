@@ -169,6 +169,14 @@ export const parseQuoteLocal = (
     const { packPrice, unitPrice } = resolvePrices(prices, packQty);
     if (packPrice === 0 && unitPrice === 0) continue;
 
+    // priceStrategy: lote explícito no texto → 'pack' (divisão segura)
+    // lote inferido por regra → 'unknown' (ambíguo, não divide)
+    // sem lote → 'unit'
+    const priceStrategy: 'pack' | 'unit' | 'unknown' =
+      packQty === 1 ? 'unit'
+      : explicitQty !== null ? 'pack'
+      : 'unknown';
+
     items.push({
       sku,
       name: name.toUpperCase(),
@@ -176,7 +184,7 @@ export const parseQuoteLocal = (
       unit: 'un',
       packQuantity: packQty,
       unitPrice,
-      priceStrategy: 'pack',
+      priceStrategy,
       isVerified: explicitQty !== null,
       isReprocessed: explicitQty === null && rulesQty > 1,
     });

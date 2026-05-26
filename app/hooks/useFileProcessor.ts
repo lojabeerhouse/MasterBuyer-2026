@@ -15,6 +15,12 @@ export const applyRule = (quote: ProductQuote, rule: PackRule): ProductQuote => 
         return { ...quote, isReprocessed: true };
     }
     const newQty = rule.quantity;
+
+    // Se ambíguo, não divide — lote atualizado mas unitPrice preservado
+    if (quote.priceStrategy === 'unknown') {
+        return { ...quote, packQuantity: newQty, isReprocessed: true };
+    }
+
     const unitPrice = quote.priceStrategy === 'unit' ? quote.price : quote.price / newQty;
     return {
         ...quote,
@@ -36,16 +42,26 @@ export const applyRulesToQuotes = (quotes: ProductQuote[], supplierExceptions: P
     });
 };
 
-export const recalculateItem = (item: ProductQuote, newStrategy?: 'pack' | 'unit', newPackQty?: number): ProductQuote => {
+export const recalculateItem = (item: ProductQuote, newStrategy?: 'pack' | 'unit' | 'unknown', newPackQty?: number): ProductQuote => {
     const strategy = newStrategy || item.priceStrategy || 'pack';
     const qty = newPackQty !== undefined ? newPackQty : item.packQuantity;
-    const unitPrice = strategy === 'unit' ? item.price : item.price / (qty || 1);
+
+    let unitPrice: number;
+    if (strategy === 'unit') {
+        unitPrice = item.price;
+    } else if (strategy === 'pack') {
+        unitPrice = item.price / (qty || 1);
+    } else {
+        // 'unknown': não divide — mantém price como valor provisório
+        unitPrice = item.price;
+    }
+
     return {
         ...item,
         priceStrategy: strategy,
         packQuantity: qty,
-        unitPrice: unitPrice,
-        isVerified: qty > 1 ? true : item.isVerified
+        unitPrice,
+        isVerified: strategy === 'unknown' ? false : (qty > 1 ? true : item.isVerified),
     };
 };
 
