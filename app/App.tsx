@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef, lazy, Suspense } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo, lazy, Suspense } from 'react';
 import { signInWithPopup, signOut, onAuthStateChanged, User } from 'firebase/auth';
 import { auth, googleProvider } from './firebaseConfig';
 import { saveUserData, loadUserData, saveChunkedData, loadChunkedData } from './services/firebaseService';
@@ -122,9 +122,9 @@ const AnimatedHeroText: React.FC = () => {
     return () => clearTimeout(t);
   }, [phase]);
 
-  const estIsAmber  = (active === 0 && (phase === 'entering' || phase === 'holding')) || phase === 'idle';
+  const estIsAmber = (active === 0 && (phase === 'entering' || phase === 'holding')) || phase === 'idle';
   const estIsPushed = active === 0 && (phase === 'entering' || phase === 'holding');
-  const resIsAmber  = active === 1 && (phase === 'entering' || phase === 'holding');
+  const resIsAmber = active === 1 && (phase === 'entering' || phase === 'holding');
   const resIsPushed = active === 1 && (phase === 'entering' || phase === 'holding');
 
   return (
@@ -135,13 +135,11 @@ const AnimatedHeroText: React.FC = () => {
       <div className="relative">
         <ChevronRight
           size={28}
-          className={`absolute top-1/2 -translate-y-1/2 text-amber-400 transition-all duration-500 ease-out ${
-            estIsPushed ? 'opacity-100 -left-8' : 'opacity-0 -left-20'
-          }`}
+          className={`absolute top-1/2 -translate-y-1/2 text-amber-400 transition-all duration-500 ease-out ${estIsPushed ? 'opacity-100 -left-8' : 'opacity-0 -left-20'
+            }`}
         />
-        <span className={`block transition-all duration-500 ease-out ${
-          estIsPushed ? 'translate-x-7' : 'translate-x-0'
-        } ${estIsAmber ? 'text-amber-400' : 'text-white/25'}`}>
+        <span className={`block transition-all duration-500 ease-out ${estIsPushed ? 'translate-x-7' : 'translate-x-0'
+          } ${estIsAmber ? 'text-amber-400' : 'text-white/25'}`}>
           ESTRATÉGICAS.
         </span>
       </div>
@@ -150,13 +148,11 @@ const AnimatedHeroText: React.FC = () => {
       <div className="relative">
         <ChevronRight
           size={28}
-          className={`absolute top-1/2 -translate-y-1/2 text-amber-400 transition-all duration-500 ease-out ${
-            resIsPushed ? 'opacity-100 -left-8' : 'opacity-0 -left-20'
-          }`}
+          className={`absolute top-1/2 -translate-y-1/2 text-amber-400 transition-all duration-500 ease-out ${resIsPushed ? 'opacity-100 -left-8' : 'opacity-0 -left-20'
+            }`}
         />
-        <div className={`transition-all duration-500 ease-out ${
-          resIsPushed ? 'translate-x-7' : 'translate-x-0'
-        } ${resIsAmber ? 'text-amber-400' : 'text-white/25'}`}>
+        <div className={`transition-all duration-500 ease-out ${resIsPushed ? 'translate-x-7' : 'translate-x-0'
+          } ${resIsAmber ? 'text-amber-400' : 'text-white/25'}`}>
           <span className="block">RESULTADOS</span>
           <span className="block">REAIS.</span>
         </div>
@@ -180,10 +176,10 @@ const LoginScreen: React.FC<{ onLogin: () => void; loading: boolean }> = ({ onLo
 
       {/* Top: wordmark */}
       <div className="relative shrink-0 flex items-center gap-3 login-anim login-anim-1">
-        <div className="w-8 h-8 bg-amber-600 rounded-lg flex items-center justify-center shrink-0">
-          <span className="font-display font-bold text-base text-white">B</span>
+        <div className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center shrink-0">
+          <img src="/img/CATOS_MASTER_BUYER_LOGO_120X.webp" alt="Logo Cato's" className="w-full h-full object-contain" />
         </div>
-        <span className="font-body text-white/60 text-sm font-medium tracking-wider">BeerHouse</span>
+        <span className="font-body text-white/60 text-sm font-medium tracking-wider">Cato's Master Buyer</span>
       </div>
 
       {/* Center: hero + description + bullets — vertically centered, compresses gracefully */}
@@ -202,8 +198,8 @@ const LoginScreen: React.FC<{ onLogin: () => void; loading: boolean }> = ({ onLo
         {/* Feature bullets */}
         <div className="space-y-3 login-anim login-anim-4">
           {([
-            { icon: BarChart3,  text: 'Comparador de cotações em tempo real' },
-            { icon: Package,    text: 'Gestão completa de pedidos e fornecedores' },
+            { icon: BarChart3, text: 'Comparador de cotações em tempo real' },
+            { icon: Package, text: 'Gestão completa de pedidos e fornecedores' },
             { icon: TrendingUp, text: 'Histórico de preços com análise de IA' },
           ] as { icon: React.ElementType; text: string }[]).map(({ icon: Icon, text }) => (
             <div key={text} className="flex items-center gap-3">
@@ -218,7 +214,7 @@ const LoginScreen: React.FC<{ onLogin: () => void; loading: boolean }> = ({ onLo
 
       {/* Bottom: copyright */}
       <p className="relative shrink-0 font-body text-white/15 text-xs login-anim login-anim-5">
-        © 2026 BeerHouse. Todos os direitos reservados.
+        © 2026 BEER CONVENIENCIA. Todos os direitos reservados.
       </p>
     </div>
 
@@ -262,10 +258,10 @@ const LoginScreen: React.FC<{ onLogin: () => void; loading: boolean }> = ({ onLo
             ) : (
               <>
                 <svg className="w-[18px] h-[18px] shrink-0" viewBox="0 0 24 24">
-                  <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
-                  <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
-                  <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
-                  <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+                  <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+                  <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+                  <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" />
+                  <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" />
                 </svg>
                 <span className="font-body text-sm">Entrar com Google</span>
               </>
@@ -306,7 +302,7 @@ const LoadingScreen: React.FC = () => (
         <div className="absolute inset-0 border-2 border-amber-600/10 rounded-xl" />
         {/* Anel Rotativo de Carregamento */}
         <div className="absolute inset-0 border-2 border-t-amber-500 border-r-amber-500 rounded-xl animate-spin" />
-        
+
         {/* Logo Central Pulsante */}
         <div className="w-10 h-10 bg-amber-600 rounded-lg flex items-center justify-center shadow-lg shadow-amber-600/20 animate-pulse">
           <span className="font-display font-black text-lg text-white">B</span>
@@ -607,19 +603,25 @@ const App: React.FC = () => {
     }));
 
     if (changed) setSuppliers(updated);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isLoaded]); // roda uma vez após o carregamento inicial
 
   // --- NOTIFICATION HANDLERS ---
   const handleNotificationResolve = useCallback(async (id: string, keepWhich?: 'existing' | 'incoming' | 'both') => {
-    const notif = notifications.find(n => n.id === id);
-    if (notif?.payload && keepWhich && user?.uid) {
-      await resolveDuplicate(user.uid, notif, keepWhich);
-    }
-    setNotifications(prev => prev.map(n =>
-      n.id === id ? { ...n, resolved: true } : n
-    ).filter(n => !(n.type === 'attention' && n.id === id)));
-  }, [notifications, user?.uid]);
+    // Para evitar stale closure do array `notifications`, buscamos o item diretamente do estado atual
+    setNotifications(prev => {
+      const notif = prev.find(n => n.id === id);
+      if (notif?.payload && keepWhich && user?.uid) {
+        // Dispara a resolução assíncrona (Firestore) sem travar a UI
+        resolveDuplicate(user.uid, notif, keepWhich).catch(err => {
+          console.error("Erro ao resolver duplicidade:", err);
+        });
+      }
+      return prev.map(n =>
+        n.id === id ? { ...n, resolved: true } : n
+      ).filter(n => !(n.type === 'attention' && n.id === id));
+    });
+  }, [user?.uid]);
 
   const handleClearConsole = useCallback(() => {
     setNotifications(prev => prev.filter(n => n.type === 'attention'));
@@ -661,7 +663,7 @@ const App: React.FC = () => {
       const exists = s.quotes.some(q => q.id === batch.id);
       return {
         ...s,
-        quotes: exists 
+        quotes: exists
           ? s.quotes.map(q => q.id === batch.id ? batch : q)
           : [batch, ...s.quotes]
       };
@@ -669,7 +671,7 @@ const App: React.FC = () => {
 
     // Impede que cotações recém-lidas "vazem" direto pro Catálogo sem o Confere Manual
     if (!batch.isSaved) {
-       return;
+      return;
     }
 
     const { newNotifications } = await processBatchIntoHistory(
@@ -871,9 +873,11 @@ const App: React.FC = () => {
             // Apply link to matched products
             let updatedProducts = catalog.products.map(p =>
               normForMapping(p.name) === normalized
-                ? { ...p, masterSku: targetSku, masterProductName: masterProduct.name,
-                    masterCategory: masterProduct.category, masterTags: masterProduct.tags,
-                    linkConfirmed: true, linkSuggestion: undefined }
+                ? {
+                  ...p, masterSku: targetSku, masterProductName: masterProduct.name,
+                  masterCategory: masterProduct.category, masterTags: masterProduct.tags,
+                  linkConfirmed: true, linkSuggestion: undefined
+                }
                 : p
             );
 
@@ -922,8 +926,10 @@ const App: React.FC = () => {
             ...catalog,
             products: catalog.products.map(p =>
               normForMapping(p.name) === normalized
-                ? { ...p, masterSku: undefined, masterProductName: undefined,
-                    masterCategory: undefined, masterTags: undefined, linkConfirmed: false }
+                ? {
+                  ...p, masterSku: undefined, masterProductName: undefined,
+                  masterCategory: undefined, masterTags: undefined, linkConfirmed: false
+                }
                 : p
             ),
           };
@@ -970,14 +976,22 @@ const App: React.FC = () => {
     setPurchaseOrders(prev => [newOrder, ...prev]);
   }, [suppliers, purchaseOrders]);
 
+  const activeOrdersCount = useMemo(
+    () => purchaseOrders.filter(o =>
+      ['draft', 'sent', 'confirmed', 'in_transit', 'awaiting'].includes(o.status)
+    ).length,
+    [purchaseOrders]
+  );
+
+  const hiddenProductIdsSet = useMemo(
+    () => new Set(hiddenProducts.map(h => h.id)),
+    [hiddenProducts]
+  );
+
   // --- RENDER ---
   if (authLoading) return <LoadingScreen />;
   if (!user) return <LoginScreen onLogin={handleLogin} loading={loginLoading} />;
   if (dataLoading) return <LoadingScreen />;
-
-  const activeOrdersCount = purchaseOrders.filter(o =>
-    ['draft', 'sent', 'confirmed', 'in_transit', 'awaiting'].includes(o.status)
-  ).length;
 
   // helper para navegação no mobile
   const navigateTo = (tab: typeof activeTab) => {
@@ -1006,504 +1020,448 @@ const App: React.FC = () => {
 
   return (
     <RightSidebarProvider>
-    <div className="flex h-screen w-full bg-slate-950 text-slate-200 font-sans overflow-hidden">
-      {/* EXIT CONFIRMATION MODAL */}
-      {showExitModal && (
-        <Suspense fallback={null}>
-          <ExitUnsavedModal 
-            onConfirm={() => {
-              setIsDirty(false);
-              setActiveTab(showExitModal.nextTab);
-              setShowExitModal(null);
-              setMobileMenuOpen(false);
-            }}
-            onCancel={() => setShowExitModal(null)}
-          />
-        </Suspense>
-      )}
-      
-      {/* Mobile overlay */}
-      {mobileMenuOpen && (
-        <div className="fixed inset-0 bg-black/60 z-40 xl:hidden" onClick={() => setMobileMenuOpen(false)} />
-      )}
+      <div className="flex h-screen w-full bg-slate-950 text-slate-200 font-sans overflow-hidden">
+        {/* EXIT CONFIRMATION MODAL */}
+        {showExitModal && (
+          <Suspense fallback={null}>
+            <ExitUnsavedModal
+              onConfirm={() => {
+                setIsDirty(false);
+                setActiveTab(showExitModal.nextTab);
+                setShowExitModal(null);
+                setMobileMenuOpen(false);
+              }}
+              onCancel={() => setShowExitModal(null)}
+            />
+          </Suspense>
+        )}
 
-      {/* Sidebar Container */}
-      <div className={`fixed xl:static inset-y-0 left-0 z-50 flex flex-col bg-slate-900 border-r border-slate-800 transition-all duration-300 ease-in-out ${mobileMenuOpen ? 'translate-x-0' : '-translate-x-full'} xl:translate-x-0 ${sidebarExpanded ? 'w-64' : 'w-20'}`}>
-        
-        {/* Top Logo Area */}
-        <div className="h-16 flex items-center justify-between px-4 border-b border-slate-800 shrink-0">
-          <div className="flex items-center gap-3 overflow-hidden">
-            <div className="w-8 h-8 bg-amber-600 rounded flex items-center justify-center shrink-0 shadow-lg">
-              <span className="font-black text-lg text-white">B</span>
+        {/* Mobile overlay */}
+        {mobileMenuOpen && (
+          <div className="fixed inset-0 bg-black/60 z-40 xl:hidden" onClick={() => setMobileMenuOpen(false)} />
+        )}
+
+        {/* Sidebar Container */}
+        <div className={`fixed xl:static inset-y-0 left-0 z-50 flex flex-col bg-slate-900 border-r border-slate-800 transition-all duration-300 ease-in-out ${mobileMenuOpen ? 'translate-x-0' : '-translate-x-full'} xl:translate-x-0 ${sidebarExpanded ? 'w-64' : 'w-20'}`}>
+
+          {/* Top Logo Area */}
+          <div className="h-16 flex items-center justify-between px-4 border-b border-slate-800 shrink-0">
+            <div className="flex items-center gap-3 overflow-hidden">
+              <div className="w-8 h-8 bg-amber-600 rounded flex items-center justify-center shrink-0 shadow-lg">
+                <span className="font-black text-lg text-white">B</span>
+              </div>
+              <h1 className={`text-lg font-bold text-white whitespace-nowrap transition-opacity duration-300 ${sidebarExpanded ? 'opacity-100' : 'opacity-0 xl:hidden'}`}>BeerHouse</h1>
             </div>
-            <h1 className={`text-lg font-bold text-white whitespace-nowrap transition-opacity duration-300 ${sidebarExpanded ? 'opacity-100' : 'opacity-0 xl:hidden'}`}>BeerHouse</h1>
+            <button className="xl:hidden p-1 text-slate-400 hover:text-white" onClick={() => setMobileMenuOpen(false)}>
+              <X className="w-5 h-5" />
+            </button>
           </div>
-          <button className="xl:hidden p-1 text-slate-400 hover:text-white" onClick={() => setMobileMenuOpen(false)}>
-            <X className="w-5 h-5" />
-          </button>
-        </div>
 
-        {/* Navigation Items */}
-        <div className="flex-1 overflow-y-auto py-4 px-3 space-y-1 custom-scrollbar">
-          {navItems.map(({ tab, icon, label, highlight }) => (
-            <button
-              key={tab}
-              onClick={() => navigateTo(tab)}
-              className={`group relative w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all ${
-                activeTab === tab
+          {/* Navigation Items */}
+          <div className="flex-1 overflow-y-auto py-4 px-3 space-y-1 custom-scrollbar">
+            {navItems.map(({ tab, icon, label, highlight }) => (
+              <button
+                key={tab}
+                onClick={() => navigateTo(tab)}
+                className={`group relative w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all ${activeTab === tab
                   ? (highlight ? 'bg-amber-600 text-white shadow-md' : 'bg-slate-800 text-white shadow-sm ring-1 ring-slate-700')
                   : (highlight ? 'text-amber-500/80 hover:bg-slate-800/50 hover:text-amber-400' : 'text-slate-400 hover:text-white hover:bg-slate-800/50')
-              }`}
-            >
-              <div className="w-5 h-5 flex items-center justify-center shrink-0">
-                {icon}
-              </div>
-              <span className={`whitespace-nowrap transition-opacity duration-300 ${sidebarExpanded ? 'opacity-100' : 'opacity-0 xl:hidden'}`}>
-                {label}
-              </span>
-              {tab === 'purchase_orders' && activeOrdersCount > 0 && (
-                <span className={`ml-auto bg-amber-500 px-2 py-0.5 rounded-full text-[10px] text-white font-bold transition-opacity duration-300 ${sidebarExpanded ? 'opacity-100' : 'opacity-0 xl:hidden'}`}>
-                  {activeOrdersCount}
-                </span>
-              )}
-
-              {/* Tooltip for collapsed mode */}
-              {!sidebarExpanded && (
-                <div className="absolute left-full ml-3 px-2 py-1 bg-slate-800 text-white text-[11px] font-bold tracking-wider uppercase rounded opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all whitespace-nowrap z-[60] border border-slate-700 shadow-xl hidden xl:block pointer-events-none">
+                  }`}
+              >
+                <div className="w-5 h-5 flex items-center justify-center shrink-0">
+                  {icon}
+                </div>
+                <span className={`whitespace-nowrap transition-opacity duration-300 ${sidebarExpanded ? 'opacity-100' : 'opacity-0 xl:hidden'}`}>
                   {label}
-                </div>
-              )}
-            </button>
-          ))}
-        </div>
+                </span>
+                {tab === 'purchase_orders' && activeOrdersCount > 0 && (
+                  <span className={`ml-auto bg-amber-500 px-2 py-0.5 rounded-full text-[10px] text-white font-bold transition-opacity duration-300 ${sidebarExpanded ? 'opacity-100' : 'opacity-0 xl:hidden'}`}>
+                    {activeOrdersCount}
+                  </span>
+                )}
 
-        {/* Bottom Actions Area (Mobile Only or Sidebar Bottom) */}
-        <div className="border-t border-slate-800 p-3 flex flex-col gap-2 shrink-0 xl:hidden">
-          <div className="flex items-center justify-center gap-4">
-            <Suspense fallback={<div className="w-8 h-8" />}>
-              <NotificationCenter
-                notifications={notifications}
-                onResolve={handleNotificationResolve}
-              />
-            </Suspense>
-
-            <button
-              onClick={() => navigateTo('settings')}
-              title="Configurações"
-              className={`p-2 rounded-xl transition-all ${activeTab === 'settings' ? 'bg-slate-800 text-white ring-1 ring-slate-700' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}
-            >
-              <Settings className="w-5 h-5" />
-            </button>
-          </div>
-
-
-          <div className="relative" ref={profileDropdownRef}>
-            <button
-              onClick={() => setProfileDropdownOpen(v => !v)}
-              className={`w-full flex items-center ${sidebarExpanded ? 'gap-3 px-3' : 'justify-center'} py-2 rounded-xl hover:bg-slate-800 transition-all focus:outline-none`}
-              title={!sidebarExpanded ? "Perfil" : undefined}
-            >
-              {user.photoURL ? (
-                <img src={user.photoURL} alt="avatar" className="w-8 h-8 rounded-full border border-slate-600 shrink-0" />
-              ) : (
-                <div className="w-8 h-8 rounded-full bg-slate-700 flex items-center justify-center text-white text-sm font-bold shrink-0">
-                  {(userProfile.displayName || user.email || 'U')[0].toUpperCase()}
-                </div>
-              )}
-              
-              <div className={`flex-1 flex items-center justify-between overflow-hidden transition-all duration-300 ${sidebarExpanded ? 'opacity-100 w-auto' : 'opacity-0 w-0 xl:hidden'}`}>
-                <div className="flex flex-col items-start truncate pr-2">
-                  <span className="text-sm font-medium text-white truncate max-w-[120px]">{userProfile.displayName || 'Meu Perfil'}</span>
-                  <span className="text-xs text-slate-400 truncate max-w-[120px]">{user.email}</span>
-                </div>
-                <ChevronDown className={`w-4 h-4 text-slate-500 shrink-0 transition-transform ${profileDropdownOpen ? 'rotate-180' : ''}`} />
-              </div>
-            </button>
-
-            {profileDropdownOpen && (
-              <div className={`absolute bottom-full mb-2 ${sidebarExpanded ? 'left-0 w-full' : 'left-full ml-2 w-48'} bg-slate-800 border border-slate-700 rounded-xl shadow-2xl z-50 overflow-hidden`}>
-                <button
-                  onClick={() => { navigateTo('profile'); setProfileDropdownOpen(false); }}
-                  className="w-full flex items-center gap-3 px-4 py-3 text-sm text-slate-300 hover:text-white hover:bg-slate-700 transition-colors text-left"
-                >
-                  <span className="text-base">👤</span> Meu Perfil
-                </button>
-                <button
-                  onClick={() => { setOfferFlyerOpen(true); setProfileDropdownOpen(false); }}
-                  className="w-full flex items-center gap-3 px-4 py-3 text-sm text-slate-300 hover:text-white hover:bg-slate-700 transition-colors text-left"
-                >
-                  <Tag className="w-4 h-4 text-red-400" /> Ofertas
-                </button>
-                <div className="border-t border-slate-700" />
-                <button
-                  onClick={() => { setProfileDropdownOpen(false); handleLogout(); }}
-                  className="w-full flex items-center gap-3 px-4 py-3 text-sm text-red-400 hover:text-red-300 hover:bg-slate-700 transition-colors text-left"
-                >
-                  <LogOut className="w-4 h-4" /> Sair
-                </button>
-              </div>
-            )}
-          </div>
-        </div>
-
-        <div className="p-3 shrink-0 hidden xl:block">
-          <button
-            onClick={() => setSidebarExpanded(!sidebarExpanded)}
-            className="flex w-full items-center justify-center p-2 text-slate-500 hover:text-white hover:bg-slate-800 transition-all rounded-xl mt-1"
-            title={sidebarExpanded ? "Recolher Menus" : "Expandir Menus"}
-          >
-             <svg className={`w-5 h-5 transition-transform duration-300 ${sidebarExpanded ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 5l7 7-7 7M5 5l7 7-7 7" />
-             </svg>
-          </button>
-        </div>
-      </div>
-
-      {/* Main Content Wrapper — inclui conteúdo principal + sidebar direita */}
-      <div className="flex-1 flex flex-row min-w-0 h-screen overflow-hidden relative">
-
-        {/* Coluna central: mobile topbar + main + assistente */}
-        <div className="flex-1 flex flex-col min-w-0 h-screen overflow-hidden">
-        {/* Mobile Top Bar */}
-        <div className="xl:hidden h-16 bg-slate-900 border-b border-slate-800 flex items-center gap-3 px-4 shrink-0 transition-all">
-          <button
-            onClick={() => setMobileMenuOpen(true)}
-            className="p-2 -ml-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-all"
-          >
-            <Menu className="w-6 h-6" />
-          </button>
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 bg-amber-600 rounded flex items-center justify-center shadow-lg shrink-0">
-              <span className="font-black text-white">B</span>
-            </div>
-            <h1 className="text-lg font-bold text-white">BeerHouse</h1>
-          </div>
-        </div>
-
-        {/* ─── Desktop Header ─── */}
-        <header className="hidden xl:flex h-16 items-center justify-between px-8 bg-slate-950/50 border-b border-slate-800/50 backdrop-blur-md shrink-0 z-30">
-          <div className="flex items-center gap-4">
-             <h2 className="text-slate-400 text-sm font-medium tracking-wide uppercase">
-               {navItems.find(i => i.tab === activeTab)?.label || 'Dashboard'}
-             </h2>
-          </div>
-
-          <div className="flex items-center gap-6">
-            {/* Notificações */}
-            <Suspense fallback={<div className="w-8 h-8" />}>
-              <NotificationCenter
-                notifications={notifications}
-                onResolve={handleNotificationResolve}
-                showLabel={true}
-              />
-            </Suspense>
-
-
-            {/* Logs */}
-            <div className="relative">
-              <button 
-                onClick={() => setIsLogsOpen(!isLogsOpen)}
-                className={`flex items-center gap-2 transition-all text-sm font-medium ${isLogsOpen ? 'text-blue-400' : 'text-slate-400 hover:text-blue-400'}`}
-              >
-                <Terminal className="w-4 h-4" />
-                Logs
-              </button>
-
-              {isLogsOpen && (
-                <LogViewer 
-                  logs={appLogs}
-                  onClose={() => setIsLogsOpen(false)}
-                  onClear={() => appLogger.clear()}
-                  onExpand={() => { setIsExpandedLogsOpen(true); setIsLogsOpen(false); }}
-                />
-              )}
-            </div>
-
-            {/* Configurações */}
-
-            <button 
-              onClick={() => navigateTo('settings')}
-              className={`flex items-center gap-2 transition-all text-sm font-medium ${activeTab === 'settings' ? 'text-amber-500' : 'text-slate-400 hover:text-white'}`}
-            >
-              <Settings className="w-4 h-4" />
-              Configurações
-            </button>
-
-            {/* Perfil */}
-            <div className="h-6 w-px bg-slate-800 mx-2" />
-            <div className="relative" ref={profileDropdownRef}>
-              <button
-                onClick={() => setProfileDropdownOpen(v => !v)}
-                className="flex items-center gap-3 pl-2 pr-1 py-1 rounded-full hover:bg-slate-800/50 transition-all"
-              >
-                <div className="flex flex-col items-end">
-                  <span className="text-xs font-bold text-white leading-none">{userProfile.displayName || 'Usuário'}</span>
-                  <span className="text-[10px] text-slate-500 mt-1">{user.email?.split('@')[0]}</span>
-                </div>
-                {user.photoURL ? (
-                  <img src={user.photoURL} alt="avatar" className="w-8 h-8 rounded-full border border-slate-700" />
-                ) : (
-                  <div className="w-8 h-8 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center text-white text-xs font-bold">
-                    {(userProfile.displayName || user.email || 'U')[0].toUpperCase()}
+                {/* Tooltip for collapsed mode */}
+                {!sidebarExpanded && (
+                  <div className="absolute left-full ml-3 px-2 py-1 bg-slate-800 text-white text-[11px] font-bold tracking-wider uppercase rounded opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all whitespace-nowrap z-[60] border border-slate-700 shadow-xl hidden xl:block pointer-events-none">
+                    {label}
                   </div>
                 )}
               </button>
+            ))}
+          </div>
+
+          {/* ─── info-config-menu: Notif · Logs · Config · Perfil (sidebar sticky-bottom, todos os devices) ─── */}
+          <div className="border-t border-slate-800 p-3 flex flex-col gap-1.5 shrink-0">
+            <div className={`flex items-center gap-1 ${sidebarExpanded ? 'px-1' : 'justify-center'}`}>
+
+              {/* Notificações */}
+              <Suspense fallback={<div className="w-8 h-8" />}>
+                <NotificationCenter
+                  notifications={notifications}
+                  onResolve={handleNotificationResolve}
+                />
+              </Suspense>
+
+              {/* Logs */}
+              <div className="relative">
+                <button
+                  onClick={() => setIsLogsOpen(!isLogsOpen)}
+                  className={`p-1.5 rounded-lg transition-all ${isLogsOpen ? 'text-blue-400 bg-blue-400/10' : 'text-slate-400 hover:text-blue-400 hover:bg-slate-800'}`}
+                  title="Logs"
+                >
+                  <Terminal className="w-4 h-4" />
+                </button>
+                {isLogsOpen && (
+                  <LogViewer
+                    logs={appLogs}
+                    onClose={() => setIsLogsOpen(false)}
+                    onClear={() => appLogger.clear()}
+                    onExpand={() => { setIsExpandedLogsOpen(true); setIsLogsOpen(false); }}
+                  />
+                )}
+              </div>
+
+              {/* Configurações */}
+              <button
+                onClick={() => navigateTo('settings')}
+                title="Configurações"
+                className={`p-1.5 rounded-lg transition-all ${activeTab === 'settings' ? 'bg-slate-800 text-amber-400' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}
+              >
+                <Settings className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Perfil */}
+            <div className="relative" ref={profileDropdownRef}>
+              <button
+                onClick={() => setProfileDropdownOpen(v => !v)}
+                className={`w-full flex items-center ${sidebarExpanded ? 'gap-3 px-2' : 'justify-center'} py-2 rounded-xl hover:bg-slate-800 transition-all focus:outline-none`}
+                title={!sidebarExpanded ? 'Perfil' : undefined}
+              >
+                {user.photoURL ? (
+                  <img src={user.photoURL} alt="avatar" className="w-8 h-8 rounded-full border border-slate-600 shrink-0" />
+                ) : (
+                  <div className="w-8 h-8 rounded-full bg-slate-700 flex items-center justify-center text-white text-sm font-bold shrink-0">
+                    {(userProfile.displayName || user.email || 'U')[0].toUpperCase()}
+                  </div>
+                )}
+                <div className={`flex-1 flex items-center justify-between overflow-hidden transition-all duration-300 ${sidebarExpanded ? 'opacity-100' : 'opacity-0 w-0'}`}>
+                  <div className="flex flex-col items-start truncate pr-2">
+                    <span className="text-sm font-medium text-white truncate max-w-[120px]">{userProfile.displayName || 'Meu Perfil'}</span>
+                    <span className="text-xs text-slate-400 truncate max-w-[120px]">{user.email}</span>
+                  </div>
+                  <ChevronDown className={`w-4 h-4 text-slate-500 shrink-0 transition-transform ${profileDropdownOpen ? 'rotate-180' : ''}`} />
+                </div>
+              </button>
 
               {profileDropdownOpen && (
-                <div className="absolute top-full right-0 mt-2 w-48 bg-slate-900 border border-slate-800 rounded-xl shadow-2xl z-50 overflow-hidden animate-in fade-in slide-in-from-top-1">
-                  <button onClick={() => { navigateTo('profile'); setProfileDropdownOpen(false); }} className="w-full flex items-center gap-3 px-4 py-3 text-sm text-slate-300 hover:text-white hover:bg-slate-800 transition-colors"><span className="text-base">👤</span> Meu Perfil</button>
-                  <button onClick={() => { setOfferFlyerOpen(true); setProfileDropdownOpen(false); }} className="w-full flex items-center gap-3 px-4 py-3 text-sm text-slate-300 hover:text-white hover:bg-slate-800 transition-colors"><Tag className="w-4 h-4 text-red-400" /> Ofertas</button>
-                  <div className="border-t border-slate-800" />
-                  <button onClick={() => { setProfileDropdownOpen(false); handleLogout(); }} className="w-full flex items-center gap-3 px-4 py-3 text-sm text-red-400 hover:text-red-300 hover:bg-slate-800 transition-colors"><LogOut className="w-4 h-4" /> Sair</button>
+                <div className={`absolute bottom-full mb-2 ${sidebarExpanded ? 'left-0 w-full' : 'left-full ml-2 w-48'} bg-slate-800 border border-slate-700 rounded-xl shadow-2xl z-50 overflow-hidden`}>
+                  <button
+                    onClick={() => { navigateTo('profile'); setProfileDropdownOpen(false); }}
+                    className="w-full flex items-center gap-3 px-4 py-3 text-sm text-slate-300 hover:text-white hover:bg-slate-700 transition-colors text-left"
+                  >
+                    <span className="text-base">👤</span> Meu Perfil
+                  </button>
+                  <button
+                    onClick={() => { setOfferFlyerOpen(true); setProfileDropdownOpen(false); }}
+                    className="w-full flex items-center gap-3 px-4 py-3 text-sm text-slate-300 hover:text-white hover:bg-slate-700 transition-colors text-left"
+                  >
+                    <Tag className="w-4 h-4 text-red-400" /> Ofertas
+                  </button>
+                  <div className="border-t border-slate-700" />
+                  <button
+                    onClick={() => { setProfileDropdownOpen(false); handleLogout(); }}
+                    className="w-full flex items-center gap-3 px-4 py-3 text-sm text-red-400 hover:text-red-300 hover:bg-slate-700 transition-colors text-left"
+                  >
+                    <LogOut className="w-4 h-4" /> Sair
+                  </button>
                 </div>
               )}
             </div>
           </div>
-        </header>
 
-      {/* Modal OfferFlyer (acessado via dropdown) */}
-      {offerFlyerOpen && (
-        <div
-          className="fixed inset-0 bg-black/60 z-40 flex items-center justify-center p-4"
-          onClick={e => { if (e.target === e.currentTarget) setOfferFlyerOpen(false); }}
-        >
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-4xl max-h-[90vh] overflow-y-auto p-6">
-            <div className="flex items-center justify-between mb-5">
-              <div className="flex items-center gap-3">
-                <Tag className="w-5 h-5 text-red-500" />
-                <h2 className="text-white font-bold text-lg">Flyer de Ofertas</h2>
-              </div>
-              <button
-                onClick={() => setOfferFlyerOpen(false)}
-                className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-all"
-              >
-                ✕
-              </button>
-            </div>
-            <OfferFlyer products={masterProducts} />
+          {/* Botão colapsar sidebar */}
+          <div className="p-3 shrink-0 hidden xl:block">
+            <button
+              onClick={() => setSidebarExpanded(!sidebarExpanded)}
+              className="flex w-full items-center justify-center p-2 text-slate-500 hover:text-white hover:bg-slate-800 transition-all rounded-xl"
+              title={sidebarExpanded ? 'Recolher Menus' : 'Expandir Menus'}
+            >
+              <svg className={`w-5 h-5 transition-transform duration-300 ${sidebarExpanded ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 5l7 7-7 7M5 5l7 7-7 7" />
+              </svg>
+            </button>
           </div>
         </div>
-      )}
 
-      <main className="flex-1 overflow-y-auto p-4 md:p-6 w-full max-w-7xl mx-auto custom-scrollbar">
-        {activeTab === 'dashboard' && (
-          <Suspense fallback={<div className="flex items-center justify-center h-full text-slate-500 text-sm">Carregando...</div>}>
-            <Dashboard
-              user={user}
-              userProfile={userProfile}
-              suppliers={suppliers}
-              purchaseOrders={purchaseOrders}
-              masterProducts={masterProducts}
-              notifications={notifications}
-              cart={cart}
-              onNavigate={(tab) => setActiveTab(tab as typeof activeTab)}
-            />
-          </Suspense>
-        )}
-        <Suspense fallback={<div className="flex items-center justify-center h-full text-slate-500 text-sm">Carregando...</div>}>
-        {activeTab === 'uploads' && (
-          <UploadCenter
-             suppliers={suppliers}
-             globalPackRules={globalPackRules}
-             onBatchCompleted={handleBatchCompleted}
-             onCreateOrder={handleCreateOrderFromUpload}
-             onNavigateToOrders={() => setActiveTab('purchase_orders')}
-          />
-        )}
-        {activeTab === 'sales' && (
-          <SalesDashboard
-            setForecast={setForecast} salesData={salesData} setSalesData={setSalesData}
-            csvContent={salesCsvContent} setCsvContent={setSalesCsvContent}
-            salesConfig={salesConfig} setSalesConfig={setSalesConfig}
-            salesUrl={salesUrl} setSalesUrl={setSalesUrl}
-            masterProducts={masterProducts}
-          />
-        )}
-        {activeTab === 'comparator' && (
-          <QuoteComparator
-            suppliers={suppliers} forecast={forecast} cart={cart} setCart={setCart}
-            updateForecast={updateForecast} productMappings={productMappings}
-            ignoredMappings={ignoredMappings} addMapping={addMapping}
-            removeMapping={removeMapping} ignoreMapping={ignoreMapping}
-            salesConfig={salesConfig} considerStock={considerStock}
-            setConsiderStock={setConsiderStock} masterProducts={masterProducts}
-            hiddenProductIds={new Set(hiddenProducts.map(h => h.id))}
-            showInactive={appSettings.showInactiveProducts}
-          />
-        )}
-        {activeTab === 'purchase_orders' && (
-          <OrderManager
-            suppliers={suppliers}
-            purchaseOrders={purchaseOrders}
-            setPurchaseOrders={setPurchaseOrders}
-            cart={cart}
-            setCart={setCart}
-            supplierCatalogs={supplierCatalogs}
-            userProfile={userProfile}
-            getNextSeqNumber={getNextSeqNumber}
-          />
-        )}
-        {activeTab === 'schedule' && (
-          <Schedule suppliers={suppliers} purchaseOrders={purchaseOrders} setPurchaseOrders={setPurchaseOrders} />
-        )}
-        {activeTab === 'catalog' && (
-          <div className="flex flex-col h-full overflow-hidden gap-3">
-            <div className="flex gap-2 shrink-0">
-              <button
-                onClick={() => setCatalogTab('master')}
-                className={`px-4 py-2 rounded-xl text-sm font-medium whitespace-nowrap transition-all ${
-                  catalogTab === 'master' ? 'bg-amber-600 text-white' : 'bg-slate-900 border border-slate-700 text-slate-400 hover:text-white'
-                }`}
-              >
-                📦 Catálogo Geral
-              </button>
-              <button
-                onClick={() => setCatalogTab('suppliers')}
-                className={`px-4 py-2 rounded-xl text-sm font-medium whitespace-nowrap transition-all ${
-                  catalogTab === 'suppliers' ? 'bg-amber-600 text-white' : 'bg-slate-900 border border-slate-700 text-slate-400 hover:text-white'
-                }`}
-              >
-                🏪 Por Fornecedor
-              </button>
-            </div>
-            <div className="flex-1 overflow-hidden min-h-0">
-              {catalogTab === 'master' ? (
-                <div className="h-full overflow-y-auto">
-                  <ProductCatalog suppliers={suppliers} cart={cart} setCart={setCart} forecast={forecast} />
+        {/* Main Content Wrapper — inclui conteúdo principal + sidebar direita */}
+        <div className="flex-1 flex flex-row min-w-0 h-screen overflow-hidden relative">
+
+          {/* Coluna central: mobile topbar + main + assistente */}
+          <div className="flex-1 flex flex-col min-w-0 h-screen overflow-hidden">
+            {/* Mobile Top Bar */}
+            <div className="xl:hidden relative h-14 bg-slate-900 border-b border-slate-800 flex items-center justify-between px-4 shrink-0">
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setMobileMenuOpen(true)}
+                  className="p-2 -ml-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-all"
+                >
+                  <Menu className="w-5 h-5" />
+                </button>
+                {/* Ícone do app — coloque logo.png em /public e troque por: <img src="/logo.png" className="w-7 h-7 object-contain" alt="logo" /> */}
+                <div className="w-7 h-7 bg-amber-600 rounded flex items-center justify-center shrink-0">
+                  <span className="font-black text-sm text-white">B</span>
                 </div>
-              ) : (
-                <SupplierCatalogView
-                  suppliers={suppliers}
-                  catalogs={supplierCatalogs}
-                  masterProducts={masterProducts}
-                  uid={user!.uid}
-                  globalValidityDays={appSettings.priceValidityDays}
-                  showInactive={appSettings.showInactiveProducts}
-                  hiddenProducts={hiddenProducts}
-                  onCatalogUpdate={updated => setSupplierCatalogs(prev => ({ ...prev, [updated.supplierId]: updated }))}
-                  onHideProduct={handleHideProduct}
-                  onUnhideProduct={handleUnhideProduct}
-                  onAddMapping={addMapping}
-                  onRemoveMapping={removeMapping}
-                />
+              </div>
+              {/* Breadcrumb: página atual */}
+              <span className="absolute left-1/2 -translate-x-1/2 text-white font-semibold text-sm pointer-events-none">
+                {navItems.find(i => i.tab === activeTab)?.label || 'Início'}
+              </span>
+            </div>
+
+            {/* Desktop: sem header — info-config-menu está na sidebar (sticky-bottom) */}
+
+            {/* Modal OfferFlyer (acessado via dropdown) */}
+            {offerFlyerOpen && (
+              <div
+                className="fixed inset-0 bg-black/60 z-40 flex items-center justify-center p-4"
+                onClick={e => { if (e.target === e.currentTarget) setOfferFlyerOpen(false); }}
+              >
+                <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-4xl max-h-[90vh] overflow-y-auto p-6">
+                  <div className="flex items-center justify-between mb-5">
+                    <div className="flex items-center gap-3">
+                      <Tag className="w-5 h-5 text-red-500" />
+                      <h2 className="text-white font-bold text-lg">Flyer de Ofertas</h2>
+                    </div>
+                    <button
+                      onClick={() => setOfferFlyerOpen(false)}
+                      className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-all"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                  <OfferFlyer products={masterProducts} />
+                </div>
+              </div>
+            )}
+
+            <main className="flex-1 overflow-y-auto p-4 md:p-6 w-full max-w-7xl mx-auto custom-scrollbar">
+              {activeTab === 'dashboard' && (
+                <Suspense fallback={<div className="flex items-center justify-center h-full text-slate-500 text-sm">Carregando...</div>}>
+                  <Dashboard
+                    user={user}
+                    userProfile={userProfile}
+                    suppliers={suppliers}
+                    purchaseOrders={purchaseOrders}
+                    masterProducts={masterProducts}
+                    notifications={notifications}
+                    cart={cart}
+                    onNavigate={(tab) => setActiveTab(tab as typeof activeTab)}
+                  />
+                </Suspense>
               )}
-            </div>
-          </div>
-        )}
-        {activeTab === 'inventory_count' && (
-          <Suspense fallback={<div className="flex items-center justify-center h-full text-slate-500 text-sm">Carregando...</div>}>
-            <InventoryCount
-              masterProducts={masterProducts}
-              userId={user.uid}
-              confirmedCount={inventoryCount}
-              onSaveCount={setInventoryCount}
-              categoryTree={Object.keys(categoryTree).length > 0 ? categoryTree : undefined}
-              countTimestamps={inventoryTimestamps}
-              onSaveTimestamps={handleSaveTimestamps}
-              onUpdateStock={handleUpdateProductStocks}
-            />
-          </Suspense>
-        )}
-        {activeTab === 'category_manager' && (
-          <Suspense fallback={<div className="flex items-center justify-center h-full text-slate-500 text-sm">Carregando...</div>}>
-            <CategoryManager
-              categoryTree={categoryTree}
-              masterProducts={masterProducts}
-              onSaveCategoryTree={setCategoryTree}
-              onUpdateMasterProducts={setMasterProducts}
-            />
-          </Suspense>
-        )}
-        {activeTab === 'database' && (
-          <ProductDatabase
-            masterProducts={masterProducts} setMasterProducts={setMasterProducts}
-            sheetUrl={dbSheetUrl} setSheetUrl={setDbSheetUrl}
-            categoryTree={categoryTree}
-            setIsDirty={setIsDirty}
-            userId={uid}
-            userDisplay={userProfile?.displayName || user?.displayName || user?.email || undefined}
+              <Suspense fallback={<div className="flex items-center justify-center h-full text-slate-500 text-sm">Carregando...</div>}>
+                {activeTab === 'uploads' && (
+                  <UploadCenter
+                    suppliers={suppliers}
+                    globalPackRules={globalPackRules}
+                    onBatchCompleted={handleBatchCompleted}
+                    onCreateOrder={handleCreateOrderFromUpload}
+                    onNavigateToOrders={() => setActiveTab('purchase_orders')}
+                  />
+                )}
+                {activeTab === 'sales' && (
+                  <SalesDashboard
+                    setForecast={setForecast} salesData={salesData} setSalesData={setSalesData}
+                    csvContent={salesCsvContent} setCsvContent={setSalesCsvContent}
+                    salesConfig={salesConfig} setSalesConfig={setSalesConfig}
+                    salesUrl={salesUrl} setSalesUrl={setSalesUrl}
+                    masterProducts={masterProducts}
+                  />
+                )}
+                {activeTab === 'comparator' && (
+                  <QuoteComparator
+                    suppliers={suppliers} forecast={forecast} cart={cart} setCart={setCart}
+                    updateForecast={updateForecast} productMappings={productMappings}
+                    ignoredMappings={ignoredMappings} addMapping={addMapping}
+                    removeMapping={removeMapping} ignoreMapping={ignoreMapping}
+                    salesConfig={salesConfig} considerStock={considerStock}
+                    setConsiderStock={setConsiderStock} masterProducts={masterProducts}
+                    hiddenProductIds={hiddenProductIdsSet}
+                    showInactive={appSettings.showInactiveProducts}
+                  />
+                )}
+                {activeTab === 'purchase_orders' && (
+                  <OrderManager
+                    suppliers={suppliers}
+                    purchaseOrders={purchaseOrders}
+                    setPurchaseOrders={setPurchaseOrders}
+                    cart={cart}
+                    setCart={setCart}
+                    supplierCatalogs={supplierCatalogs}
+                    userProfile={userProfile}
+                    getNextSeqNumber={getNextSeqNumber}
+                  />
+                )}
+                {activeTab === 'schedule' && (
+                  <Schedule suppliers={suppliers} purchaseOrders={purchaseOrders} setPurchaseOrders={setPurchaseOrders} />
+                )}
+                {activeTab === 'catalog' && (
+                  <div className="flex flex-col h-full overflow-hidden gap-3">
+                    <div className="flex gap-2 shrink-0">
+                      <button
+                        onClick={() => setCatalogTab('master')}
+                        className={`px-4 py-2 rounded-xl text-sm font-medium whitespace-nowrap transition-all ${catalogTab === 'master' ? 'bg-amber-600 text-white' : 'bg-slate-900 border border-slate-700 text-slate-400 hover:text-white'
+                          }`}
+                      >
+                        📦 Catálogo Geral
+                      </button>
+                      <button
+                        onClick={() => setCatalogTab('suppliers')}
+                        className={`px-4 py-2 rounded-xl text-sm font-medium whitespace-nowrap transition-all ${catalogTab === 'suppliers' ? 'bg-amber-600 text-white' : 'bg-slate-900 border border-slate-700 text-slate-400 hover:text-white'
+                          }`}
+                      >
+                        🏪 Por Fornecedor
+                      </button>
+                    </div>
+                    <div className="flex-1 overflow-hidden min-h-0">
+                      {catalogTab === 'master' ? (
+                        <div className="h-full overflow-y-auto">
+                          <ProductCatalog suppliers={suppliers} cart={cart} setCart={setCart} forecast={forecast} />
+                        </div>
+                      ) : (
+                        <SupplierCatalogView
+                          suppliers={suppliers}
+                          catalogs={supplierCatalogs}
+                          masterProducts={masterProducts}
+                          uid={user!.uid}
+                          globalValidityDays={appSettings.priceValidityDays}
+                          showInactive={appSettings.showInactiveProducts}
+                          hiddenProducts={hiddenProducts}
+                          onCatalogUpdate={updated => setSupplierCatalogs(prev => ({ ...prev, [updated.supplierId]: updated }))}
+                          onHideProduct={handleHideProduct}
+                          onUnhideProduct={handleUnhideProduct}
+                          onAddMapping={addMapping}
+                          onRemoveMapping={removeMapping}
+                        />
+                      )}
+                    </div>
+                  </div>
+                )}
+                {activeTab === 'inventory_count' && (
+                  <Suspense fallback={<div className="flex items-center justify-center h-full text-slate-500 text-sm">Carregando...</div>}>
+                    <InventoryCount
+                      masterProducts={masterProducts}
+                      userId={user.uid}
+                      confirmedCount={inventoryCount}
+                      onSaveCount={setInventoryCount}
+                      categoryTree={Object.keys(categoryTree).length > 0 ? categoryTree : undefined}
+                      countTimestamps={inventoryTimestamps}
+                      onSaveTimestamps={handleSaveTimestamps}
+                      onUpdateStock={handleUpdateProductStocks}
+                    />
+                  </Suspense>
+                )}
+                {activeTab === 'category_manager' && (
+                  <Suspense fallback={<div className="flex items-center justify-center h-full text-slate-500 text-sm">Carregando...</div>}>
+                    <CategoryManager
+                      categoryTree={categoryTree}
+                      masterProducts={masterProducts}
+                      onSaveCategoryTree={setCategoryTree}
+                      onUpdateMasterProducts={setMasterProducts}
+                    />
+                  </Suspense>
+                )}
+                {activeTab === 'database' && (
+                  <ProductDatabase
+                    masterProducts={masterProducts} setMasterProducts={setMasterProducts}
+                    sheetUrl={dbSheetUrl} setSheetUrl={setDbSheetUrl}
+                    categoryTree={categoryTree}
+                    setIsDirty={setIsDirty}
+                    userId={uid}
+                    userDisplay={userProfile?.displayName || user?.displayName || user?.email || undefined}
+                  />
+                )}
+                {activeTab === 'suppliers' && (
+                  <SupplierManager
+                    suppliers={suppliers} setSuppliers={setSuppliers}
+                    globalPackRules={globalPackRules} setGlobalPackRules={setGlobalPackRules}
+                    onBatchCompleted={handleBatchCompleted}
+                    uid={uid ?? ''}
+                    onBatchDateChange={handleBatchDateChange}
+                    productMappings={productMappings}
+                    masterProducts={masterProducts}
+                    onAddMapping={addMapping}
+                    onRemoveMapping={removeMapping}
+                    priceValidityConfig={priceValidityConfig}
+                    setPriceValidityConfig={setPriceValidityConfig}
+                  />
+                )}
+                {activeTab === 'quote_request' && (
+                  <QuoteRequest
+                    suppliers={suppliers}
+                    catalogs={supplierCatalogs}
+                    globalValidityDays={appSettings.priceValidityDays}
+                    quoteStages={quoteStages}
+                    onSaveStages={setQuoteStages}
+                  />
+                )}
+                {activeTab === 'settings' && (
+                  <div className="h-full overflow-y-auto">
+                    <div className="flex items-center gap-3 mb-5">
+                      <Settings className="w-5 h-5 text-amber-400" />
+                      <h2 className="text-white font-bold text-lg">Configurações Gerais</h2>
+                    </div>
+                    <AppSettingsPanel
+                      settings={appSettings}
+                      onSettingsChange={s => { setAppSettings(s); setPriceValidityConfig({ globalDays: s.priceValidityDays }); }}
+                      globalPackRules={globalPackRules}
+                      onPackRulesChange={setGlobalPackRules}
+                      hiddenProducts={hiddenProducts}
+                      onUnhide={handleUnhideProduct}
+                      onClearAllHidden={handleClearAllHidden}
+                    />
+                  </div>
+                )}
+                {activeTab === 'profile' && (
+                  <div className="h-full overflow-y-auto">
+                    <div className="flex items-center gap-3 mb-5">
+                      <span className="text-xl">👤</span>
+                      <h2 className="text-white font-bold text-lg">Meu Perfil</h2>
+                    </div>
+                    <UserProfilePanel
+                      profile={userProfile}
+                      onProfileChange={setUserProfile}
+                      userPhotoURL={user.photoURL || undefined}
+                      userEmail={user.email || undefined}
+                    />
+                  </div>
+                )}
+              </Suspense>
+            </main>
+
+            {/* Assistente flutuante */}
+            <Suspense fallback={null}>
+              <BuyingAssistant suppliers={suppliers} cart={cart} setCart={setCart} salesData={salesData} />
+            </Suspense>
+          </div>{/* fim coluna central */}
+
+          {/* Sidebar de Ações Global */}
+          <RightActionSidebar />
+
+        </div>{/* fim Main Content Wrapper */}
+      </div>
+
+      {/* Expanded Logs Modal */}
+      {isExpandedLogsOpen && (
+        <Suspense fallback={null}>
+          <ExpandedLogs
+            logs={appLogs}
+            onClear={() => appLogger.clear()}
+            onClose={() => setIsExpandedLogsOpen(false)}
           />
-        )}
-        {activeTab === 'suppliers' && (
-          <SupplierManager
-            suppliers={suppliers} setSuppliers={setSuppliers}
-            globalPackRules={globalPackRules} setGlobalPackRules={setGlobalPackRules}
-            onBatchCompleted={handleBatchCompleted}
-            uid={uid ?? ''}
-            onBatchDateChange={handleBatchDateChange}
-            productMappings={productMappings}
-            masterProducts={masterProducts}
-            onAddMapping={addMapping}
-            onRemoveMapping={removeMapping}
-            priceValidityConfig={priceValidityConfig}
-            setPriceValidityConfig={setPriceValidityConfig}
-          />
-        )}
-        {activeTab === 'quote_request' && (
-          <QuoteRequest
-            suppliers={suppliers}
-            catalogs={supplierCatalogs}
-            globalValidityDays={appSettings.priceValidityDays}
-            quoteStages={quoteStages}
-            onSaveStages={setQuoteStages}
-          />
-        )}
-        {activeTab === 'settings' && (
-          <div className="h-full overflow-y-auto">
-            <div className="flex items-center gap-3 mb-5">
-              <Settings className="w-5 h-5 text-amber-400" />
-              <h2 className="text-white font-bold text-lg">Configurações Gerais</h2>
-            </div>
-            <AppSettingsPanel
-              settings={appSettings}
-              onSettingsChange={s => { setAppSettings(s); setPriceValidityConfig({ globalDays: s.priceValidityDays }); }}
-              globalPackRules={globalPackRules}
-              onPackRulesChange={setGlobalPackRules}
-              hiddenProducts={hiddenProducts}
-              onUnhide={handleUnhideProduct}
-              onClearAllHidden={handleClearAllHidden}
-            />
-          </div>
-        )}
-        {activeTab === 'profile' && (
-          <div className="h-full overflow-y-auto">
-            <div className="flex items-center gap-3 mb-5">
-              <span className="text-xl">👤</span>
-              <h2 className="text-white font-bold text-lg">Meu Perfil</h2>
-            </div>
-            <UserProfilePanel
-              profile={userProfile}
-              onProfileChange={setUserProfile}
-              userPhotoURL={user.photoURL || undefined}
-              userEmail={user.email || undefined}
-            />
-          </div>
-        )}
         </Suspense>
-      </main>
-
-      {/* Assistente flutuante */}
-      <Suspense fallback={null}>
-        <BuyingAssistant suppliers={suppliers} cart={cart} setCart={setCart} salesData={salesData} />
-      </Suspense>
-        </div>{/* fim coluna central */}
-
-        {/* Sidebar de Ações Global */}
-        <RightActionSidebar />
-
-      </div>{/* fim Main Content Wrapper */}
-    </div>
-    
-    {/* Expanded Logs Modal */}
-    {isExpandedLogsOpen && (
-      <Suspense fallback={null}>
-        <ExpandedLogs 
-          logs={appLogs}
-          onClear={() => appLogger.clear()}
-          onClose={() => setIsExpandedLogsOpen(false)}
-        />
-      </Suspense>
-    )}
+      )}
     </RightSidebarProvider>
 
   );

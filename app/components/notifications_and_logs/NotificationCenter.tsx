@@ -1,13 +1,13 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { AppNotification, DuplicatePayload } from '../../types';
-import { Bell, Terminal, X, CheckCircle, AlertTriangle, Clock, ChevronRight, Trash2, Maximize2 } from 'lucide-react';
+import { Bell, Terminal, X, CheckCircle, AlertTriangle, Clock, ChevronRight, Trash2, Maximize2, GitMerge } from 'lucide-react';
 import ExpandedNotifications from './ExpandedNotifications';
 
 
 interface NotificationCenterProps {
   notifications: AppNotification[];
-  onResolve: (id: string, keepWhich?: 'existing' | 'incoming') => void;
+  onResolve: (id: string, keepWhich?: 'existing' | 'incoming' | 'both') => void;
   showLabel?: boolean;
 }
 
@@ -95,7 +95,19 @@ const DuplicateModal: React.FC<{
             <div className="mt-2 text-xs text-slate-500">lote c/{payload.incoming.packQuantity}</div>
           </button>
 
-          <p className="text-slate-600 text-xs text-center pt-1">O outro registro será descartado permanentemente.</p>
+          {/* Both */}
+          <button
+            onClick={() => onKeep('both')}
+            className="w-full text-left bg-slate-800 hover:bg-teal-950/30 border border-slate-700 hover:border-teal-600/50 rounded-xl p-4 transition-all group flex items-center justify-between"
+          >
+            <div>
+              <span className="text-xs font-bold text-teal-400 uppercase tracking-wide">Manter as Duas Cotações</span>
+              <p className="text-slate-400 text-xs mt-1">Registra ambos os preços no histórico do fornecedor.</p>
+            </div>
+            <GitMerge className="w-5 h-5 text-teal-400 shrink-0 ml-3" />
+          </button>
+
+          <p className="text-slate-600 text-xs text-center pt-1">Ao escolher um registro individual, o outro será descartado permanentemente.</p>
         </div>
       </div>
     </div>

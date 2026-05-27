@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { PackRule, HiddenProduct, AppSettings } from '../types';
-import { Settings, Eye, EyeOff, Trash2, Plus, Clock, Package, RefreshCw, ChevronDown, ChevronUp } from 'lucide-react';
+import { Settings, Eye, EyeOff, Trash2, Plus, Clock, Package, RefreshCw, ChevronDown, ChevronUp, AlertTriangle, Save } from 'lucide-react';
 
 interface AppSettingsProps {
   settings: AppSettings;
@@ -26,6 +26,23 @@ const AppSettingsPanel: React.FC<AppSettingsProps> = ({
   const [showHidden, setShowHidden] = useState(false);
   const [showPack, setShowPack] = useState(true);
 
+  // ── Draft de configurações (buffer local antes de salvar) ──
+  const [draftSettings, setDraftSettings] = useState<AppSettings>(settings);
+  const isDirty = JSON.stringify(draftSettings) !== JSON.stringify(settings);
+
+  // Sincroniza draft se settings for atualizado externamente
+  useEffect(() => {
+    setDraftSettings(settings);
+  }, [settings]);
+
+  const handleSave = () => {
+    onSettingsChange(draftSettings);
+  };
+
+  const handleDiscard = () => {
+    setDraftSettings(settings);
+  };
+
   const addRule = () => {
     if (!newTerm.trim()) return;
     onPackRulesChange([
@@ -42,6 +59,31 @@ const AppSettingsPanel: React.FC<AppSettingsProps> = ({
 
   return (
     <div className="max-w-2xl mx-auto space-y-4 py-2">
+
+      {/* ── Barra de alterações não salvas ── */}
+      {isDirty && (
+        <div className="sticky top-0 z-10 flex items-center justify-between px-4 py-2.5 bg-amber-950/95 border border-amber-700/50 rounded-xl backdrop-blur-sm">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+            <span className="text-amber-300 text-xs font-medium">Alterações não salvas</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleDiscard}
+              className="text-slate-400 hover:text-white text-xs px-3 py-1.5 rounded-lg hover:bg-slate-700 transition-colors"
+            >
+              Descartar
+            </button>
+            <button
+              onClick={handleSave}
+              className="flex items-center gap-1.5 bg-amber-600 hover:bg-amber-500 text-white text-xs px-3 py-1.5 rounded-lg transition-colors font-medium"
+            >
+              <Save className="w-3 h-3" />
+              Salvar
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* ── Exibição ── */}
       <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden">
@@ -60,13 +102,13 @@ const AppSettingsPanel: React.FC<AppSettingsProps> = ({
               </p>
             </div>
             <button
-              onClick={() => onSettingsChange({ ...settings, showInactiveProducts: !settings.showInactiveProducts })}
+              onClick={() => setDraftSettings(d => ({ ...d, showInactiveProducts: !d.showInactiveProducts }))}
               className={`relative w-12 h-6 rounded-full transition-all duration-200 ${
-                settings.showInactiveProducts ? 'bg-amber-600' : 'bg-slate-700'
+                draftSettings.showInactiveProducts ? 'bg-amber-600' : 'bg-slate-700'
               }`}
             >
               <span className={`absolute top-1 w-4 h-4 bg-white rounded-full shadow transition-all duration-200 ${
-                settings.showInactiveProducts ? 'left-7' : 'left-1'
+                draftSettings.showInactiveProducts ? 'left-7' : 'left-1'
               }`} />
             </button>
           </div>
@@ -82,8 +124,8 @@ const AppSettingsPanel: React.FC<AppSettingsProps> = ({
             <div className="flex items-center gap-2">
               <input
                 type="number"
-                value={settings.priceValidityDays}
-                onChange={e => onSettingsChange({ ...settings, priceValidityDays: Number(e.target.value) })}
+                value={draftSettings.priceValidityDays}
+                onChange={e => setDraftSettings(d => ({ ...d, priceValidityDays: Number(e.target.value) }))}
                 className="w-16 bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-white text-sm text-center focus:outline-none focus:border-amber-500"
                 min={1} max={365}
               />

@@ -65,6 +65,30 @@ O foco prático e mais viável é: operador fala o **valor da venda + forma de p
 
 ---
 
+## [EM ABERTO] Virtualização DOM com react-virtuoso em QuoteDetailModal
+
+### CONTEXTO:
+Durante a otimização de performance (maio 2026), a tabela de inspeção de cotações
+em `QuoteDetailModal.tsx` foi identificada como potencial gargalo para listas muito grandes.
+A memoização com `useMemo` foi aplicada e resolveu o gargalo de computação (filtro/sort).
+A virtualização DOM foi descartada por ora — sem necessidade observada nos tamanhos reais
+de cotação (20–150 itens típicos).
+
+### PROPOSTA:
+Instalar `react-virtuoso` e substituir o `<tbody>` + `.map()` da tabela de inspeção
+por um componente `<TableVirtuoso>`, renderizando apenas as linhas visíveis na tela.
+
+### QUANDO REVISAR:
+- Travamento visível ao scrollar listas com 300+ itens na tabela de inspeção
+- Ou se cotações de grande volume passarem a ser comuns
+
+### ESFORÇO ESTIMADO:
+- 1 nova dependência npm (`react-virtuoso`)
+- ~30 linhas alteradas em `QuoteDetailModal.tsx`
+- Sem impacto em tipos, Firestore ou outros componentes
+
+---
+
 ## [EM ABERTO] Planejamento de Categoria com IA e Sugestão de Atribuição
 ### SOLICITAÇÃO DO USUÁRIO:
 Planejamento de categoria com IA: após criar a categoria pai, receber sugestões de subcategorias sob demanda.

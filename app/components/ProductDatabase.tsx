@@ -1039,11 +1039,16 @@ const ProductDatabase: React.FC<ProductDatabaseProps> = ({ masterProducts = [], 
         return result.slice(0, 50);
     }, [masterProducts, debouncedSearch, sortConfig, visibleColumnIds, isEditMode, draftProducts, selectedCategoryId, categoryTree]);
 
-    const totalStockValue = masterProducts.reduce((acc, curr) => acc + (curr.priceCost * curr.stock), 0);
+    const totalStockValue = useMemo(
+        () => masterProducts.reduce((acc, curr) => acc + (curr.priceCost * curr.stock), 0),
+        [masterProducts]
+    );
     const isAllVisibleSelected = filteredAndSortedProducts.length > 0 && filteredAndSortedProducts.every(p => selectedIds.has(p.id));
 
-    // Get active columns objects
-    const activeColumns = ALL_COLUMNS.filter(c => visibleColumnIds.has(c.id));
+    const activeColumns = useMemo(
+        () => ALL_COLUMNS.filter(c => visibleColumnIds.has(c.id)),
+        [visibleColumnIds]
+    );
 
     return (
         <div className="flex flex-col h-full space-y-3 relative bg-slate-950">

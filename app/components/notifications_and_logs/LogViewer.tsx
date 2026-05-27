@@ -37,7 +37,7 @@ const LogViewer: React.FC<LogViewerProps> = ({ logs, onClose, onClear, onExpand 
   }, [logs.length]);
 
   return (
-    <div className="absolute right-0 top-full mt-2 w-96 bg-slate-950 border border-slate-800 rounded-2xl shadow-2xl z-[100] overflow-hidden font-mono animate-in fade-in zoom-in-95 slide-in-from-top-2">
+    <div className="absolute left-0 bottom-full mb-2 w-96 bg-slate-950 border border-slate-800 rounded-2xl shadow-2xl z-[100] overflow-hidden font-mono animate-in fade-in zoom-in-95 slide-in-from-top-2">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-slate-800 bg-slate-900/50 backdrop-blur-md">
         <div className="flex items-center gap-2">
@@ -70,7 +70,7 @@ const LogViewer: React.FC<LogViewerProps> = ({ logs, onClose, onClear, onExpand 
       </div>
 
       {/* Content */}
-      <div 
+      <div
         ref={scrollRef}
         className="max-h-[400px] overflow-y-auto p-2 space-y-1 custom-scrollbar bg-[#050505]"
       >
@@ -83,8 +83,8 @@ const LogViewer: React.FC<LogViewerProps> = ({ logs, onClose, onClear, onExpand 
           logs.map((log) => {
             const styles = getLevelStyles(log.level);
             return (
-              <div 
-                key={log.id} 
+              <div
+                key={log.id}
                 className={`group flex items-start gap-3 px-3 py-2 rounded-lg transition-all border border-transparent hover:border-slate-800/50 ${styles.bg}`}
               >
                 <div className="mt-0.5 shrink-0">
@@ -124,8 +124,8 @@ const LogViewer: React.FC<LogViewerProps> = ({ logs, onClose, onClear, onExpand 
           {logs.length} EVENTOS NA SESSÃO
         </span>
         <div className="flex gap-1">
-           <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-           <span className="text-[9px] text-slate-500">LIVE</span>
+          <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+          <span className="text-[9px] text-slate-500">LIVE</span>
         </div>
       </div>
     </div>

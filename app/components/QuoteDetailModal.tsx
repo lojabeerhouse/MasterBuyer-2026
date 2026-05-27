@@ -716,10 +716,13 @@ const QuoteDetailModal: React.FC<QuoteDetailModalProps> = ({
   };
 
   // ── Batch status (derived) ─────────────────────────────────────────────────
-  const snap = batchSnapshot.current;
-  const isDirty =
-    JSON.stringify(viewingBatch.items) !== JSON.stringify(snap.items) ||
-    viewingBatch.timestamp !== snap.timestamp;
+  const isDirty = useMemo(() => {
+    const snap = batchSnapshot.current;
+    return (
+      JSON.stringify(viewingBatch.items) !== JSON.stringify(snap.items) ||
+      viewingBatch.timestamp !== snap.timestamp
+    );
+  }, [viewingBatch.items, viewingBatch.timestamp]);
   const batchStatus: 'draft' | 'saved' | 'dirty' =
     !viewingBatch.isSaved ? 'draft' : isDirty ? 'dirty' : 'saved';
 
@@ -729,6 +732,28 @@ const QuoteDetailModal: React.FC<QuoteDetailModalProps> = ({
     onAddMapping?.(normalizedName, targetSku, targetType, targetName, supplierSku);
     setLinkingItem(null);
   };
+
+  // ── Filtered + sorted items (memoised — evita re-sort em cada render) ────────
+  const filteredItems = useMemo(() =>
+    viewingBatch.items
+      .map((it, idx) => ({ item: it, originalIndex: idx }))
+      .filter(x => {
+        if (!detailsSearchTerm) return true;
+        const tokens = detailsSearchTerm.toLowerCase().split(/\s+/).filter(t => t);
+        const n = x.item.name.toLowerCase();
+        const s = (x.item.sku || '').toLowerCase();
+        return tokens.every(t => n.includes(t) || s.includes(t));
+      })
+      .sort((a, b) => {
+        switch (detailsSortBy) {
+          case 'name': return a.item.name.localeCompare(b.item.name);
+          case 'price_asc': return a.item.unitPrice - b.item.unitPrice;
+          case 'price_desc': return b.item.unitPrice - a.item.unitPrice;
+          case 'pack': return b.item.packQuantity - a.item.packQuantity;
+          default: return 0;
+        }
+      }),
+  [viewingBatch.items, detailsSearchTerm, detailsSortBy]);
 
   // ── Render ────────────────────────────────────────────────────────────────────
   return (
@@ -877,25 +902,6 @@ const QuoteDetailModal: React.FC<QuoteDetailModalProps> = ({
             <div className="overflow-auto flex-1 bg-[#0b0e14] custom-scrollbar">
               <div className="p-6 space-y-8">
                 {(() => {
-                  const filteredItems = viewingBatch.items
-                    .map((it, idx) => ({ item: it, originalIndex: idx }))
-                    .filter(x => {
-                      if (!detailsSearchTerm) return true;
-                      const tokens = detailsSearchTerm.toLowerCase().split(/\s+/).filter(t => t);
-                      const n = x.item.name.toLowerCase();
-                      const s = (x.item.sku || '').toLowerCase();
-                      return tokens.every(t => n.includes(t) || s.includes(t));
-                    })
-                    .sort((a, b) => {
-                      switch (detailsSortBy) {
-                        case 'name': return a.item.name.localeCompare(b.item.name);
-                        case 'price_asc': return a.item.unitPrice - b.item.unitPrice;
-                        case 'price_desc': return b.item.unitPrice - a.item.unitPrice;
-                        case 'pack': return b.item.packQuantity - a.item.packQuantity;
-                        default: return 0;
-                      }
-                    });
-
                   const inspectionItems = filteredItems.filter(x => getItemCategory(x.item) === 'inspection');
                   const yellowItems = filteredItems.filter(x => getItemCategory(x.item) === 'yellow');
                   const blueItems = filteredItems.filter(x => getItemCategory(x.item) === 'blue');
