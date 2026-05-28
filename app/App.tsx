@@ -1253,6 +1253,13 @@ const App: React.FC = () => {
                     masterProducts={masterProducts}
                     notifications={notifications}
                     cart={cart}
+                    supplierCatalogs={supplierCatalogs}
+                    salesData={salesData}
+                    forecast={forecast}
+                    inventoryCount={inventoryCount}
+                    categoryTree={categoryTree}
+                    quoteStages={quoteStages}
+                    appSettings={appSettings}
                     onNavigate={(tab) => setActiveTab(tab as typeof activeTab)}
                   />
                 </Suspense>

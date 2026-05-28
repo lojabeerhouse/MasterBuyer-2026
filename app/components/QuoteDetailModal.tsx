@@ -2,15 +2,18 @@ import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react'
 import { Supplier, QuoteBatch, ProductQuote, ProductMapping, MasterProduct, PackRule } from '../types';
 import {
   Trash2, CheckCircle, Loader2, Ban, Pencil, Save, X, XCircle, RefreshCw,
-  Coins, BoxSelect, Sparkles, ChevronLeft, ChevronRight, ChevronDown,
-  ChevronUp, AlertTriangle, Check, CheckSquare, Square, Search, Bot, Eye, Link2, Unlink,
+  Coins, BoxSelect, Sparkles, AlertTriangle, Check, Search, Bot, Eye, Link2, Unlink,
   Star, RotateCcw, ShieldAlert, Calendar,
 } from 'lucide-react';
 import { batchSmartIdentify } from '../services/geminiService';
 import { normalizeProductName, normForMapping, findMasterProductMatches } from '../services/compras/supplierCatalogService';
+import { getItemCategory } from '../services/compras/itemCategorizationService';
 import LinkProductModal from './LinkProductModal';
 import { useSidebar } from '../contexts/RightSidebarContext';
 import QuoteActionsPanel from './QuoteActionsPanel';
+import ConfirmActionDialog from './compras/ConfirmActionDialog';
+import UnsavedChangesDialog from './compras/UnsavedChangesDialog';
+import QuoteSection from './compras/QuoteSection';
 
 // ─── Props ────────────────────────────────────────────────────────────────────
 
@@ -431,38 +434,6 @@ const QuoteDetailModal: React.FC<QuoteDetailModalProps> = ({
     return set;
   }, [supplier.quotes, viewingBatch.id]);
 
-  const getItemCategory = (item: ProductQuote): 'green' | 'blue' | 'yellow' | 'novelty' | 'inspection' => {
-    if (item.isNovelty) return 'novelty';
-
-    // Primary match: supplier SKU
-    if (item.sku && item.sku !== 'S/N' && productMappings) {
-      const skuMapping = productMappings.find(m => m.supplierSku === item.sku);
-      if (skuMapping) {
-        // Sanity check: if name similarity is too low, flag for human inspection
-        const nameSim = findMasterProductMatches(item.name,
-          masterProducts?.filter(p => p.sku === skuMapping.targetSku) ?? [], 1);
-        const nameScore = nameSim.length > 0 ? nameSim[0].score : 0;
-        if (nameScore < 40) return 'inspection';
-        if (!skuMapping.targetType || skuMapping.targetType === 'master') {
-          if (masterProducts?.some(p => p.sku === skuMapping.targetSku)) return 'green';
-        }
-        if (skuMapping.targetType === 'supplier') return 'blue';
-      }
-    }
-
-    // Fallback: name-based mapping
-    const mappingKey = normForMapping(item.name);
-    const mapping = productMappings?.find(m => m.supplierProductNameNormalized === mappingKey);
-    if (mapping) {
-      if (!mapping.targetType || mapping.targetType === 'master') {
-        if (masterProducts?.some(p => p.sku === mapping.targetSku)) return 'green';
-      }
-      if (mapping.targetType === 'supplier') return 'blue';
-    }
-    const displayKey = normalizeProductName(item.name);
-    if (seenNames.has(displayKey)) return 'blue';
-    return 'yellow';
-  };
 
   // Calcula sugestão para UM item sob demanda (lazy, no hover da linha)
   // Pré-filtro de tokens reduz de ~2.000 → ~30 candidatos antes do Levenshtein: ~66× mais rápido
@@ -511,7 +482,7 @@ const QuoteDetailModal: React.FC<QuoteDetailModalProps> = ({
       );
     }
 
-    const category = getItemCategory(item);
+    const category = getItemCategory(item, productMappings, masterProducts, seenNames);
     const suggestion = revealedSuggestions.get(idx);
     const isDismissed = dismissedSuggestions.has(normForMapping(item.name));
     const hasSuggestion = !!suggestion && !isDismissed && category !== 'green' && category !== 'novelty';
@@ -693,14 +664,14 @@ const QuoteDetailModal: React.FC<QuoteDetailModalProps> = ({
         {/* Ações */}
         <td className="px-2 py-1.5 text-center w-20">
           <div className="flex items-center justify-center gap-0.5">
-            {getItemCategory(item) !== 'green' && (
+            {getItemCategory(item, productMappings, masterProducts, seenNames) !== 'green' && (
               <button onClick={() => setLinkingItem(item)}
                 className="text-slate-600 hover:text-amber-400 p-1.5 rounded hover:bg-amber-950/20 transition-all"
                 title="Vincular ao catálogo master">
                 <Link2 className="w-3.5 h-3.5" />
               </button>
             )}
-            {getItemCategory(item) === 'green' && (
+            {getItemCategory(item, productMappings, masterProducts, seenNames) === 'green' && (
               <button onClick={() => onRemoveMapping?.(item.name)}
                 className="text-slate-700 hover:text-orange-400 p-1.5 rounded hover:bg-orange-950/20 opacity-0 group-hover:opacity-100 transition-all"
                 title="Remover vínculo com catálogo master">
@@ -781,58 +752,21 @@ const QuoteDetailModal: React.FC<QuoteDetailModalProps> = ({
       )}
 
       {/* ── Confirm Action Dialog ─────────────────────────────────────────────── */}
-      {confirmAction && (
-        <div className="fixed inset-0 z-[120] flex items-center justify-center pointer-events-auto">
-          <div className="absolute inset-0 bg-transparent" onClick={() => setConfirmAction(null)} />
-          <div className="bg-slate-800 border border-slate-600 rounded-lg shadow-2xl p-4 w-72 transform transition-all animate-in fade-in zoom-in-95 relative z-10">
-            <h4 className="font-bold text-white mb-1">
-              {confirmAction.type === 'ban' ? 'Bloquear Item?' : 'Excluir Item?'}
-            </h4>
-            <p className="text-xs text-slate-400 mb-3 line-clamp-2">
-              {confirmAction.type === 'ban'
-                ? `Isso irá adicionar "${confirmAction.itemName}" à lista negra.`
-                : `Isso removerá "${confirmAction.itemName}" desta cotação.`}
-            </p>
-            <div className="flex items-center gap-2 mb-3 cursor-pointer" onClick={() => setDontAskAgain(!dontAskAgain)}>
-              <div className={`w-3 h-3 border rounded flex items-center justify-center ${dontAskAgain ? 'bg-amber-500 border-amber-500' : 'border-slate-500'}`}>
-                {dontAskAgain && <Check className="w-2 h-2 text-slate-900" />}
-              </div>
-              <span className="text-[10px] text-slate-400">Não perguntar novamente nesta sessão</span>
-            </div>
-            <div className="flex gap-2 justify-end">
-              <button onClick={() => setConfirmAction(null)} className="px-3 py-1.5 text-xs text-slate-300 hover:text-white">Cancelar</button>
-              <button onClick={confirmPendingAction} className={`px-3 py-1.5 text-xs text-white rounded font-medium shadow-md ${confirmAction.type === 'ban' ? 'bg-red-600 hover:bg-red-700' : 'bg-slate-600 hover:bg-slate-500'}`}>Confirmar</button>
-            </div>
-          </div>
-        </div>
-      )}
+      <ConfirmActionDialog
+        action={confirmAction}
+        dontAskAgain={dontAskAgain}
+        onConfirm={confirmPendingAction}
+        onCancel={() => setConfirmAction(null)}
+        onDontAskAgainChange={setDontAskAgain}
+      />
 
       {/* ── Unsaved Changes Dialog ────────────────────────────────────────────── */}
-      {showUnsavedDialog && (
-        <div className="fixed inset-0 z-[130] flex items-center justify-center pointer-events-auto">
-          <div className="absolute inset-0 bg-black/50" onClick={() => setShowUnsavedDialog(false)} />
-          <div className="bg-slate-800 border border-slate-600 rounded-xl shadow-2xl p-5 w-80 relative z-10">
-            <div className="flex items-center gap-2 mb-2">
-              <AlertTriangle className="w-4 h-4 text-amber-400" />
-              <h4 className="font-bold text-white text-sm">Alterações não salvas</h4>
-            </div>
-            <p className="text-xs text-slate-400 mb-4">
-              Você fez alterações nesta cotação. O que deseja fazer?
-            </p>
-            <div className="flex flex-col gap-2">
-              <button onClick={handleSaveAndClose} className="px-3 py-2 text-xs text-white bg-amber-600 hover:bg-amber-500 rounded-lg font-semibold flex items-center gap-2 transition-colors">
-                <Save className="w-3.5 h-3.5" /> Salvar e fechar
-              </button>
-              <button onClick={handleDiscardAndClose} className="px-3 py-2 text-xs text-slate-200 bg-slate-700 hover:bg-slate-600 rounded-lg font-medium flex items-center gap-2 transition-colors">
-                <X className="w-3.5 h-3.5" /> Fechar sem salvar
-              </button>
-              <button onClick={() => setShowUnsavedDialog(false)} className="px-3 py-1.5 text-xs text-slate-400 hover:text-white text-center transition-colors">
-                Cancelar
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <UnsavedChangesDialog
+        isOpen={showUnsavedDialog}
+        onSaveAndClose={handleSaveAndClose}
+        onDiscardAndClose={handleDiscardAndClose}
+        onCancel={() => setShowUnsavedDialog(false)}
+      />
 
       {/* ── Detail Modal ──────────────────────────────────────────────────────────────── */}
       <div className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
@@ -906,107 +840,88 @@ const QuoteDetailModal: React.FC<QuoteDetailModalProps> = ({
             <div className="overflow-auto flex-1 bg-[#0b0e14] custom-scrollbar">
               <div className="p-6 space-y-8">
                 {(() => {
-                  const inspectionItems = filteredItems.filter(x => getItemCategory(x.item) === 'inspection');
-                  const yellowItems = filteredItems.filter(x => getItemCategory(x.item) === 'yellow');
-                  const blueItems = filteredItems.filter(x => getItemCategory(x.item) === 'blue');
-                  const greenItems = filteredItems.filter(x => getItemCategory(x.item) === 'green');
-                  const noveltyItems = filteredItems.filter(x => getItemCategory(x.item) === 'novelty');
-                  
-                  const sectionTable = (items: typeof filteredItems, dividerColor: string, category: string) => {
-                    const indices = items.map(p => p.originalIndex);
-                    const isAllSelected = indices.length > 0 && indices.every(i => selectedPendingItems.has(i));
-                    
-                    return (
-                      <table className="w-full text-left text-sm text-slate-300">
-                        <thead className={`${dividerColor.replace('divide-', 'bg-')}/5 text-[10px] uppercase font-bold tracking-widest text-slate-500 border-b ${dividerColor}`}>
-                          <tr>
-                            <th className="p-2 text-center w-10">
-                              <button onClick={() => toggleSelectAllForCategory(indices)} className="hover:text-amber-400 transition-colors">
-                                {isAllSelected ? <CheckSquare className="w-4 h-4" /> : <Square className="w-4 h-4" />}
-                              </button>
-                            </th>
-                            <th className="p-2">Produto</th>
-                            <th className="p-2 text-center w-20">Emb.</th>
-                            <th className="p-2 text-center w-14">Modo</th>
-                            <th className="p-2 text-right w-24">Lote (R$)</th>
-                            <th className="p-2 text-right w-24">Unit. (R$)</th>
-                            <th className="p-2 text-center w-28">Ações</th>
-                          </tr>
-                        </thead>
-                        <tbody className={`divide-y ${dividerColor}`}>
-                          {items.map(x => renderItemRow(x.item, x.originalIndex, viewingBatch.id))}
-                        </tbody>
-                      </table>
-                    );
-                  };
+                  const inspectionItems = filteredItems.filter(x => getItemCategory(x.item, productMappings, masterProducts, seenNames) === 'inspection');
+                  const yellowItems = filteredItems.filter(x => getItemCategory(x.item, productMappings, masterProducts, seenNames) === 'yellow');
+                  const blueItems = filteredItems.filter(x => getItemCategory(x.item, productMappings, masterProducts, seenNames) === 'blue');
+                  const greenItems = filteredItems.filter(x => getItemCategory(x.item, productMappings, masterProducts, seenNames) === 'green');
+                  const noveltyItems = filteredItems.filter(x => getItemCategory(x.item, productMappings, masterProducts, seenNames) === 'novelty');
 
                   return (
                     <>
-                      {/* SECTION: INSPEÇÃO */}
                       {inspectionItems.length > 0 && (
-                        <div className="rounded-xl overflow-hidden border border-orange-900/30 bg-orange-950/5">
-                          <div className="p-3.5 bg-orange-950/20 flex justify-between items-center cursor-pointer" onClick={() => setCollapsedSections(prev => ({ ...prev, inspection: !prev.inspection }))}>
-                            <h4 className="font-bold text-orange-400 flex items-center gap-2.5 text-sm uppercase tracking-tight">
-                              <ShieldAlert className="w-4 h-4" /> Inspeção Humana ({inspectionItems.length})
-                            </h4>
-                            <ChevronDown className={`w-4 h-4 text-orange-700 transition-transform ${collapsedSections.inspection ? '-rotate-90' : ''}`} />
-                          </div>
-                          {!collapsedSections.inspection && sectionTable(inspectionItems, 'divide-orange-900/20', 'inspection')}
-                        </div>
+                        <QuoteSection
+                          title="Inspeção Humana"
+                          count={inspectionItems.length}
+                          icon={<ShieldAlert className="w-4 h-4" />}
+                          colorVariant="orange"
+                          isCollapsed={collapsedSections.inspection}
+                          onToggle={() => setCollapsedSections(prev => ({ ...prev, inspection: !prev.inspection }))}
+                          items={inspectionItems}
+                          selectedItems={selectedPendingItems}
+                          onToggleSelectAll={toggleSelectAllForCategory}
+                          batchId={viewingBatch.id}
+                          renderRow={renderItemRow}
+                        />
                       )}
 
-                      {/* SECTION: NOVOS / DESCONHECIDOS */}
-                      <div className="rounded-xl overflow-hidden border border-yellow-900/30 bg-yellow-950/5">
-                        <div className="p-3.5 bg-yellow-950/20 flex justify-between items-center cursor-pointer" onClick={() => setCollapsedSections(prev => ({ ...prev, yellow: !prev.yellow }))}>
-                          <h4 className="font-bold text-yellow-400 flex items-center gap-2.5 text-sm uppercase tracking-tight">
-                            <AlertTriangle className="w-4 h-4" /> Desconhecidos ({yellowItems.length})
-                          </h4>
-                          <ChevronDown className={`w-4 h-4 text-yellow-700 transition-transform ${collapsedSections.yellow ? '-rotate-90' : ''}`} />
-                        </div>
-                        {!collapsedSections.yellow && (
-                          yellowItems.length === 0 
-                          ? <div className="p-10 text-center text-slate-600 text-xs italic">Tudo limpo nesta categoria.</div>
-                          : sectionTable(yellowItems, 'divide-yellow-900/20', 'yellow')
-                        )}
-                      </div>
+                      <QuoteSection
+                        title="Desconhecidos"
+                        count={yellowItems.length}
+                        icon={<AlertTriangle className="w-4 h-4" />}
+                        colorVariant="yellow"
+                        isCollapsed={collapsedSections.yellow}
+                        onToggle={() => setCollapsedSections(prev => ({ ...prev, yellow: !prev.yellow }))}
+                        items={yellowItems}
+                        selectedItems={selectedPendingItems}
+                        onToggleSelectAll={toggleSelectAllForCategory}
+                        batchId={viewingBatch.id}
+                        renderRow={renderItemRow}
+                        emptyMessage="Tudo limpo nesta categoria."
+                      />
 
-                      {/* SECTION: RECONHECIDOS */}
-                      <div className="rounded-xl overflow-hidden border border-blue-900/20 bg-blue-950/5">
-                        <div className="p-3.5 bg-blue-950/20 flex justify-between items-center cursor-pointer" onClick={() => setCollapsedSections(prev => ({ ...prev, blue: !prev.blue }))}>
-                          <h4 className="font-bold text-blue-400 flex items-center gap-2.5 text-sm uppercase tracking-tight">
-                            <Eye className="w-4 h-4" /> Reconhecidos ({blueItems.length})
-                          </h4>
-                          <ChevronDown className={`w-4 h-4 text-blue-700 transition-transform ${collapsedSections.blue ? '-rotate-90' : ''}`} />
-                        </div>
-                        {!collapsedSections.blue && (
-                          blueItems.length === 0 
-                          ? <div className="p-10 text-center text-slate-600 text-xs italic">Nenhum item pendente.</div>
-                          : sectionTable(blueItems, 'divide-blue-900/20', 'blue')
-                        )}
-                      </div>
+                      <QuoteSection
+                        title="Reconhecidos"
+                        count={blueItems.length}
+                        icon={<Eye className="w-4 h-4" />}
+                        colorVariant="blue"
+                        isCollapsed={collapsedSections.blue}
+                        onToggle={() => setCollapsedSections(prev => ({ ...prev, blue: !prev.blue }))}
+                        items={blueItems}
+                        selectedItems={selectedPendingItems}
+                        onToggleSelectAll={toggleSelectAllForCategory}
+                        batchId={viewingBatch.id}
+                        renderRow={renderItemRow}
+                        emptyMessage="Nenhum item pendente."
+                      />
 
-                      {/* SECTION: LINKADOS */}
-                      <div className="rounded-xl overflow-hidden border border-emerald-900/20 bg-emerald-950/5 opacity-80 hover:opacity-100 transition-opacity">
-                        <div className="p-3.5 bg-emerald-950/20 flex justify-between items-center cursor-pointer" onClick={() => setCollapsedSections(prev => ({ ...prev, green: !prev.green }))}>
-                          <h4 className="font-bold text-emerald-400 flex items-center gap-2.5 text-sm uppercase tracking-tight">
-                            <CheckCircle className="w-4 h-4" /> Mapeados ao Catálogo ({greenItems.length})
-                          </h4>
-                          <ChevronDown className={`w-4 h-4 text-emerald-700 transition-transform ${collapsedSections.green ? '-rotate-90' : ''}`} />
-                        </div>
-                        {!collapsedSections.green && sectionTable(greenItems, 'divide-emerald-900/20', 'green')}
-                      </div>
+                      <QuoteSection
+                        title="Mapeados ao Catálogo"
+                        count={greenItems.length}
+                        icon={<CheckCircle className="w-4 h-4" />}
+                        colorVariant="emerald"
+                        isCollapsed={collapsedSections.green}
+                        onToggle={() => setCollapsedSections(prev => ({ ...prev, green: !prev.green }))}
+                        items={greenItems}
+                        selectedItems={selectedPendingItems}
+                        onToggleSelectAll={toggleSelectAllForCategory}
+                        batchId={viewingBatch.id}
+                        renderRow={renderItemRow}
+                      />
 
-                      {/* SECTION: INÉDITOS */}
                       {noveltyItems.length > 0 && (
-                         <div className="rounded-xl overflow-hidden border border-violet-900/20 bg-violet-950/5">
-                          <div className="p-3.5 bg-violet-950/20 flex justify-between items-center cursor-pointer" onClick={() => setCollapsedSections(prev => ({ ...prev, novelties: !prev.novelties }))}>
-                            <h4 className="font-bold text-violet-400 flex items-center gap-2.5 text-sm uppercase tracking-tight">
-                              <Star className="w-4 h-4" /> Inéditos ({noveltyItems.length})
-                            </h4>
-                            <ChevronDown className={`w-4 h-4 text-violet-700 transition-transform ${collapsedSections.novelties ? '-rotate-90' : ''}`} />
-                          </div>
-                          {!collapsedSections.novelties && sectionTable(noveltyItems, 'divide-violet-900/20', 'novelty')}
-                         </div>
+                        <QuoteSection
+                          title="Inéditos"
+                          count={noveltyItems.length}
+                          icon={<Star className="w-4 h-4" />}
+                          colorVariant="violet"
+                          isCollapsed={collapsedSections.novelties}
+                          onToggle={() => setCollapsedSections(prev => ({ ...prev, novelties: !prev.novelties }))}
+                          items={noveltyItems}
+                          selectedItems={selectedPendingItems}
+                          onToggleSelectAll={toggleSelectAllForCategory}
+                          batchId={viewingBatch.id}
+                          renderRow={renderItemRow}
+                        />
                       )}
                     </>
                   );

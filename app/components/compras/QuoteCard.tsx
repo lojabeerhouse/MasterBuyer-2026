@@ -12,7 +12,7 @@ export interface QuoteCardProps {
   onDownloadArchived: (quote: QuoteBatch) => void;
 }
 
-const QuoteCard = React.memo<QuoteCardProps>(({ quote, supplierId, onViewRaw, onDownloadCsv, onRemove, onOpen, onDownloadArchived }) => {
+const QuoteCard = React.memo<QuoteCardProps>(function QuoteCard({ quote, supplierId, onViewRaw, onDownloadCsv, onRemove, onOpen, onDownloadArchived }) {
   if (quote.archivedCsv) {
     return (
       <div className="flex items-center gap-3 px-3 py-2 bg-slate-900/50 border border-slate-800 rounded text-xs text-slate-500 group hover:border-slate-700 transition-all">
@@ -131,6 +131,6 @@ const QuoteCard = React.memo<QuoteCardProps>(({ quote, supplierId, onViewRaw, on
       </div>
     </div>
   );
-}, (prev, next) => prev.quote === next.quote && prev.supplierId === next.supplierId);
+});
 
 export default QuoteCard;

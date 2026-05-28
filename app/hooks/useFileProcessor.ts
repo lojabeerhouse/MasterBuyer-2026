@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { Supplier, ProductQuote, PackRule } from '../types';
 import { isNFeXml, parseNFeFile } from '../services/compras/parseNFe';
 import { parseQuoteContent } from '../services/geminiService';
@@ -24,7 +24,7 @@ export interface ProcessingLog {
 export const useFileProcessor = () => {
     const [isProcessing, setIsProcessing] = useState(false);
 
-    const processFile = async (
+    const processFile = useCallback(async (
         file: File,
         supplier: Supplier | undefined,
         globalPackRules: PackRule[]
@@ -46,8 +46,6 @@ export const useFileProcessor = () => {
                 }
                 quotes = nfeResult.items;
                 detectedDate = nfeResult.detectedDate;
-                quotes = filterBlacklisted(quotes, blacklist);
-                quotes = applyRulesToQuotes(quotes, supplierExceptions, globalPackRules);
             } else {
                 const base64 = await new Promise<string>((resolve, reject) => {
                     const reader = new FileReader();
@@ -59,12 +57,13 @@ export const useFileProcessor = () => {
                 const geminiResult = await parseQuoteContent(base64, file.type, true, allRules);
                 quotes = geminiResult.items;
                 if (geminiResult.detectedDate) detectedDate = geminiResult.detectedDate;
-                quotes = filterBlacklisted(quotes, blacklist);
-                quotes = applyRulesToQuotes(quotes, supplierExceptions, globalPackRules);
             }
 
+            // Pipeline pós-parse unificado
             const totalParsed = quotes.length;
-            const blacklistFiltered = 0; // tracked upstream (before filterBlacklisted)
+            quotes = filterBlacklisted(quotes, blacklist);
+            const blacklistFiltered = totalParsed - quotes.length;
+            quotes = applyRulesToQuotes(quotes, supplierExceptions, globalPackRules);
             const rulesApplied = quotes.filter(q => q.isReprocessed).length;
 
             const initializedQuotes = quotes.map(q => recalculateItem({...q, priceStrategy: q.priceStrategy ?? 'pack'}, q.priceStrategy ?? 'pack'));
@@ -84,7 +83,7 @@ export const useFileProcessor = () => {
             setIsProcessing(false);
             return { quotes: [], errorMessage: e.message || 'Falha ao processar arquivo via IA/XML.' };
         }
-    };
+    }, []);
 
     return { isProcessing, processFile };
 };

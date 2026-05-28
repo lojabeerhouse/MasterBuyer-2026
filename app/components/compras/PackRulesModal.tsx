@@ -51,7 +51,7 @@ const PackRulesModal: React.FC<PackRulesModalProps> = ({ supplierName, rules, on
               min="1"
               placeholder="Qtd"
               value={qty}
-              onChange={(e) => setQty(parseInt(e.target.value))}
+              onChange={(e) => setQty(parseInt(e.target.value, 10) || 1)}
               className="w-20 bg-slate-800 border border-slate-600 rounded px-3 py-2 text-white focus:border-blue-500 focus:outline-none text-center"
             />
             <button onClick={handleAdd} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded font-bold">

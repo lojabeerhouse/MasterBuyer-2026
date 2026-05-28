@@ -78,8 +78,7 @@ export function useUploadQueue({
     };
 
     processNext();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [uploadQueue, isQueueProcessing, suppliers, globalPackRules]);
+  }, [uploadQueue, isQueueProcessing, suppliers, globalPackRules, processFile]);
 
   const handleFilesSelected = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && activeTab) {
