@@ -30,6 +30,7 @@ const SupplierManager = lazy(() => import('./components/compras/SupplierManager'
 const SupplierCatalogView = lazy(() => import('./components/compras/SupplierCatalogView'));
 const AppSettingsPanel = lazy(() => import('./components/AppSettings'));
 const UserProfilePanel = lazy(() => import('./components/UserProfile'));
+import { DEFAULT_GLOBAL_PACK_RULES, applyRulesToQuotes } from './services/compras/packRulesService';
 import {
   Supplier,
   ForecastItem,
@@ -66,25 +67,7 @@ const InventoryCount = lazy(() => import('./components/inventory_count/Inventory
 const CategoryManager = lazy(() => import('./components/category_manager/CategoryManager'));
 
 // ─── defaults ────────────────────────────────────────────────────────────────
-
-const defaultGlobalPackRules: PackRule[] = [
-  { id: 'def-1', term: 'Lata 350ml', quantity: 12 },
-  { id: 'def-2', term: 'Lata 473ml', quantity: 12 },
-  { id: 'def-3', term: 'Longneck', quantity: 24 },
-  { id: 'def-4', term: 'Long Neck', quantity: 24 },
-  { id: 'def-5', term: '300ml', quantity: 23 },
-  { id: 'def-6', term: '600ml', quantity: 6 },
-  { id: 'def-7', term: '1L', quantity: 6 },
-  { id: 'def-8', term: '1.5L', quantity: 6 },
-  { id: 'def-9', term: '2L', quantity: 6 },
-  { id: 'def-10', term: 'Redbull', quantity: 12 },
-  { id: 'def-11', term: '250ml', quantity: 12 },
-  { id: 'def-12', term: '269ml', quantity: 12 },
-  { id: 'def-13', term: '473ml', quantity: 12 },
-  { id: 'def-14', term: '500ml', quantity: 12 },
-  { id: 'def-15', term: 'Askov', quantity: 6 },
-  { id: 'def-16', term: 'Ice', quantity: 24 },
-];
+// defaultGlobalPackRules movido para services/compras/packRulesService.ts
 
 const DEFAULT_USER_PROFILE: UserProfile = {
   displayName: '',
@@ -354,7 +337,7 @@ const App: React.FC = () => {
   const [cart, setCart] = useState<CartItem[]>([]);
   const [masterProducts, setMasterProducts] = useState<MasterProduct[]>([]);
   const [dbSheetUrl, setDbSheetUrl] = useState<string>("");
-  const [globalPackRules, setGlobalPackRules] = useState<PackRule[]>(defaultGlobalPackRules);
+  const [globalPackRules, setGlobalPackRules] = useState<PackRule[]>(DEFAULT_GLOBAL_PACK_RULES);
   const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([]);
   const [userProfile, setUserProfile] = useState<UserProfile>(DEFAULT_USER_PROFILE);
 
@@ -461,7 +444,7 @@ const App: React.FC = () => {
       loadUserData<string>(uid, 'dbSheetUrl', ""),
       loadUserData<string>(uid, 'salesUrl', ""),
       loadUserData<boolean>(uid, 'considerStock', true),
-      loadUserData<PackRule[]>(uid, 'globalPackRules', defaultGlobalPackRules),
+      loadUserData<PackRule[]>(uid, 'globalPackRules', DEFAULT_GLOBAL_PACK_RULES),
     ]);
 
     setSuppliers(savedSuppliers);
@@ -976,6 +959,20 @@ const App: React.FC = () => {
     setPurchaseOrders(prev => [newOrder, ...prev]);
   }, [suppliers, purchaseOrders]);
 
+  // Re-aplica regras globais retroativamente em todas as cotações salvas de todos os fornecedores.
+  // Chamado a partir de AppSettings → botão "Re-aplicar Regras a Todos os Fornecedores".
+  const handleReapplyGlobalPackRules = useCallback(() => {
+    if (!window.confirm('ATENÇÃO: Isso aplicará as Regras Globais em TODOS os fornecedores. Exceções individuais serão mantidas. Continuar?')) return;
+    setSuppliers((prev: Supplier[]) => prev.map((s: Supplier) => ({
+      ...s,
+      quotes: s.quotes.map((q: QuoteBatch) => ({
+        ...q,
+        items: applyRulesToQuotes(q.items, s.packRules || [], globalPackRules),
+      })),
+    })));
+    alert('Regras aplicadas com sucesso!');
+  }, [globalPackRules, setSuppliers]);
+
   const activeOrdersCount = useMemo(
     () => purchaseOrders.filter(o =>
       ['draft', 'sent', 'confirmed', 'in_transit', 'awaiting'].includes(o.status)
@@ -1385,7 +1382,7 @@ const App: React.FC = () => {
                 {activeTab === 'suppliers' && (
                   <SupplierManager
                     suppliers={suppliers} setSuppliers={setSuppliers}
-                    globalPackRules={globalPackRules} setGlobalPackRules={setGlobalPackRules}
+                    globalPackRules={globalPackRules}
                     onBatchCompleted={handleBatchCompleted}
                     uid={uid ?? ''}
                     onBatchDateChange={handleBatchDateChange}
@@ -1420,6 +1417,7 @@ const App: React.FC = () => {
                       hiddenProducts={hiddenProducts}
                       onUnhide={handleUnhideProduct}
                       onClearAllHidden={handleClearAllHidden}
+                      onReapplyGlobalRules={handleReapplyGlobalPackRules}
                     />
                   </div>
                 )}

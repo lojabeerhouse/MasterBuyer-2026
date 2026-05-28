@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
-import { Supplier, QuoteBatch, ProductQuote, ProductMapping, MasterProduct } from '../types';
+import { Supplier, QuoteBatch, ProductQuote, ProductMapping, MasterProduct, PackRule } from '../types';
 import {
   Trash2, CheckCircle, Loader2, Ban, Pencil, Save, X, XCircle, RefreshCw,
   Coins, BoxSelect, Sparkles, ChevronLeft, ChevronRight, ChevronDown,
@@ -27,6 +27,7 @@ interface QuoteDetailModalProps {
   masterProducts?: MasterProduct[];
   onAddMapping?: (normalizedName: string, targetSku: string, targetType?: 'master' | 'supplier', targetName?: string, supplierSku?: string) => void;
   onRemoveMapping?: (supplierProductName: string) => void;
+  globalPackRules?: PackRule[];
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -44,6 +45,7 @@ const QuoteDetailModal: React.FC<QuoteDetailModalProps> = ({
   masterProducts,
   onAddMapping,
   onRemoveMapping,
+  globalPackRules = [],
 }) => {
   // ── Local batch state ────────────────────────────────────────────────────────
   const [viewingBatch, setViewingBatch] = useState<QuoteBatch>(initialBatch);
@@ -256,7 +258,9 @@ const QuoteDetailModal: React.FC<QuoteDetailModalProps> = ({
         };
       });
 
-      const results = await batchSmartIdentify(itemsToProcess);
+      // Combina exceções do fornecedor + regras globais para guiar a IA
+      const allRules = [...(supplier.packRules || []), ...globalPackRules];
+      const results = await batchSmartIdentify(itemsToProcess, allRules);
 
       const nextItems = [...viewingBatch.items];
       results.forEach((res: { index: number; suggestedPackQty: number }) => {

@@ -8,9 +8,15 @@ const getAI = () => new GoogleGenAI({ apiKey: (import.meta as any).env.VITE_GEMI
 export const parseQuoteContent = async (
   content: string,
   mimeType: string = 'text/plain',
-  isBase64: boolean = false
+  isBase64: boolean = false,
+  packRules: { term: string; quantity: number }[] = []
 ): Promise<{ items: ProductQuote[], detectedDate?: number }> => {
   const ai = getAI();
+
+  // Injeta regras do cliente no prompt apenas quando existem (backward-compatible se vazio)
+  const packRulesSection = packRules.length > 0
+    ? `\n       CUSTOMER PACK RULES — also valid when no explicit keyword is present (case-insensitive substring match):\n${packRules.slice(0, 20).map(r => `         - Name contains "${r.term}" → packQuantity = ${r.quantity}`).join('\n')}`
+    : '';
 
   const prompt = `
     TASK: Extract product data from the provided input (Price List / Invoice).
@@ -21,8 +27,8 @@ export const parseQuoteContent = async (
        - "Cerveja 350ml" -> packQuantity is 1 (unless "cx 12" is specified).
        - "Refr 2L" -> packQuantity is not the "2L" in this example.
        - "Arroz 5kg" -> packQuantity is not the "5kg" in this example.
-    3. ONLY extract 'packQuantity' > 1 if explicit keywords exist: "Cx", "Caixa", "Fd", "Fardo", "Pack", "C/12", "C/24", "X12", "C18".
-    4. If unsure or if it looks like a single unit, default 'packQuantity' to 1.
+    3. ONLY extract 'packQuantity' > 1 if explicit keywords exist: "Cx", "Caixa", "Fd", "Fardo", "Pack", "C/12", "C/24", "X12", "C18".${packRulesSection}
+    4. If unsure or if it looks like a single unit, and no customer pack rule matches, default 'packQuantity' to 1.
     5. READ THE ENTIRE DOCUMENT. Do not stop after the first few pages.
     6. Extract 'documentDate': the emission/issue date of the document (NOT a delivery/forecast date). Format: YYYY-MM-DD. Leave empty string if not found.
     7. CRITICAL: 'quantityBought' is the total AMOUNT OF PACKAGES OR UNITS bought/ordered on the invoice. Example: If they bought 2 boxes, 'quantityBought' = 2. If it's just a price list with no quantities bought, default to 1.
@@ -257,12 +263,17 @@ export const extractCatalogRawData = async (
 };
 
 export const batchSmartIdentify = async (
-  items: { index: number, name: string, price: number }[]
+  items: { index: number, name: string, price: number }[],
+  packRules: { term: string; quantity: number }[] = []
 ): Promise<{ index: number, suggestedPackQty: number }[]> => {
   const ai = getAI();
 
   // Safety limit to avoid huge payload
   const chunk = items.slice(0, 50);
+
+  const packRulesSection = packRules.length > 0
+    ? `\n        CUSTOMER PACK RULES (prioritize over general knowledge — case-insensitive substring match):\n${packRules.slice(0, 20).map(r => `           - Name contains "${r.term}" → packQuantity = ${r.quantity}`).join('\n')}\n`
+    : '';
 
   const prompt = `
         You are a product identification expert for Brazilian supermarkets/wholesalers.
@@ -272,8 +283,7 @@ export const batchSmartIdentify = async (
            - If the name implies a pack (e.g. "cx", "fardo"), extract it.
            - DO NOT confuse 'ml' or 'kg' with quantity. '350ml' is NOT quantity 350.
            - If implied by context (e.g. a beer can usually comes in packs of 12 or 15 or 18), guess it.
-           - If completely unknown, suggest 1.
-
+           - If completely unknown, suggest 1.${packRulesSection}
         INPUT JSON:
         ${JSON.stringify(chunk)}
 

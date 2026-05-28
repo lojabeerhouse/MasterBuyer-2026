@@ -39,7 +39,12 @@ Este documento serve como mapa de referência para a localização de todos os c
 | Arquivo | Responsabilidade |
 |---|---|
 | `OrderManager.tsx` | Gestão de pedidos de compra (kanban + importação de NF) |
-| `SupplierManager.tsx` | Gestão de fornecedores e catálogos |
+| `SupplierManager.tsx` | Orquestrador de fornecedores (~540 linhas, usa sub-componentes abaixo) |
+| `QuoteCard.tsx` | Card de cotação no histórico (extraído do SupplierManager) |
+| `SupplierEditModal.tsx` | Modal de edição de fornecedor (nome, logística, horários, template) |
+| `BlacklistModal.tsx` | Modal da lista negra de itens do fornecedor |
+| `PackRulesModal.tsx` | Modal de exceções de embalagem por fornecedor |
+| `RawContentModal.tsx` | Modal de visualização de conteúdo bruto de cotação |
 | `SupplierCatalogView.tsx` | Visualização de catálogo do fornecedor |
 | `QuoteComparator.tsx` | Comparação de cotações multi-fornecedor |
 | `QuoteRequest.tsx` | Solicitação e envio de cotação |
@@ -83,6 +88,7 @@ Este documento serve como mapa de referência para a localização de todos os c
 | `supplierCatalogService.ts` | Normalização de catálogos de fornecedores |
 | `parseNFe.ts` | Parser de XML de NF-e (extração sem IA) |
 | `parseQuoteLocal.ts` | Parser de arquivos locais de cotação |
+| `packRulesService.ts` | **Fonte única** de regras de lote: `DEFAULT_GLOBAL_PACK_RULES`, `applyRule`, `applyRulesToQuotes`, `filterBlacklisted`, `recalculateItem` |
 
 ### Notificações e Logs (`notifications_and_logs/`)
 | Arquivo | Responsabilidade |
@@ -112,6 +118,7 @@ Este documento serve como mapa de referência para a localização de todos os c
 | Arquivo | Responsabilidade |
 |---|---|
 | `useFileProcessor.ts` | Decide rota de parse (XML → parseNFe / PDF+img → Gemini), aplica packRules |
+| `useUploadQueue.ts` | Gerencia fila de upload, drag-and-drop e processamento assíncrono sequencial de arquivos |
 
 ---
 

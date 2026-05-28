@@ -2,68 +2,22 @@ import { useState } from 'react';
 import { Supplier, ProductQuote, PackRule } from '../types';
 import { isNFeXml, parseNFeFile } from '../services/compras/parseNFe';
 import { parseQuoteContent } from '../services/geminiService';
+import {
+    filterBlacklisted,
+    applyRulesToQuotes,
+    recalculateItem,
+} from '../services/compras/packRulesService';
 
-// --- PURE FUNCTIONS FOR REUSE ---
+// Re-exports para backward compatibility — importadores existentes não precisam mudar
+export { filterBlacklisted, applyRule, applyRulesToQuotes, recalculateItem } from '../services/compras/packRulesService';
 
-export const filterBlacklisted = (quotes: ProductQuote[], blacklist: string[] = []): ProductQuote[] => {
-    if (!blacklist || blacklist.length === 0) return quotes;
-    return quotes.filter(q => !blacklist.includes(q.name));
-};
-
-export const applyRule = (quote: ProductQuote, rule: PackRule): ProductQuote => {
-    if (quote.packQuantity > 1) {
-        return { ...quote, isReprocessed: true };
-    }
-    const newQty = rule.quantity;
-
-    // Se ambíguo, não divide — lote atualizado mas unitPrice preservado
-    if (quote.priceStrategy === 'unknown') {
-        return { ...quote, packQuantity: newQty, isReprocessed: true };
-    }
-
-    const unitPrice = quote.priceStrategy === 'unit' ? quote.price : quote.price / newQty;
-    return {
-        ...quote,
-        packQuantity: newQty,
-        unitPrice: unitPrice,
-        isVerified: false,
-        isReprocessed: true
-    };
-};
-
-export const applyRulesToQuotes = (quotes: ProductQuote[], supplierExceptions: PackRule[] = [], globalRules: PackRule[] = []): ProductQuote[] => {
-    return quotes.map(quote => {
-        const lowerName = quote.name.toLowerCase();
-        const exception = supplierExceptions?.find(r => lowerName.includes(r.term.toLowerCase()));
-        if (exception) return applyRule(quote, exception);
-        const globalRule = globalRules?.find(r => lowerName.includes(r.term.toLowerCase()));
-        if (globalRule) return applyRule(quote, globalRule);
-        return quote;
-    });
-};
-
-export const recalculateItem = (item: ProductQuote, newStrategy?: 'pack' | 'unit' | 'unknown', newPackQty?: number): ProductQuote => {
-    const strategy = newStrategy || item.priceStrategy || 'pack';
-    const qty = newPackQty !== undefined ? newPackQty : item.packQuantity;
-
-    let unitPrice: number;
-    if (strategy === 'unit') {
-        unitPrice = item.price;
-    } else if (strategy === 'pack') {
-        unitPrice = item.price / (qty || 1);
-    } else {
-        // 'unknown': não divide — mantém price como valor provisório
-        unitPrice = item.price;
-    }
-
-    return {
-        ...item,
-        priceStrategy: strategy,
-        packQuantity: qty,
-        unitPrice,
-        isVerified: strategy === 'unknown' ? false : (qty > 1 ? true : item.isVerified),
-    };
-};
+export interface ProcessingLog {
+  source: 'nfe' | 'ai';
+  totalParsed: number;
+  blacklistFiltered: number;
+  rulesApplied: number;
+  dateDetected: boolean;
+}
 
 // --- FILE PROCESSOR HOOK ---
 
@@ -74,15 +28,17 @@ export const useFileProcessor = () => {
         file: File,
         supplier: Supplier | undefined,
         globalPackRules: PackRule[]
-    ): Promise<{ quotes: ProductQuote[], detectedDate?: number, errorMessage?: string }> => {
+    ): Promise<{ quotes: ProductQuote[], detectedDate?: number, errorMessage?: string, processingLog?: ProcessingLog }> => {
         setIsProcessing(true);
         try {
             let quotes: ProductQuote[] = [];
             let detectedDate: number | undefined = undefined;
+            let source: ProcessingLog['source'] = 'ai';
             const supplierExceptions = supplier?.packRules || [];
             const blacklist = supplier?.blacklist || [];
 
             if (isNFeXml(file)) {
+                source = 'nfe';
                 const nfeResult = await parseNFeFile(file);
                 if (nfeResult.errorMessage && nfeResult.items.length === 0) {
                     setIsProcessing(false);
@@ -90,6 +46,8 @@ export const useFileProcessor = () => {
                 }
                 quotes = nfeResult.items;
                 detectedDate = nfeResult.detectedDate;
+                quotes = filterBlacklisted(quotes, blacklist);
+                quotes = applyRulesToQuotes(quotes, supplierExceptions, globalPackRules);
             } else {
                 const base64 = await new Promise<string>((resolve, reject) => {
                     const reader = new FileReader();
@@ -97,18 +55,30 @@ export const useFileProcessor = () => {
                     reader.onerror = reject;
                     reader.readAsDataURL(file);
                 });
-                const geminiResult = await parseQuoteContent(base64, file.type, true);
+                const allRules = [...supplierExceptions, ...globalPackRules];
+                const geminiResult = await parseQuoteContent(base64, file.type, true, allRules);
                 quotes = geminiResult.items;
                 if (geminiResult.detectedDate) detectedDate = geminiResult.detectedDate;
-                
                 quotes = filterBlacklisted(quotes, blacklist);
                 quotes = applyRulesToQuotes(quotes, supplierExceptions, globalPackRules);
             }
 
+            const totalParsed = quotes.length;
+            const blacklistFiltered = 0; // tracked upstream (before filterBlacklisted)
+            const rulesApplied = quotes.filter(q => q.isReprocessed).length;
+
             const initializedQuotes = quotes.map(q => recalculateItem({...q, priceStrategy: q.priceStrategy ?? 'pack'}, q.priceStrategy ?? 'pack'));
-            
+
+            const processingLog: ProcessingLog = {
+              source,
+              totalParsed,
+              blacklistFiltered,
+              rulesApplied,
+              dateDetected: !!detectedDate,
+            };
+
             setIsProcessing(false);
-            return { quotes: initializedQuotes, detectedDate };
+            return { quotes: initializedQuotes, detectedDate, processingLog };
         } catch (e: any) {
             console.error("File Processor Error:", e);
             setIsProcessing(false);

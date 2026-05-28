@@ -10,6 +10,8 @@ interface AppSettingsProps {
   hiddenProducts: HiddenProduct[];
   onUnhide: (id: string) => void;
   onClearAllHidden: () => void;
+  /** Re-aplica as regras globais retroativamente em TODAS as cotações salvas */
+  onReapplyGlobalRules?: () => void;
 }
 
 const AppSettingsPanel: React.FC<AppSettingsProps> = ({
@@ -20,6 +22,7 @@ const AppSettingsPanel: React.FC<AppSettingsProps> = ({
   hiddenProducts,
   onUnhide,
   onClearAllHidden,
+  onReapplyGlobalRules,
 }) => {
   const [newTerm, setNewTerm] = useState('');
   const [newQty, setNewQty] = useState(12);
@@ -267,10 +270,18 @@ const AppSettingsPanel: React.FC<AppSettingsProps> = ({
               </div>
             )}
 
-            {/* Nota sobre o assistente */}
-            <div className="px-5 py-3 border-t border-slate-800 bg-slate-950/30">
+            {/* Ações de regras */}
+            <div className="px-5 py-3 border-t border-slate-800 bg-slate-950/30 space-y-2">
+              {onReapplyGlobalRules && (
+                <button
+                  onClick={onReapplyGlobalRules}
+                  className="w-full flex items-center justify-center gap-2 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg border border-slate-700 text-xs font-medium transition-colors"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" /> Re-aplicar Regras a Todos os Fornecedores
+                </button>
+              )}
               <p className="text-slate-600 text-xs">
-                💡 Dica: use o assistente para criar exceções — ex: "Defina o lote da Budweiser Zero 350ml como 8"
+                💡 Para exceções por fornecedor, use o botão <span className="text-slate-500">Exceções de Lote</span> no painel do fornecedor.
               </p>
             </div>
           </div>
