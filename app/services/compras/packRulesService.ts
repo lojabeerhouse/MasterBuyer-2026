@@ -1,4 +1,4 @@
-import { PackRule, ProductQuote } from '../../types';
+import { PackRule, ParseSource, ProductQuote } from '../../types';
 
 // ─── Defaults ─────────────────────────────────────────────────────────────────
 // Regras padrão aplicadas a novos usuários e como fallback.
@@ -25,6 +25,8 @@ export const DEFAULT_GLOBAL_PACK_RULES: PackRule[] = [
 
 // ─── Funções puras de aplicação de regras ─────────────────────────────────────
 
+const FISCAL_SOURCES: ParseSource[] = ['1-xml', '2-nfepdf'];
+
 /** Filtra itens cujo nome exato está na blacklist do fornecedor. */
 export const filterBlacklisted = (
   quotes: ProductQuote[],
@@ -36,18 +38,22 @@ export const filterBlacklisted = (
 
 /**
  * Aplica uma PackRule a um único item.
- * - Se o item já tem packQuantity > 1, apenas marca isReprocessed (respeita parse original).
+ * - Itens fiscais (1-xml, 2-nfepdf) são imutáveis — nunca sobrescritos.
+ * - Itens editados manualmente (isManuallyEdited) são respeitados.
+ * - Se o item já tem packQuantity > 1 por parse, apenas marca isReprocessed.
  * - Se priceStrategy é 'unknown', atualiza lote mas não divide o preço.
  * - Caso contrário, recalcula unitPrice com base no novo lote.
  */
 export const applyRule = (quote: ProductQuote, rule: PackRule): ProductQuote => {
+  if (quote.parseSource && FISCAL_SOURCES.includes(quote.parseSource)) return quote;
+  if (quote.isManuallyEdited) return quote;
   if (quote.packQuantity > 1) {
     return { ...quote, isReprocessed: true };
   }
   const newQty = rule.quantity;
 
   if (quote.priceStrategy === 'unknown') {
-    return { ...quote, packQuantity: newQty, isReprocessed: true };
+    return { ...quote, packQuantity: newQty, isReprocessed: true, appliedRuleId: rule.id };
   }
 
   const unitPrice = quote.priceStrategy === 'unit'
@@ -60,24 +66,27 @@ export const applyRule = (quote: ProductQuote, rule: PackRule): ProductQuote => 
     unitPrice,
     isVerified: false,
     isReprocessed: true,
+    appliedRuleId: rule.id,
   };
 };
 
 /**
  * Percorre uma lista de ProductQuotes e aplica:
- * 1. Exceções do fornecedor (prioridade maior)
- * 2. Regras globais (fallback)
+ * 1. Exceções do fornecedor (prioridade maior, ordenadas por especificidade)
+ * 2. Regras globais (fallback, ordenadas por especificidade)
  */
 export const applyRulesToQuotes = (
   quotes: ProductQuote[],
   supplierExceptions: PackRule[] = [],
   globalRules: PackRule[] = []
 ): ProductQuote[] => {
+  const sortedSupplier = [...supplierExceptions].sort((a, b) => b.term.length - a.term.length);
+  const sortedGlobal = [...globalRules].sort((a, b) => b.term.length - a.term.length);
   return quotes.map(quote => {
     const lowerName = quote.name.toLowerCase();
-    const exception = supplierExceptions.find(r => lowerName.includes(r.term.toLowerCase()));
+    const exception = sortedSupplier.find(r => lowerName.includes(r.term.toLowerCase()));
     if (exception) return applyRule(quote, exception);
-    const globalRule = globalRules.find(r => lowerName.includes(r.term.toLowerCase()));
+    const globalRule = sortedGlobal.find(r => lowerName.includes(r.term.toLowerCase()));
     if (globalRule) return applyRule(quote, globalRule);
     return quote;
   });

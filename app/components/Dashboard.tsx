@@ -1,9 +1,11 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import {
   AlertTriangle, ArrowRight, BarChart3, Bell, CalendarDays, CheckCircle2,
   ClipboardList, Clock3, Database, FileText, MessageSquare, Package,
-  PackageSearch, Scale, ShoppingCart, Tag, TrendingUp, UploadCloud, Users
+  PackageSearch, Scale, ShoppingCart, Tag, TrendingDown, TrendingUp, UploadCloud, Users
 } from 'lucide-react';
+import { OPEN_STATUSES } from '../utils/orderUtils';
+import { calcPriceMovers } from '../utils/priceUtils';
 import {
   AppNotification,
   AppSettings,
@@ -204,14 +206,13 @@ const Dashboard: React.FC<DashboardProps> = ({
   const hour = now.getHours();
   const greeting = hour < 12 ? 'Bom dia' : hour < 18 ? 'Boa tarde' : 'Boa noite';
 
-  const activeOrders = purchaseOrders.filter(o =>
-    ['draft', 'sent', 'confirmed', 'in_transit', 'awaiting'].includes(o.status)
-  );
+  const activeOrders = purchaseOrders.filter(o => OPEN_STATUSES.includes(o.status));
   const draftOrders = purchaseOrders.filter(o => o.status === 'draft');
   const sentOrders = purchaseOrders.filter(o => o.status === 'sent');
   const awaitingOrders = purchaseOrders.filter(o => o.status === 'awaiting');
   const confirmedOrders = purchaseOrders.filter(o => o.status === 'confirmed');
   const inTransitOrders = purchaseOrders.filter(o => o.status === 'in_transit');
+  const toCheckOrders = purchaseOrders.filter(o => o.status === 'received_unchecked');
 
   const unresolvedNotifications = notifications.filter(n => !n.resolved);
   const catalogCount = Object.keys(supplierCatalogs).length;
@@ -243,6 +244,8 @@ const Dashboard: React.FC<DashboardProps> = ({
     return ageDays > priceValidityDays;
   });
 
+  const priceMovers = useMemo(() => calcPriceMovers(suppliers), [suppliers]);
+
   const recentOrders = [...activeOrders]
     .sort((a, b) => (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0))
     .slice(0, 4);
@@ -255,6 +258,14 @@ const Dashboard: React.FC<DashboardProps> = ({
       desc: 'Revise alertas antes de seguir com compras.',
       severity: 'critical' as Severity,
       tab: unresolvedNotifications.some(n => n.supplierId) ? 'suppliers' : 'uploads',
+    }] : []),
+    ...(toCheckOrders.length > 0 ? [{
+      id: 'to-check',
+      icon: <Package className="h-4 w-4" />,
+      title: `${toCheckOrders.length} pedido${toCheckOrders.length === 1 ? '' : 's'} aguardando conferencia`,
+      desc: 'Mercadoria chegou — confira itens, quantidades e NF.',
+      severity: 'critical' as Severity,
+      tab: 'purchase_orders',
     }] : []),
     ...(cart.length > 0 ? [{
       id: 'cart',
@@ -283,7 +294,7 @@ const Dashboard: React.FC<DashboardProps> = ({
     ...(staleQuoteSuppliers.length > 0 ? [{
       id: 'stale-quotes',
       icon: <AlertTriangle className="h-4 w-4" />,
-      title: `${staleQuoteSuppliers.length} cotacao${staleQuoteSuppliers.length === 1 ? '' : 'oes'} fora da validade`,
+      title: `${staleQuoteSuppliers.length} ${staleQuoteSuppliers.length === 1 ? 'cotacao' : 'cotacoes'} fora da validade`,
       desc: `Validade configurada: ${priceValidityDays} dias.`,
       severity: 'warning' as Severity,
       tab: 'suppliers',
@@ -328,7 +339,10 @@ const Dashboard: React.FC<DashboardProps> = ({
       severity: 'info' as Severity,
       tab: 'sales',
     }] : []),
-  ].slice(0, 5);
+  ].sort((a, b) => {
+    const rank: Record<Severity, number> = { critical: 0, warning: 1, info: 2, success: 3 };
+    return rank[a.severity] - rank[b.severity];
+  }).slice(0, 5);
 
   const primaryAction = cart.length > 0
     ? 'purchase_orders'
@@ -379,10 +393,10 @@ const Dashboard: React.FC<DashboardProps> = ({
           )}
         </section>
 
-        <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <section className={`grid grid-cols-2 gap-3 ${toCheckOrders.length > 0 ? 'lg:grid-cols-5' : 'lg:grid-cols-4'}`}>
           <MetricCard
             icon={<Bell className="h-5 w-5" />}
-            label="Pendencias"
+            label="Notificacoes"
             value={unresolvedNotifications.length}
             sub={unresolvedNotifications.length > 0 ? 'Requer revisao' : 'Tudo resolvido'}
             onClick={() => onNavigate(unresolvedNotifications.some(n => n.supplierId) ? 'suppliers' : 'uploads')}
@@ -390,19 +404,35 @@ const Dashboard: React.FC<DashboardProps> = ({
           />
           <MetricCard
             icon={<ClipboardList className="h-5 w-5" />}
-            label="Pedidos ativos"
+            label="Em aberto"
             value={activeOrders.length}
             sub={`${purchaseOrders.length} pedidos no total`}
             onClick={() => onNavigate('purchase_orders')}
             severity={activeOrders.length > 0 ? 'warning' : 'info'}
           />
+          {toCheckOrders.length > 0 && (
+            <MetricCard
+              icon={<Package className="h-5 w-5" />}
+              label="A conferir"
+              value={toCheckOrders.length}
+              sub="Mercadoria chegou"
+              onClick={() => onNavigate('purchase_orders')}
+              severity="critical"
+            />
+          )}
           <MetricCard
-            icon={<MessageSquare className="h-5 w-5" />}
-            label="Cotacoes disponiveis"
+            icon={<Scale className="h-5 w-5" />}
+            label="Prontas para comparar"
             value={suppliersWithQuotes.length}
-            sub={`${staleQuoteSuppliers.length} fora da validade`}
+            sub={suppliersWithQuotes.length > 0 ? `${staleQuoteSuppliers.length} fora da validade` : 'Sem cotacoes importadas'}
             onClick={() => onNavigate(suppliersWithQuotes.length > 0 ? 'comparator' : 'quote_request')}
-            severity={staleQuoteSuppliers.length > 0 ? 'warning' : 'info'}
+            severity={
+              staleQuoteSuppliers.length > 0 && staleQuoteSuppliers.length === suppliersWithQuotes.length
+                ? 'critical'
+                : staleQuoteSuppliers.length > 0
+                  ? 'warning'
+                  : 'info'
+            }
           />
           <MetricCard
             icon={<ShoppingCart className="h-5 w-5" />}
@@ -413,6 +443,58 @@ const Dashboard: React.FC<DashboardProps> = ({
             severity={cart.length > 0 ? 'warning' : 'info'}
           />
         </section>
+
+        {(priceMovers.topGainers.length > 0 || priceMovers.topLosers.length > 0) && (
+          <section>
+            <SectionHeader title="Variacao de precos — ultimos 7 dias" />
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              {priceMovers.topLosers.length > 0 && (
+                <div className="space-y-2">
+                  <p className="px-1 text-xs font-semibold uppercase tracking-wider text-emerald-400">Maiores quedas</p>
+                  {priceMovers.topLosers.slice(0, 3).map((entry, i) => (
+                    <button
+                      key={i}
+                      onClick={() => onNavigate('comparator')}
+                      className="flex w-full items-center gap-3 rounded-lg border border-emerald-500/20 bg-slate-900 p-3 text-left transition-all hover:border-emerald-500/40 hover:bg-slate-800/70"
+                    >
+                      <TrendingDown className="h-4 w-4 shrink-0 text-emerald-400" />
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-medium text-slate-200">{entry.productName}</p>
+                        <p className="truncate text-xs text-slate-500">{entry.supplierName}</p>
+                      </div>
+                      <div className="shrink-0 text-right">
+                        <p className="text-sm font-bold text-emerald-400">{entry.changePct.toFixed(1)}%</p>
+                        <p className="text-xs text-slate-500">R$ {entry.currentPrice.toFixed(2).replace('.', ',')}</p>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+              {priceMovers.topGainers.length > 0 && (
+                <div className="space-y-2">
+                  <p className="px-1 text-xs font-semibold uppercase tracking-wider text-red-400">Maiores altas</p>
+                  {priceMovers.topGainers.slice(0, 3).map((entry, i) => (
+                    <button
+                      key={i}
+                      onClick={() => onNavigate('comparator')}
+                      className="flex w-full items-center gap-3 rounded-lg border border-red-500/20 bg-slate-900 p-3 text-left transition-all hover:border-red-500/40 hover:bg-slate-800/70"
+                    >
+                      <TrendingUp className="h-4 w-4 shrink-0 text-red-400" />
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-medium text-slate-200">{entry.productName}</p>
+                        <p className="truncate text-xs text-slate-500">{entry.supplierName}</p>
+                      </div>
+                      <div className="shrink-0 text-right">
+                        <p className="text-sm font-bold text-red-400">+{entry.changePct.toFixed(1)}%</p>
+                        <p className="text-xs text-slate-500">R$ {entry.currentPrice.toFixed(2).replace('.', ',')}</p>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </section>
+        )}
 
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_1.15fr]">
           <section>
@@ -425,6 +507,14 @@ const Dashboard: React.FC<DashboardProps> = ({
                 onClick={() => onNavigate(primaryAction)}
                 highlight
               />
+              {suppliers.length > 0 && primaryAction !== 'quote_request' && (
+                <QuickAction
+                  icon={<MessageSquare className="h-4 w-4" />}
+                  label="Solicitar cotacao"
+                  desc="Pedir precos atualizados aos fornecedores"
+                  onClick={() => onNavigate('quote_request')}
+                />
+              )}
               <QuickAction
                 icon={<UploadCloud className="h-4 w-4" />}
                 label="Uploads"

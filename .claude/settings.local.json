@@ -12,7 +12,9 @@
       "Bash(node -e \"const fs = require\\('fs'\\); const content = fs.readFileSync\\('app/components/QuoteRequest.tsx', 'utf8'\\); const fixed = content.replace\\(/const searchNorm = \\\\\\(s: string\\\\\\) =>\\\\n  s\\\\.toLowerCase\\\\\\(\\\\\\)\\\\.normalize\\\\\\('NFD'\\\\\\)\\\\.replace\\\\\\(\\\\/\\\\[.*?\\\\]\\\\/g, ''\\\\\\);/, \\\\\"const searchNorm = \\(s: string\\) =>\\\\n  s.toLowerCase\\(\\).normalize\\('NFD'\\).replace\\(/[\\\\\\\\u0300-\\\\\\\\u036f]/g, ''\\);\\\\\"\\); console.log\\(fixed.includes\\('\\\\\\\\\\\\\\\\u0300'\\) ? 'FOUND unicode escape' : 'NOT FOUND'\\); console.log\\(fixed.substring\\(fixed.indexOf\\('searchNorm'\\), fixed.indexOf\\('searchNorm'\\) + 100\\)\\);\")",
       "Bash(node -e ' *)",
       "Bash(node_modules/.bin/tsc --noEmit)",
-      "PowerShell(cd \"g:\\\\Meu Drive\\\\APPS\\\\CATOS-MASTER-BUYER\\\\MasterBuyer-2026\\\\app\"; \\(Get-Content \"components\\\\QuoteDetailModal.tsx\"\\).Count)"
+      "PowerShell(cd \"g:\\\\Meu Drive\\\\APPS\\\\CATOS-MASTER-BUYER\\\\MasterBuyer-2026\\\\app\"; \\(Get-Content \"components\\\\QuoteDetailModal.tsx\"\\).Count)",
+      "PowerShell(\\(Get-Content \"g:\\\\Meu Drive\\\\APPS\\\\CATOS-MASTER-BUYER\\\\MasterBuyer-2026\\\\app\\\\components\\\\QuoteDetailModal.tsx\"\\).Count; \\(Get-Content \"g:\\\\Meu Drive\\\\APPS\\\\CATOS-MASTER-BUYER\\\\MasterBuyer-2026\\\\app\\\\components\\\\compras\\\\ItemRow.tsx\"\\).Count)",
+      "Bash(node_modules/.bin/tsc.cmd --noEmit)"
     ]
   }
 }

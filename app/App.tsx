@@ -8,6 +8,7 @@ import { appendAuditEntry } from './services/auditService';
 
 
 import { loadAllCatalogs, processBatchIntoCatalog, saveCatalog, normForMapping, makeProductId } from './services/compras/supplierCatalogService';
+import { OPEN_STATUSES } from './utils/orderUtils';
 import { RightSidebarProvider } from './contexts/RightSidebarContext';
 import RightActionSidebar from './components/RightActionSidebar';
 const NotificationCenter = lazy(() => import('./components/notifications_and_logs/NotificationCenter'));
@@ -974,9 +975,7 @@ const App: React.FC = () => {
   }, [globalPackRules, setSuppliers]);
 
   const activeOrdersCount = useMemo(
-    () => purchaseOrders.filter(o =>
-      ['draft', 'sent', 'confirmed', 'in_transit', 'awaiting'].includes(o.status)
-    ).length,
+    () => purchaseOrders.filter(o => OPEN_STATUSES.includes(o.status)).length,
     [purchaseOrders]
   );
 

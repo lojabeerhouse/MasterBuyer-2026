@@ -89,9 +89,7 @@ const NEXT_ACTIONS: Record<PurchaseOrderStatus, { to: PurchaseOrderStatus; label
   cancelled: [],
 };
 
-const OPEN_STATUSES: PurchaseOrderStatus[] = ['draft','sent','confirmed','in_transit','awaiting'];
-const CHECK_STATUSES: PurchaseOrderStatus[] = ['received_unchecked'];
-const DONE_STATUSES: PurchaseOrderStatus[] = ['received','entered_system','fully_checked'];
+import { OPEN_STATUSES, CHECK_STATUSES, DONE_STATUSES } from '../../utils/orderUtils';
 
 function fmtCurrency(v: number) { return `R$ ${v.toFixed(2).replace('.', ',')}`; }
 function fmtDate(ts?: number) {

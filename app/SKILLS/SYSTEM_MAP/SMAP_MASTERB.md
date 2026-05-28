@@ -45,6 +45,10 @@ Este documento serve como mapa de referência para a localização de todos os c
 | `BlacklistModal.tsx` | Modal da lista negra de itens do fornecedor |
 | `PackRulesModal.tsx` | Modal de exceções de embalagem por fornecedor |
 | `RawContentModal.tsx` | Modal de visualização de conteúdo bruto de cotação |
+| `ConfirmActionDialog.tsx` | Dialog de ban/delete com checkbox "não perguntar de novo" (extraído do QuoteDetailModal) |
+| `UnsavedChangesDialog.tsx` | Dialog de alterações não salvas ao fechar QuoteDetailModal |
+| `QuoteSection.tsx` | Seção de categoria com color map estático e render prop `renderRow` |
+| `ItemRow.tsx` | Linha de item de cotação (~288 linhas, extraído do QuoteDetailModal — renderItemRow) |
 | `SupplierCatalogView.tsx` | Visualização de catálogo do fornecedor |
 | `QuoteComparator.tsx` | Comparação de cotações multi-fornecedor |
 | `QuoteRequest.tsx` | Solicitação e envio de cotação |
@@ -89,6 +93,7 @@ Este documento serve como mapa de referência para a localização de todos os c
 | `parseNFe.ts` | Parser de XML de NF-e (extração sem IA) |
 | `parseQuoteLocal.ts` | Parser de arquivos locais de cotação |
 | `packRulesService.ts` | **Fonte única** de regras de lote: `DEFAULT_GLOBAL_PACK_RULES`, `applyRule`, `applyRulesToQuotes`, `filterBlacklisted`, `recalculateItem` |
+| `itemCategorizationService.ts` | `getItemCategory(item, productMappings, masterProducts, seenNames): ItemCategory` — função pura, sem closure sobre estado |
 
 ### Notificações e Logs (`notifications_and_logs/`)
 | Arquivo | Responsabilidade |

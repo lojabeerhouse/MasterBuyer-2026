@@ -187,6 +187,7 @@ export const parseQuoteLocal = (
       priceStrategy,
       isVerified: explicitQty !== null,
       isReprocessed: explicitQty === null && rulesQty > 1,
+      parseSource: '4-text',
     });
   }
 

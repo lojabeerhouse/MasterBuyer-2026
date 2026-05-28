@@ -134,6 +134,7 @@ export const parseQuoteContent = async (
           priceStrategy: priceMode as 'pack' | 'unit' | 'unknown',
           rawLine: item.rawLine ?? undefined,
           isVerified: priceMode !== 'unknown' && (item.packQuantity ?? 1) > 1,
+          parseSource: '5-ocr' as const,
         };
       });
 

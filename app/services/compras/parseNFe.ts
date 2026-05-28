@@ -256,6 +256,7 @@ export function parseNFe(xmlString: string): ParseNFeResult {
         priceStrategy: packQuantity > 1 ? 'pack' : 'unit',
         isVerified: true,    // dados vindos de NF são exatos — marca como verificado
         isReprocessed: false,
+        parseSource: '1-xml',
       };
 
       items.push(item);

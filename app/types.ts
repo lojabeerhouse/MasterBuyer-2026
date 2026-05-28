@@ -1,4 +1,6 @@
 
+export type ParseSource = '1-xml' | '2-nfepdf' | '3-pdftext' | '4-text' | '5-ocr';
+
 export interface ProductQuote {
   sku: string;
   name: string;
@@ -13,6 +15,9 @@ export interface ProductQuote {
   isReprocessed?: boolean; // If true, rule was applied automatically, needs verification
   isNovelty?: boolean; // If true, user explicitly marked this as a new/unknown product from this supplier
   isAiSuggested?: boolean; // If true, this value was suggested by AI and can be cleared on manual edit
+  parseSource?: ParseSource;     // immutable after parse — method that originated the data
+  isManuallyEdited?: boolean;    // set on any manual edit in QuoteDetailModal
+  appliedRuleId?: string;        // ID of the PackRule automatically applied
 }
 
 export interface QuoteBatch {

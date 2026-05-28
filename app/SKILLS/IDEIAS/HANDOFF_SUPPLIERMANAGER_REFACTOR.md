@@ -1,6 +1,6 @@
 # Handoff — Refatoração Estrutural SupplierManager + QuoteDetailModal
 **Data:** 2026-05-28  
-**Status:** ✅ Sessão 1 (Fases 1-3, 5, 6) + ✅ Sessão 2 (Bugs + Fase 4a) + ✅ Sessão 3 (Validação Arquitetônica) · ⏳ Fase 4b (renderItemRow) + ⏳ parseSource guards pendentes
+**Status:** ✅ Sessão 1 (Fases 1-3, 5, 6) + ✅ Sessão 2 (Bugs + Fase 4a) + ✅ Sessão 3 (Validação Arquitetônica) + ✅ Sessão 4 (Fase 4b — ItemRow) + ✅ Sessão 5 (parseSource + guards + especificidade)
 
 ---
 
@@ -151,7 +151,26 @@ O challenge de planejamento levantou risco de `revealedSuggestions` e `computedS
 
 ---
 
-## Arquitetura atual (pós-sessão 2)
+## O que foi feito — Sessão 4 (Fase 4b — ItemRow)
+
+### Extração do renderItemRow
+
+**QuoteDetailModal:** ~874 → **772 linhas** · TypeScript: exit code 0
+
+| Arquivo | Linhas | Responsabilidade |
+|---|---|---|
+| `app/components/compras/ItemRow.tsx` | 288 | Linha de item de cotação — props flat tipadas, sem closure sobre pai |
+
+**Abordagem adotada:** componente funcional com props individuais planas (não agrupadas em objetos).
+- Parent computa valores derivados antes de passar: `isSelected`, `rowAnimationType`, `isEditingName`, `suggestion`, `isDismissed`
+- `key={idx}` fica no `<ItemRow>` dentro do `renderItemRow` wrapper
+- Os `<tr>` dentro de `ItemRow` não têm `key` (correto — não estão em array no escopo do componente)
+- `getItemCategory` chamado uma vez no `ItemRow` e reutilizado (eliminadas as 3 chamadas redundantes do original)
+- SMAP atualizado com todos os componentes extraídos nas Sessões 2 e 4
+
+---
+
+## Arquitetura atual (pós-sessão 4) ✅ REFATORAÇÃO ESTRUTURAL COMPLETA
 
 ```
 SupplierManager (627 linhas, orquestrador)
@@ -162,16 +181,17 @@ SupplierManager (627 linhas, orquestrador)
   ├─ PackRulesModal ← parseInt corrigido
   ├─ RawContentModal
   ├─ QuoteCard ← React.memo padrão corrigido
-  └─ QuoteDetailModal (967 linhas) ← FASE 4b PENDENTE
+  └─ QuoteDetailModal (772 linhas)
        ├─ ConfirmActionDialog ← extraído (Sessão 2)
        ├─ UnsavedChangesDialog ← extraído (Sessão 2)
        ├─ QuoteSection ← extraído (Sessão 2); color map estático
        ├─ getItemCategory() via itemCategorizationService ← função pura (Sessão 2)
        ├─ LinkProductModal (externo)
        ├─ QuoteActionsPanel (externo, sidebar)
-       └─ renderItemRow (inline, ~230 linhas) ← FASE 4b PENDENTE
+       └─ ItemRow (288 linhas) ← extraído (Sessão 4)
 
 app/services/compras/itemCategorizationService.ts  ← NOVO (Sessão 2)
+app/components/compras/ItemRow.tsx                 ← NOVO (Sessão 4)
 ```
 
 ---
@@ -262,3 +282,28 @@ const sortedGlobal = [...globalRules].sort((a, b) => b.term.length - a.term.leng
 ```
 
 **Exceção por fornecedor (Ideia 1):** JÁ EXISTE e é necessária. Sem ambiguidade: cada QuoteBatch sabe de qual supplier veio, supplier rules sempre aplicam antes das globais.
+
+---
+
+## O que foi feito — Sessão 5 (parseSource + guards + especificidade)
+
+> Implementado antes da Sessão 4 ser documentada — confirmado por git status em 2026-05-28.
+
+| Arquivo | O que foi feito |
+|---|---|
+| `app/types.ts` | `export type ParseSource = '1-xml' \| '2-nfepdf' \| '3-pdftext' \| '4-text' \| '5-ocr'` + campos `parseSource?`, `isManuallyEdited?`, `appliedRuleId?` em `ProductQuote` |
+| `app/services/compras/parseNFe.ts` | `parseSource: '1-xml'` em cada `ProductQuote` criado |
+| `app/services/compras/parseQuoteLocal.ts` | `parseSource: '4-text'` em cada `ProductQuote` criado |
+| `app/services/geminiService.ts` | `parseSource: '5-ocr' as const` em cada `ProductQuote` criado |
+| `app/services/compras/packRulesService.ts` | `FISCAL_SOURCES` guard em `applyRule()` + sort por `term.length` desc em `applyRulesToQuotes()` |
+| `app/components/QuoteDetailModal.tsx` | `isManuallyEdited: true` nos 5 handlers: `saveItemName`, `updateItemStrategy`, `updateItemPackQuantityLocal`, `updateItemPriceLocal`, `toggleItemNovelty` |
+
+---
+
+## Próxima etapa — Sessão 6: knownPackQtys em MasterProduct (UX)
+
+Escopo:
+1. `knownPackQtys?: number[]` + `defaultPackQty?: number` em `MasterProduct` em `types.ts`
+2. Campo de preenchimento no modal de master products
+3. `ItemRow.tsx`: quando item linkado a master com `knownPackQtys`, input de lote vira `<select>` com opções + "outro"
+4. Seleção → `isManuallyEdited: true` via callback `updateItemPackQuantityLocal`
