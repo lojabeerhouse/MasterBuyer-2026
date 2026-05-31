@@ -15,6 +15,10 @@ export default defineConfig(({ mode, command }) => {
       'process.env.API_KEY': JSON.stringify(env.API_KEY || process.env.API_KEY)
     },
 
+    optimizeDeps: {
+      exclude: ['pdfjs-dist'],
+    },
+
     build: {
       outDir: 'dist',
       rollupOptions: {
@@ -30,6 +34,8 @@ export default defineConfig(({ mode, command }) => {
               return 'vendor-charts';
             if (id.includes('node_modules/lucide-react'))
               return 'vendor-lucide';
+            if (id.includes('node_modules/pdfjs-dist'))
+              return 'vendor-pdfjs';
           }
         }
       }

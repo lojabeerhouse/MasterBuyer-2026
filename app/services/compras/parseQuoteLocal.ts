@@ -1,4 +1,4 @@
-import { ProductQuote } from '../../types';
+import { ProductQuote, ParseSource } from '../../types';
 
 /**
  * Parser local v3 — sem Gemini, 100% offline
@@ -148,7 +148,8 @@ const extractDateFromText = (text: string): number | undefined => {
 export const parseQuoteLocal = (
   text: string,
   globalPackRules: { term: string; quantity: number }[] = [],
-  supplierPackRules: { term: string; quantity: number }[] = []
+  supplierPackRules: { term: string; quantity: number }[] = [],
+  sourceOverride?: ParseSource
 ): { items: ProductQuote[]; detectedDate?: number } => {
   const allRules = [...supplierPackRules, ...globalPackRules];
   const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 2);
@@ -187,7 +188,7 @@ export const parseQuoteLocal = (
       priceStrategy,
       isVerified: explicitQty !== null,
       isReprocessed: explicitQty === null && rulesQty > 1,
-      parseSource: '4-text',
+      parseSource: sourceOverride ?? '4-text',
     });
   }
 

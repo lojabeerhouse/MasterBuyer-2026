@@ -1,6 +1,6 @@
 import React, { useState, useRef, useMemo, useCallback } from 'react';
-import { Supplier, QuoteBatch, ProductQuote, PackRule, ProductMapping, MasterProduct, PriceValidityConfig } from '../../types';
-import { Upload, Trash2, FileText, CheckCircle, Plus, Ban, Eye, Pencil, MessageCircle, MapPin, Search, Files, FilePlus, Archive, Loader2, Settings, Bot, Package, X as XIcon } from 'lucide-react';
+import { Supplier, QuoteBatch, ProductQuote, PackRule, ProductMapping, MasterProduct, PriceValidityConfig, SupplierCatalog } from '../../types';
+import { Upload, Trash2, FileText, CheckCircle, Plus, Ban, Eye, Pencil, MessageCircle, MapPin, Search, Files, FilePlus, Archive, Loader2, Settings, Bot, Package, X as XIcon, AlertTriangle, RotateCcw } from 'lucide-react';
 import QuoteDetailModal from '../QuoteDetailModal';
 import QuoteCard from './QuoteCard';
 import SupplierEditModal from './SupplierEditModal';
@@ -15,6 +15,7 @@ import { applyRulesToQuotes } from '../../services/compras/packRulesService';
 interface SupplierManagerProps {
   suppliers: Supplier[];
   setSuppliers: React.Dispatch<React.SetStateAction<Supplier[]>>;
+  supplierCatalogs?: Record<string, SupplierCatalog>;
   globalPackRules: PackRule[];
   onBatchCompleted?: (batch: QuoteBatch, supplierId: string) => void;
   uid?: string;
@@ -28,9 +29,9 @@ interface SupplierManagerProps {
 }
 
 const SupplierManager: React.FC<SupplierManagerProps> = ({
-  suppliers, setSuppliers, globalPackRules, onBatchCompleted, onBatchDateChange,
+  suppliers, setSuppliers, supplierCatalogs, globalPackRules, onBatchCompleted, onBatchDateChange,
   productMappings, masterProducts, onAddMapping, onRemoveMapping,
-  priceValidityConfig, setPriceValidityConfig
+  priceValidityConfig, setPriceValidityConfig,
 }) => {
   const [newSupplierName, setNewSupplierName] = useState('');
   const [activeTab, setActiveTab] = useState<string | null>(() => suppliers[0]?.id ?? null);
@@ -92,6 +93,36 @@ const SupplierManager: React.FC<SupplierManagerProps> = ({
     setSuppliers(remaining);
     if (activeTab === id) setActiveTab(remaining[0]?.id ?? null);
   };
+
+  // ── Recovery: reconstrói suppliers a partir dos catálogos sobreviventes ──────
+  // Usado quando suppliers foi zerado por falha de carga mas catalogs/ persistem.
+  const canRecoverFromCatalogs = useMemo(
+    () => suppliers.length === 0 && !!supplierCatalogs && Object.keys(supplierCatalogs).length > 0,
+    [suppliers.length, supplierCatalogs]
+  );
+
+  const reconstructSuppliersFromCatalogs = useCallback(() => {
+    if (!supplierCatalogs) return;
+    const catalogs = Object.values(supplierCatalogs) as SupplierCatalog[];
+    const reconstructed: Supplier[] = catalogs
+      .filter(c => !!c.supplierId)
+      .map(c => ({
+        id: c.supplierId,
+        name: c.supplierName || 'Fornecedor recuperado',
+        isEnabled: true,
+        quotes: [],
+        blacklist: [],
+        packRules: [],
+      }));
+    if (reconstructed.length === 0) return;
+    if (!window.confirm(
+      `Reconstruir ${reconstructed.length} fornecedor(es) a partir dos catálogos?\n\n` +
+      `ATENÇÃO: Apenas id, nome e isEnabled serão recuperados. ` +
+      `Cotações, blacklist, packRules, whatsapp, endereço e logística precisarão ser reconfigurados manualmente.`
+    )) return;
+    setSuppliers(reconstructed);
+    setActiveTab(reconstructed[0]?.id ?? null);
+  }, [supplierCatalogs, setSuppliers]);
 
   const saveSupplierEdit = (updated: Supplier) => {
     setSuppliers(prev => prev.map(s => s.id === updated.id ? { ...s, ...updated } : s));
@@ -292,6 +323,29 @@ const SupplierManager: React.FC<SupplierManagerProps> = ({
   // ── Render ────────────────────────────────────────────────────────────────────
   return (
     <>
+      {canRecoverFromCatalogs && (
+        <div className="mb-4 bg-amber-950/30 border border-amber-700/50 rounded-xl p-4 flex items-start gap-3">
+          <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+          <div className="flex-1">
+            <h3 className="text-amber-300 font-semibold text-sm mb-1">
+              Lista de fornecedores vazia, mas há catálogos preservados
+            </h3>
+            <p className="text-slate-300 text-xs leading-relaxed mb-3">
+              Detectamos {Object.keys(supplierCatalogs!).length} catálogo(s) de fornecedor no banco, mas a lista
+              de fornecedores está vazia. Isso pode indicar perda de dados.
+              Você pode reconstruir a lista a partir dos catálogos (apenas <code className="text-amber-400">id</code>,
+              <code className="text-amber-400"> nome</code> e <code className="text-amber-400"> isEnabled</code> serão recuperados).
+            </p>
+            <button
+              onClick={reconstructSuppliersFromCatalogs}
+              className="inline-flex items-center gap-2 bg-amber-600 hover:bg-amber-700 text-white text-xs font-medium px-3 py-2 rounded-lg transition-colors"
+            >
+              <RotateCcw className="w-4 h-4" />
+              Reconstruir fornecedores dos catálogos
+            </button>
+          </div>
+        </div>
+      )}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6 h-full relative">
         <style>{`@keyframes progressFill { from { transform: scaleX(0); } to { transform: scaleX(1); } }`}</style>
 

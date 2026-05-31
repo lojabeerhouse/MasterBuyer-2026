@@ -1,7 +1,11 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo, lazy, Suspense } from 'react';
 import { signInWithPopup, signOut, onAuthStateChanged, User } from 'firebase/auth';
 import { auth, googleProvider } from './firebaseConfig';
-import { saveUserData, loadUserData, saveChunkedData, loadChunkedData } from './services/firebaseService';
+import {
+  saveUserData, loadUserData, saveChunkedData, loadChunkedData, resetSessionGuards,
+  loadAllSuppliers, upsertSuppliers, deleteSuppliers,
+  loadAllPurchaseOrders, upsertPurchaseOrders, deletePurchaseOrders,
+} from './services/firebaseService';
 import { loadNotifications, saveNotifications, processBatchIntoHistory, resolveDuplicate, normalizeProductKey, loadPriceHistory, savePriceHistory } from './services/compras/historyService';
 import { initLogger, addLogListener } from './services/notifications_and_logs/loggerService';
 import { appendAuditEntry } from './services/auditService';
@@ -381,6 +385,11 @@ const App: React.FC = () => {
   const profileDropdownRef = useRef<HTMLDivElement>(null);
   const mobileMenuRef = useRef<HTMLDivElement>(null);
 
+  // Refs para diff de chaves com escrita por delta (1 doc/item no Firestore).
+  // Atualizados em loadAllData e no useEffect de save após o flush para Firestore.
+  const prevSuppliersRef = useRef<Supplier[]>([]);
+  const prevPurchaseOrdersRef = useRef<PurchaseOrder[]>([]);
+
   // Fecha dropdowns ao clicar fora
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -434,7 +443,7 @@ const App: React.FC = () => {
       savedConsiderStock,
       savedPackRules,
     ] = await Promise.all([
-      loadUserData<Supplier[]>(uid, 'suppliers', []),
+      loadAllSuppliers<Supplier>(uid),
       loadUserData<SalesRecord[]>(uid, 'salesData', []),
       loadUserData(uid, 'salesConfig', { historyDays: 60, inflation: 10, forecastDays: 7 }),
       loadUserData<ForecastItem[]>(uid, 'forecast', []),
@@ -448,6 +457,9 @@ const App: React.FC = () => {
       loadUserData<PackRule[]>(uid, 'globalPackRules', DEFAULT_GLOBAL_PACK_RULES),
     ]);
 
+    // Sincroniza ref de diff ANTES do setSuppliers para que o useEffect de delta
+    // veja prev === next na primeira execução pós-load e não dispare upserts.
+    prevSuppliersRef.current = savedSuppliers;
     setSuppliers(savedSuppliers);
     setSalesData(savedSalesData);
     setSalesConfig(savedSalesConfig);
@@ -476,7 +488,7 @@ const App: React.FC = () => {
     const [savedHidden, savedAppSettings, savedPurchaseOrders, savedUserProfile, savedQuoteStages, savedInventoryCount, savedCategoryTree, savedInventoryTimestamps] = await Promise.all([
       loadUserData<HiddenProduct[]>(uid, 'hiddenProducts', []),
       loadUserData<AppSettings>(uid, 'appSettings', { showInactiveProducts: false, priceValidityDays: 7 }),
-      loadUserData<PurchaseOrder[]>(uid, 'purchaseOrders', []),
+      loadAllPurchaseOrders<PurchaseOrder>(uid),
       loadUserData<UserProfile>(uid, 'userProfile', DEFAULT_USER_PROFILE),
       loadUserData<QuoteStage[]>(uid, 'quoteStages', []),
       loadUserData<InventoryCountMap>(uid, 'inventoryCount', {}),
@@ -485,6 +497,8 @@ const App: React.FC = () => {
     ]);
     setHiddenProducts(savedHidden);
     setAppSettings(savedAppSettings);
+    // Mesma sincronização do ref de diff para purchaseOrders.
+    prevPurchaseOrdersRef.current = savedPurchaseOrders;
     setPurchaseOrders(savedPurchaseOrders);
     setUserProfile(savedUserProfile);
     setQuoteStages(savedQuoteStages);
@@ -499,7 +513,24 @@ const App: React.FC = () => {
   // --- SALVA NO FIREBASE ---
   const uid = user?.uid;
 
-  useEffect(() => { if (uid && isLoaded) saveUserData(uid, 'suppliers', suppliers); }, [suppliers, uid, isLoaded]);
+  // Delta-write para suppliers: compara prev vs next, upserta apenas alterados,
+  // deleta apenas removidos. Nunca escreve o array inteiro.
+  useEffect(() => {
+    if (!uid || !isLoaded) return;
+    const prev = prevSuppliersRef.current;
+    const prevMap = new Map<string, Supplier>(prev.map((s: Supplier) => [s.id, s]));
+    const nextMap = new Map<string, Supplier>(suppliers.map((s: Supplier) => [s.id, s]));
+    const deletedIds: string[] = [];
+    for (const old of prev) if (!nextMap.has(old.id)) deletedIds.push(old.id);
+    const changed: Supplier[] = [];
+    for (const s of suppliers) {
+      const old = prevMap.get(s.id);
+      if (!old || JSON.stringify(old) !== JSON.stringify(s)) changed.push(s);
+    }
+    if (deletedIds.length > 0) deleteSuppliers(uid, deletedIds);
+    if (changed.length > 0) upsertSuppliers(uid, changed);
+    prevSuppliersRef.current = suppliers;
+  }, [suppliers, uid, isLoaded]);
   useEffect(() => { if (uid && isLoaded) saveUserData(uid, 'salesData', salesData); }, [salesData, uid, isLoaded]);
   useEffect(() => { if (uid && isLoaded) saveUserData(uid, 'salesConfig', salesConfig); }, [salesConfig, uid, isLoaded]);
   useEffect(() => { if (uid && isLoaded) saveUserData(uid, 'forecast', forecast); }, [forecast, uid, isLoaded]);
@@ -511,7 +542,23 @@ const App: React.FC = () => {
   useEffect(() => { if (uid && isLoaded) saveUserData(uid, 'salesUrl', salesUrl); }, [salesUrl, uid, isLoaded]);
   useEffect(() => { if (uid && isLoaded) saveUserData(uid, 'considerStock', considerStock); }, [considerStock, uid, isLoaded]);
   useEffect(() => { if (uid && isLoaded) saveUserData(uid, 'globalPackRules', globalPackRules); }, [globalPackRules, uid, isLoaded]);
-  useEffect(() => { if (uid && isLoaded) saveUserData(uid, 'purchaseOrders', purchaseOrders); }, [purchaseOrders, uid, isLoaded]);
+  // Delta-write para purchaseOrders (mesmo padrão de suppliers).
+  useEffect(() => {
+    if (!uid || !isLoaded) return;
+    const prev = prevPurchaseOrdersRef.current;
+    const prevMap = new Map<string, PurchaseOrder>(prev.map((o: PurchaseOrder) => [o.id, o]));
+    const nextMap = new Map<string, PurchaseOrder>(purchaseOrders.map((o: PurchaseOrder) => [o.id, o]));
+    const deletedIds: string[] = [];
+    for (const old of prev) if (!nextMap.has(old.id)) deletedIds.push(old.id);
+    const changed: PurchaseOrder[] = [];
+    for (const o of purchaseOrders) {
+      const old = prevMap.get(o.id);
+      if (!old || JSON.stringify(old) !== JSON.stringify(o)) changed.push(o);
+    }
+    if (deletedIds.length > 0) deletePurchaseOrders(uid, deletedIds);
+    if (changed.length > 0) upsertPurchaseOrders(uid, changed);
+    prevPurchaseOrdersRef.current = purchaseOrders;
+  }, [purchaseOrders, uid, isLoaded]);
   useEffect(() => { if (uid && isLoaded) saveUserData(uid, 'priceValidityConfig', priceValidityConfig); }, [priceValidityConfig, uid, isLoaded]);
   useEffect(() => { if (uid && isLoaded) saveUserData(uid, 'hiddenProducts', hiddenProducts); }, [hiddenProducts, uid, isLoaded]);
   useEffect(() => { if (uid && isLoaded) saveUserData(uid, 'appSettings', appSettings); }, [appSettings, uid, isLoaded]);
@@ -794,7 +841,10 @@ const App: React.FC = () => {
 
   const handleClearAllHidden = useCallback(() => {
     setHiddenProducts([]);
-  }, []);
+    // Clear intencional → autoriza save vazio uma vez (atualiza lastCount=0).
+    // O useEffect subsequente verá prev=0, next=0, e a Invariante 2 não dispara.
+    if (uid) saveUserData(uid, 'hiddenProducts', [], { allowEmpty: true });
+  }, [uid]);
 
   // --- AUTH ---
   const handleLogin = async () => {
@@ -810,8 +860,15 @@ const App: React.FC = () => {
 
   const handleLogout = async () => {
     await signOut(auth);
-    setUser(null);
+    // Resetar guards ANTES dos setters: garante que useEffects não disparem
+    // saves residuais com isLoaded=true antes do React processar o batch.
     setIsLoaded(false);
+    resetSessionGuards();
+    // Reset dos refs de diff — sem isso, no próximo login os deltas seriam
+    // calculados contra os dados do usuário anterior.
+    prevSuppliersRef.current = [];
+    prevPurchaseOrdersRef.current = [];
+    setUser(null);
     setSuppliers([]);
     setSalesData([]);
     setForecast([]);
@@ -1388,6 +1445,7 @@ const App: React.FC = () => {
                 {activeTab === 'suppliers' && (
                   <SupplierManager
                     suppliers={suppliers} setSuppliers={setSuppliers}
+                    supplierCatalogs={supplierCatalogs}
                     globalPackRules={globalPackRules}
                     onBatchCompleted={handleBatchCompleted}
                     uid={uid ?? ''}

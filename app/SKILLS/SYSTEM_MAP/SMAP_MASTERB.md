@@ -91,7 +91,8 @@ Este documento serve como mapa de referência para a localização de todos os c
 | `historyService.ts` | Histórico de cotações e detecção de duplicidades |
 | `supplierCatalogService.ts` | Normalização de catálogos de fornecedores |
 | `parseNFe.ts` | Parser de XML de NF-e (extração sem IA) |
-| `parseQuoteLocal.ts` | Parser de arquivos locais de cotação |
+| `parseQuoteLocal.ts` | Parser de arquivos locais de cotação (texto/CSV); aceita `sourceOverride?: ParseSource` |
+| `extractTextFromPdf.ts` | Extração de texto de PDF via pdfjs-dist (client-side); gate de confiança heurístico |
 | `packRulesService.ts` | **Fonte única** de regras de lote: `DEFAULT_GLOBAL_PACK_RULES`, `applyRule`, `applyRulesToQuotes`, `filterBlacklisted`, `recalculateItem` |
 | `itemCategorizationService.ts` | `getItemCategory(item, productMappings, masterProducts, seenNames): ItemCategory` — função pura, sem closure sobre estado |
 
@@ -113,7 +114,7 @@ Este documento serve como mapa de referência para a localização de todos os c
 ### Gerais
 | Arquivo | Responsabilidade |
 |---|---|
-| `firebaseService.ts` | Integração Firestore (carregar/salvar dados de usuário) |
+| `firebaseService.ts` | Integração Firestore. **Blob** (`loadUserData`/`saveUserData` + guards `hydrated`/`lastCount`). **Chunked** (`loadChunkedData`/`saveChunkedData`, usado por masterProducts). **Delta** (`loadAllSuppliers`/`upsertSuppliers`/`deleteSuppliers`, `loadAllPurchaseOrders`/`upsertPurchaseOrders`/`deletePurchaseOrders` — escrita por item, nunca dataset inteiro). `resetSessionGuards()` deve ser chamado no logout. |
 | `geminiService.ts` | Chamadas ao Gemini (parse PDF/imagem de cotações) |
 
 ---
@@ -122,27 +123,52 @@ Este documento serve como mapa de referência para a localização de todos os c
 
 | Arquivo | Responsabilidade |
 |---|---|
-| `useFileProcessor.ts` | Decide rota de parse (XML → parseNFe / PDF+img → Gemini), aplica packRules |
+| `useFileProcessor.ts` | Decide rota de parse (XML → parseNFe / PDF → local first → fallback Gemini / outros → Gemini); aplica packRules; aceita `options.forceGemini` |
 | `useUploadQueue.ts` | Gerencia fila de upload, drag-and-drop e processamento assíncrono sequencial de arquivos |
 
 ---
 
-## Firestore Keys (`users/{userId}/data/{key}`)
+## Firestore — Coleções delta (1 doc por item)
 
-| Key | Conteúdo |
-|---|---|
-| `suppliers` | Fornecedores parceiros |
-| `salesData` | Histórico de vendas |
-| `salesConfig` | Configurações do dashboard de vendas |
-| `forecast` | Previsão de demanda consolidada |
-| `cart` | Carrinho de compras planejadas |
-| `mappings` | Mapeamentos catálogo fornecedor → produto master |
-| `ignoredMappings` | Associações ignoradas pelo operador |
-| `masterProducts` | Cadastro de produtos master |
-| `dbSheetUrl` | URL das planilhas integradas |
-| `salesUrl` | URL da fonte de dados de vendas |
-| `considerStock` | Boolean — considerar estoque no assistente |
-| `globalPackRules` | Regras globais de conversão caixa/unidade |
-| `globalNamingRules` | Regras globais de nomenclatura |
-| `error_logs` | Logs de erro persistidos em produção |
-| `purchaseOrders` | Pedidos de compra (kanban) |
+> Padrão: `users/{uid}/{collection}/{itemId}` · Escrita via `writeBatch` com upsert/delete por id.
+> Nunca escreve o array inteiro. Migração one-shot automática a partir do blob legado.
+
+| Coleção | Conteúdo | API em firebaseService.ts |
+|---|---|---|
+| `users/{uid}/suppliers/{id}` | Fornecedores parceiros | `loadAllSuppliers` / `upsertSuppliers` / `deleteSuppliers` |
+| `users/{uid}/purchaseOrders/{id}` | Pedidos de compra (kanban) | `loadAllPurchaseOrders` / `upsertPurchaseOrders` / `deletePurchaseOrders` |
+| `users/{uid}/catalogs/{supplierId}` | Catálogo de cotações por fornecedor | `loadAllCatalogs` / `saveCatalog` (em `supplierCatalogService.ts`) |
+
+---
+
+## Firestore — Blobs (`users/{uid}/data/{key}`)
+
+> Padrão: `{ value: JSON.stringify(dado), updatedAt: number }`.
+> Protegidos por guards `hydrated` + `lastCount` em `firebaseService.ts`.
+> `suppliers` e `purchaseOrders` estão nesta tabela como **deprecated** (legado preservado para rollback).
+
+| Key | Conteúdo | Status |
+|---|---|---|
+| `suppliers` | Fornecedores parceiros | **DEPRECATED** — migrado para coleção delta em 2026-05-28 |
+| `purchaseOrders` | Pedidos de compra (kanban) | **DEPRECATED** — migrado para coleção delta em 2026-05-28 |
+| `salesData` | Histórico de vendas | ativo |
+| `salesConfig` | Configurações do dashboard de vendas | ativo |
+| `forecast` | Previsão de demanda consolidada | ativo |
+| `cart` | Carrinho de compras planejadas | ativo |
+| `mappings` | Mapeamentos catálogo fornecedor → produto master | ativo |
+| `ignoredMappings` | Associações ignoradas pelo operador | ativo |
+| `masterProducts` | Cadastro de produtos master (chunked: `_meta` + `_0`,`_1`...) | ativo — candidato à migração delta futura |
+| `dbSheetUrl` | URL das planilhas integradas | ativo |
+| `salesUrl` | URL da fonte de dados de vendas | ativo |
+| `considerStock` | Boolean — considerar estoque no assistente | ativo |
+| `globalPackRules` | Regras globais de conversão caixa/unidade | ativo |
+| `globalNamingRules` | Regras globais de nomenclatura | ativo |
+| `error_logs` | Logs de erro persistidos em produção | ativo |
+| `hiddenProducts` | Produtos ocultados no catálogo | ativo |
+| `appSettings` | Configurações gerais do app | ativo |
+| `userProfile` | Perfil do usuário (nome, empresa, endereços) | ativo |
+| `quoteStages` | Etapas de pipeline de cotação | ativo |
+| `inventoryCount` | Contagens de estoque pendentes (não confirmadas) | ativo |
+| `inventoryTimestamps` | Timestamps de última contagem por produto | ativo |
+| `categoryTree` | Árvore de categorias de produtos | ativo |
+| `priceValidityConfig` | Configuração de validade de preços | ativo |

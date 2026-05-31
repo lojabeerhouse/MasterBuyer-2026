@@ -64,7 +64,7 @@ const UploadCenter: React.FC<UploadCenterProps> = ({ suppliers, globalPackRules,
        setFiles(prev => prev.filter(f => !f.isSelected));
    };
 
-   const processItem = async (id: string) => {
+   const processItem = async (id: string, options?: { forceGemini?: boolean }) => {
        const item = files.find(f => f.id === id);
        if (!item || !item.supplierId || item.tags.length === 0) {
            updateFile(id, { status: 'error', errorMessage: 'Fornecedor e Tag obrigatórios.' });
@@ -73,10 +73,10 @@ const UploadCenter: React.FC<UploadCenterProps> = ({ suppliers, globalPackRules,
        const supplier = suppliers.find(s => s.id === item.supplierId);
 
        updateFile(id, { status: 'processing', errorMessage: undefined });
-       
+
        const _uploadedAt = Date.now();
-       const result = await processFile(item.file, supplier, globalPackRules);
-       
+       const result = await processFile(item.file, supplier, globalPackRules, options);
+
        if (result.errorMessage) {
            updateFile(id, { status: 'error', errorMessage: result.errorMessage });
        } else {
@@ -98,6 +98,8 @@ const UploadCenter: React.FC<UploadCenterProps> = ({ suppliers, globalPackRules,
            updateFile(id, { status: 'completed' });
        }
    };
+
+   const reprocessItemWithAI = (id: string) => processItem(id, { forceGemini: true });
 
    const processSelected = () => {
        const selectedIds = files.filter(f => f.isSelected && f.status !== 'completed').map(f => f.id);
@@ -197,6 +199,7 @@ const UploadCenter: React.FC<UploadCenterProps> = ({ suppliers, globalPackRules,
                         onUpdate={updateFile}
                         onRemove={removeFile}
                         onProcess={processItem}
+                        onReprocessWithAI={reprocessItemWithAI}
                         processedBatch={processedBatches[item.id]}
                         onCreateOrder={onCreateOrder ? (items, supplierId) => {
                           onCreateOrder(items, supplierId);

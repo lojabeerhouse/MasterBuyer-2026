@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Supplier, QuoteBatch, CartItem } from '../types';
-import { FileText, FileCode, Image as ImageIcon, File, Trash2, Send, Loader2, AlertCircle, CheckCircle, Search, ChevronDown, ShoppingCart, X, Plus } from 'lucide-react';
+import { FileText, FileCode, Image as ImageIcon, File, Trash2, Send, Loader2, AlertCircle, CheckCircle, Search, ChevronDown, ShoppingCart, X, Plus, RefreshCw } from 'lucide-react';
 
 export type FileTag = 'quote' | 'order' | 'invoice';
 
@@ -21,11 +21,12 @@ interface UploadItemProps {
   onUpdate: (id: string, partial: Partial<UploadedFileData>) => void;
   onRemove: (id: string) => void;
   onProcess: (id: string) => void;
+  onReprocessWithAI?: (id: string) => void;
   processedBatch?: { batch: QuoteBatch; supplierId: string };
   onCreateOrder?: (items: CartItem[], supplierId: string) => void;
 }
 
-const UploadItem: React.FC<UploadItemProps> = ({ item, suppliers, onUpdate, onRemove, onProcess, processedBatch, onCreateOrder }) => {
+const UploadItem: React.FC<UploadItemProps> = ({ item, suppliers, onUpdate, onRemove, onProcess, onReprocessWithAI, processedBatch, onCreateOrder }) => {
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [supplierSearch, setSupplierSearch] = useState('');
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -144,12 +145,31 @@ const UploadItem: React.FC<UploadItemProps> = ({ item, suppliers, onUpdate, onRe
       {/* Nome e Tamanho */}
       <div className="flex-1 min-w-0">
         <h4 className="text-white font-medium truncate" title={item.file.name}>{item.file.name}</h4>
-        <div className="flex items-center gap-2 mt-1">
+        <div className="flex items-center gap-2 mt-1 flex-wrap">
           <span className="text-xs text-slate-400">{formatSize(item.file.size)}</span>
           {getStatusIcon()}
           {item.status === 'error' && item.errorMessage && (
              <span className="text-xs text-red-400 truncate max-w-[200px]" title={item.errorMessage}>{item.errorMessage}</span>
           )}
+          {processedBatch && (() => {
+            const src = processedBatch.batch.items[0]?.parseSource;
+            if (src === '3-pdftext') return (
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-green-900/50 text-green-400 border border-green-800/50 font-medium leading-none">
+                Local · PDF
+              </span>
+            );
+            if (src === '5-ocr') return (
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-700/50 text-slate-400 border border-slate-700 font-medium leading-none">
+                IA · Gemini
+              </span>
+            );
+            if (src === '1-xml') return (
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-900/50 text-blue-400 border border-blue-800/50 font-medium leading-none">
+                XML · NF-e
+              </span>
+            );
+            return null;
+          })()}
         </div>
       </div>
 
@@ -265,6 +285,17 @@ const UploadItem: React.FC<UploadItemProps> = ({ item, suppliers, onUpdate, onRe
                 {item.status === 'processing' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
                 <span className="hidden sm:inline">Enviar</span>
             </button>
+            {processedBatch && processedBatch.batch.items[0]?.parseSource === '3-pdftext' && onReprocessWithAI && (
+              <button
+                onClick={() => onReprocessWithAI(item.id)}
+                disabled={item.status === 'processing'}
+                className="flex items-center gap-1.5 px-3 py-2 bg-slate-700 hover:bg-slate-600 disabled:opacity-50 text-slate-300 hover:text-white rounded-lg transition-colors border border-slate-600 text-xs font-medium"
+                title="Reprocessar com IA (Gemini)"
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Via IA</span>
+              </button>
+            )}
             {processedBatch && onCreateOrder && (
               <button
                 onClick={openOrderModal}
