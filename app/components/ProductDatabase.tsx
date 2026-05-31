@@ -333,11 +333,11 @@ const ProductDatabase: React.FC<ProductDatabaseProps> = ({ masterProducts = [], 
     const handleSaveEdit = () => {
         const now = new Date().toISOString();
         let changedCount = 0;
-        
+
         const finalProducts = draftProducts.map(draftP => {
             const original = masterProducts.find(m => m.id === draftP.id);
             if (!original) return draftP;
-            
+
             const changes: any[] = [];
             ALL_COLUMNS.forEach(col => {
                 if (col.id !== 'margin' && col.id !== 'lastUpdatedAt' && col.editable) {
@@ -348,7 +348,7 @@ const ProductDatabase: React.FC<ProductDatabaseProps> = ({ masterProducts = [], 
                     }
                 }
             });
-            
+
             if (changes.length > 0) {
                 changedCount++;
                 const audited = {
@@ -357,7 +357,7 @@ const ProductDatabase: React.FC<ProductDatabaseProps> = ({ masterProducts = [], 
                     lastUpdatedBy: userDisplay || userId || 'Sistema',
                     lastUpdateSource: 'manual_edit' as const
                 };
-                
+
                 if (userId) {
                     appendAuditEntry(userId, draftP.id, draftP.sku, {
                         timestamp: now,
@@ -957,7 +957,7 @@ const ProductDatabase: React.FC<ProductDatabaseProps> = ({ masterProducts = [], 
             else if (product.lastUpdateSource === 'manual_edit') icon = <Pencil className="w-3 h-3 text-blue-400" />;
             else if (product.lastUpdateSource === 'ai_edit') icon = <Sparkles className="w-3 h-3 text-purple-400" />;
             else if (product.lastUpdateSource === 'inventory_sync') icon = <Package className="w-3 h-3 text-green-400" />;
-            
+
             return (
                 <div className="flex items-center gap-1.5 justify-center text-slate-300 text-xs">
                     {icon}
@@ -981,7 +981,7 @@ const ProductDatabase: React.FC<ProductDatabaseProps> = ({ masterProducts = [], 
             }
             return (
                 <div className="flex items-center gap-2">
-                    <button 
+                    <button
                         onClick={(e) => { e.stopPropagation(); setHistoryProduct(product); }}
                         className="text-slate-500 hover:text-amber-400 transition-colors"
                         title="Ver histórico de alterações"
@@ -1613,7 +1613,7 @@ const ProductDatabase: React.FC<ProductDatabaseProps> = ({ masterProducts = [], 
                                     let typeColor = 'text-slate-400';
                                     let typeBg = 'bg-slate-900';
                                     let typeLabel = 'Edição';
-                                    
+
                                     if (log.source === 'import') { icon = <Upload className="w-4 h-4 text-amber-400" />; typeColor = 'text-amber-400'; typeBg = 'bg-amber-900/30'; typeLabel = 'Importação CSV'; }
                                     else if (log.source === 'manual_edit') { icon = <Pencil className="w-4 h-4 text-blue-400" />; typeColor = 'text-blue-400'; typeBg = 'bg-blue-900/30'; typeLabel = 'Edição Manual'; }
                                     else if (log.source === 'ai_edit') { icon = <Sparkles className="w-4 h-4 text-purple-400" />; typeColor = 'text-purple-400'; typeBg = 'bg-purple-900/30'; typeLabel = 'IA bulk edit'; }

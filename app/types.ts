@@ -505,6 +505,7 @@ export interface SaleOrder {
   discount: number;
   total: number;
   customerId?: string;
+  customerName?: string;        // cache desnormalizado — fallback: 'Consumidor Final'
   pdvSessionId?: string;        // link com PdvSession que originou a venda
   stockMovementIds: string[];   // IDs dos StockMovements gerados por este pedido
   financialEntryId?: string;    // reservado para futuro módulo financeiro

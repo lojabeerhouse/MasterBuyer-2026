@@ -1055,31 +1055,43 @@ const App: React.FC = () => {
     return Math.max(...saleOrders.map(o => o.seqNumber || 0)) + 1;
   }, [saleOrders]);
 
-  // Cria SaleOrder a partir do PDV (status inicial: pending, sem movimentação de estoque ainda)
+  // Cria SaleOrder a partir do PDV ou manual (status inicial: pending, sem movimentação de estoque ainda)
   const handleFinalizeSale = useCallback((
     items: SaleOrderItem[],
     paymentMethod: SaleOrder['paymentMethod'],
+    origin: SaleOrder['origin'] = 'pdv',
+    customerName?: string,
   ): SaleOrder => {
     const now = new Date().toISOString();
     const subtotal = items.reduce((s, i) => s + i.total, 0);
+    const openSession = pdvSessions.find(s => s.status === 'open');
     const newOrder: SaleOrder = {
       id: crypto.randomUUID(),
       seqNumber: getNextSaleSeqNumber(),
-      origin: 'pdv',
+      origin,
       status: 'pending',
       items,
       paymentMethod,
       subtotal,
       discount: 0,
       total: subtotal,
+      customerName: customerName ?? 'Consumidor Final',
+      pdvSessionId: openSession?.id,
       stockMovementIds: [],
       createdAt: now,
       updatedAt: now,
       createdBy: uid ?? '',
     };
     setSaleOrders(prev => [newOrder, ...prev]);
+    if (openSession) {
+      setPdvSessions(prev => prev.map(s =>
+        s.id === openSession.id
+          ? { ...s, saleOrderIds: [...s.saleOrderIds, newOrder.id] }
+          : s
+      ));
+    }
     return newOrder;
-  }, [uid, getNextSaleSeqNumber]);
+  }, [uid, getNextSaleSeqNumber, pdvSessions]);
 
   // Debita estoque: pending → stock_committed. Grava StockMovements append-only.
   const handleCommitStock = useCallback((orderId: string) => {
@@ -1144,6 +1156,31 @@ const App: React.FC = () => {
       o.id === orderId ? { ...o, status: 'cancelled', cancelReason: reason, updatedAt: now } : o
     ));
   }, [uid, saleOrders]);
+
+  // Abre nova sessão de caixa — rejeita se já houver uma aberta
+  const handleOpenSession = useCallback((cashierName: string, openingBalance: number) => {
+    if (!uid) return;
+    if (pdvSessions.some(s => s.status === 'open')) return;
+    const now = new Date().toISOString();
+    const session: PdvSession = {
+      id: crypto.randomUUID(),
+      cashierName,
+      openedAt: now,
+      openingBalance,
+      saleOrderIds: [],
+      status: 'open',
+      createdBy: uid,
+    };
+    setPdvSessions(prev => [...prev, session]);
+  }, [uid, pdvSessions]);
+
+  // Fecha sessão de caixa ativa
+  const handleCloseSession = useCallback((sessionId: string) => {
+    const now = new Date().toISOString();
+    setPdvSessions(prev => prev.map(s =>
+      s.id === sessionId ? { ...s, status: 'closed' as const, closedAt: now } : s
+    ));
+  }, []);
 
   // Cria pedido a partir de itens processados no UploadCenter
   const handleCreateOrderFromUpload = useCallback((items: import('./types').CartItem[], supplierId: string) => {
@@ -1490,6 +1527,9 @@ const App: React.FC = () => {
                     saleOrders={saleOrders}
                     onCommitStock={handleCommitStock}
                     onCancelOrder={handleCancelOrder}
+                    activeSession={pdvSessions.find(s => s.status === 'open')}
+                    onOpenSession={handleOpenSession}
+                    onCloseSession={handleCloseSession}
                   />
                 )}
                 {activeTab === 'comparator' && (

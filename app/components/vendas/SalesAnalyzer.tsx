@@ -1,6 +1,6 @@
 
-import React, { useState, useEffect } from 'react';
-import { SalesRecord, ForecastItem } from '../../types';
+import React, { useState, useEffect, useMemo } from 'react';
+import { SalesRecord, ForecastItem, SaleOrder } from '../../types';
 import { FileSpreadsheet, Play, TrendingUp, AlertCircle, Save, Link as LinkIcon, RefreshCw, Box } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, CartesianGrid } from 'recharts';
 
@@ -15,25 +15,43 @@ interface SalesAnalyzerProps {
   setSalesConfig: React.Dispatch<React.SetStateAction<{ historyDays: number; inflation: number; forecastDays: number; lastImportDate?: string }>>;
   salesUrl: string;
   setSalesUrl: React.Dispatch<React.SetStateAction<string>>;
+  saleOrders?: SaleOrder[];
 }
 
-const SalesAnalyzer: React.FC<SalesAnalyzerProps> = ({ 
-    setForecast, 
-    salesData, 
+const SalesAnalyzer: React.FC<SalesAnalyzerProps> = ({
+    setForecast,
+    salesData,
     setSalesData,
     csvContent,
     setCsvContent,
     salesConfig,
     setSalesConfig,
     salesUrl,
-    setSalesUrl
+    setSalesUrl,
+    saleOrders,
 }) => {
   const [historyDays, setHistoryDays] = useState<number>(salesConfig.historyDays || 60);
   const [forecastDays, setForecastDays] = useState<number>(salesConfig.forecastDays || 7);
   const [inflation, setInflation] = useState<number>(salesConfig.inflation || 10);
   const [isProcessing, setIsProcessing] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
-  
+  const [dataSource, setDataSource] = useState<'csv' | 'system'>('csv');
+
+  // Deriva SalesRecord[] dos pedidos reais — nunca chama setSalesData (não persiste no blob)
+  const systemSalesData = useMemo<SalesRecord[]>(() => {
+    if (!saleOrders?.length) return [];
+    return saleOrders
+      .filter(o => o.status !== 'cancelled')
+      .flatMap(o => o.items.map(item => ({
+        sku: item.sku,
+        productName: item.name,
+        quantitySold: item.qty,
+        date: o.createdAt,
+      })));
+  }, [saleOrders]);
+
+  const activeData = dataSource === 'system' ? systemSalesData : salesData;
+
   // Stock Data State: Stores Qty AND Name to restore items that have no sales history
   const [stockData, setStockData] = useState<Map<string, { qty: number, name: string }>>(new Map());
   const [stockFileStatus, setStockFileStatus] = useState<string>('');
@@ -206,7 +224,7 @@ const SalesAnalyzer: React.FC<SalesAnalyzerProps> = ({
     
     // 1. Aggregate Sales Data
     const skuMap = new Map<string, {name: string, totalQty: number}>();
-    salesData.forEach(record => {
+    activeData.forEach(record => {
         const key = record.productName; 
         const existing = skuMap.get(key);
         if (existing) {
@@ -270,7 +288,7 @@ const SalesAnalyzer: React.FC<SalesAnalyzerProps> = ({
     }, 500);
   };
 
-  const chartData = Array.from(salesData.reduce((acc, curr) => {
+  const chartData = Array.from(activeData.reduce((acc, curr) => {
       acc.set(curr.productName, (acc.get(curr.productName) || 0) + curr.quantitySold);
       return acc;
   }, new Map<string, number>()))
@@ -288,8 +306,27 @@ const SalesAnalyzer: React.FC<SalesAnalyzerProps> = ({
                 <h2 className="text-xl font-bold text-amber-500 mb-4 flex items-center gap-2">
                     <FileSpreadsheet className="w-5 h-5"/> Importar Vendas
                 </h2>
-                
-                {/* 1. URL Import */}
+
+                {/* Toggle fonte de dados — só exibe se houver pedidos no sistema */}
+                {(saleOrders?.length ?? 0) > 0 && (
+                    <div className="flex gap-1 p-1 bg-slate-900/60 rounded-lg border border-slate-700 mb-4">
+                        <button
+                            onClick={() => setDataSource('csv')}
+                            className={`flex-1 py-1.5 text-xs font-semibold rounded-md transition-all ${dataSource === 'csv' ? 'bg-amber-600 text-white' : 'text-slate-400 hover:text-white'}`}
+                        >
+                            Importar CSV
+                        </button>
+                        <button
+                            onClick={() => setDataSource('system')}
+                            className={`flex-1 py-1.5 text-xs font-semibold rounded-md transition-all ${dataSource === 'system' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white'}`}
+                        >
+                            Dados do Sistema
+                        </button>
+                    </div>
+                )}
+
+                {/* 1. URL Import — só visível no modo CSV */}
+                {dataSource === 'csv' && <>{/* 1. URL Import */}
                 <div className="mb-4">
                     <label className="block text-sm text-slate-400 mb-2">Link Planilha Google (Publicado Web CSV)</label>
                     <div className="flex gap-2">
@@ -344,6 +381,7 @@ const SalesAnalyzer: React.FC<SalesAnalyzerProps> = ({
                      <p className="text-[10px] text-slate-500 mt-2">Colunas: "Produto" e "Saldo/Estoque". Opcional.</p>
                      {stockFileStatus && <p className="text-xs text-green-400 mt-1">{stockFileStatus}</p>}
                 </div>
+                </>}
 
                 {errorMsg && (
                     <div className="bg-red-900/50 p-3 rounded text-sm text-red-200 border border-red-800 mb-4 flex items-center gap-2">
@@ -351,9 +389,14 @@ const SalesAnalyzer: React.FC<SalesAnalyzerProps> = ({
                     </div>
                 )}
 
-                {salesData.length > 0 && (
+                {activeData.length > 0 && dataSource === 'csv' && (
                     <div className="bg-slate-900/50 p-3 rounded text-sm text-green-400 border border-green-900 mb-4">
-                        {salesData.length} registros de venda importados.
+                        {activeData.length} registros de venda importados.
+                    </div>
+                )}
+                {dataSource === 'system' && (
+                    <div className="bg-blue-950/50 p-3 rounded text-sm text-blue-400 border border-blue-900/60 mb-4">
+                        {activeData.length} registros derivados dos pedidos do sistema.
                     </div>
                 )}
 
@@ -393,9 +436,9 @@ const SalesAnalyzer: React.FC<SalesAnalyzerProps> = ({
                         </div>
                     </div>
 
-                    <button 
+                    <button
                         onClick={generateForecast}
-                        disabled={salesData.length === 0 || isProcessing}
+                        disabled={activeData.length === 0 || isProcessing}
                         className="w-full bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-700 hover:to-orange-700 text-white font-bold py-3 rounded shadow-lg disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                     >
                         {isProcessing ? 'Calculando...' : <><Play className="w-4 h-4" /> Gerar Simulação</>}
@@ -406,7 +449,7 @@ const SalesAnalyzer: React.FC<SalesAnalyzerProps> = ({
 
         {/* Visualization & Result Panel */}
         <div className="lg:col-span-2 bg-slate-800 p-6 rounded-lg border border-slate-700 flex flex-col">
-            {salesData.length > 0 ? (
+            {activeData.length > 0 ? (
                 <>
                     <h3 className="text-lg font-semibold text-slate-300 mb-4 flex items-center gap-2"><TrendingUp className="w-4 h-4"/> Top 10 Produtos Mais Vendidos</h3>
                     <div style={{ width: '100%', height: 400 }}>

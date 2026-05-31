@@ -13,6 +13,8 @@ Antes de qualquer alteração de código, responda com:
 
 Só execute após "ok", "pode", "vai" ou equivalente explícito do usuário.
 
+Após execução ao final sempre exiba um task geral, com todas as etapas (master e micro) executadas e pendentes de execução.
+
 ### Gatilhos de aviso adicional
 
 Adicione ao final do plano, antes do "Aguardando aprovação":

@@ -1,10 +1,13 @@
 import React, { useState, useMemo } from 'react';
-import { Search, ShoppingCart, Plus, Minus, Trash2, CreditCard, Banknote, Tag, ScanBarcode, CheckCircle2, X } from 'lucide-react';
-import { MasterProduct, SaleOrder, SaleOrderItem } from '../../types';
+import { Search, ShoppingCart, Plus, Minus, Trash2, CreditCard, Banknote, Tag, ScanBarcode, CheckCircle2, X, User, Lock, Unlock } from 'lucide-react';
+import { MasterProduct, SaleOrder, SaleOrderItem, PdvSession } from '../../types';
 
 interface POSProps {
   masterProducts: MasterProduct[];
-  onFinalizeSale: (items: SaleOrderItem[], paymentMethod: SaleOrder['paymentMethod']) => SaleOrder;
+  onFinalizeSale: (items: SaleOrderItem[], paymentMethod: SaleOrder['paymentMethod'], origin?: SaleOrder['origin'], customerName?: string) => SaleOrder;
+  activeSession?: PdvSession;
+  onOpenSession?: (cashierName: string, openingBalance: number) => void;
+  onCloseSession?: (sessionId: string) => void;
 }
 
 interface CartItem {
@@ -21,11 +24,25 @@ const PAYMENT_LABELS: Record<PaymentMethod, string> = {
   mixed: 'Misto',
 };
 
-const POS: React.FC<POSProps> = ({ masterProducts, onFinalizeSale }) => {
+const POS: React.FC<POSProps> = ({ masterProducts, onFinalizeSale, activeSession, onOpenSession, onCloseSession }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [cart, setCart] = useState<CartItem[]>([]);
   const [selectedPayment, setSelectedPayment] = useState<PaymentMethod | null>(null);
   const [confirmedOrder, setConfirmedOrder] = useState<SaleOrder | null>(null);
+  const [customerName, setCustomerName] = useState('Consumidor Final');
+
+  // Modal de abertura de caixa
+  const [showSessionModal, setShowSessionModal] = useState(false);
+  const [sessionCashier, setSessionCashier] = useState('');
+  const [sessionBalance, setSessionBalance] = useState('0');
+
+  const handleOpenSessionSubmit = () => {
+    if (!sessionCashier.trim() || !onOpenSession) return;
+    onOpenSession(sessionCashier.trim(), parseFloat(sessionBalance) || 0);
+    setShowSessionModal(false);
+    setSessionCashier('');
+    setSessionBalance('0');
+  };
 
   const filteredProducts = useMemo(() => {
     if (!searchTerm.trim()) return masterProducts.slice(0, 30);
@@ -74,7 +91,7 @@ const POS: React.FC<POSProps> = ({ masterProducts, onFinalizeSale }) => {
       unitPrice: i.product.priceSell || 0,
       total: (i.product.priceSell || 0) * i.quantity,
     }));
-    const order = onFinalizeSale(items, selectedPayment);
+    const order = onFinalizeSale(items, selectedPayment, 'pdv', customerName || 'Consumidor Final');
     setConfirmedOrder(order);
   };
 
@@ -82,10 +99,92 @@ const POS: React.FC<POSProps> = ({ masterProducts, onFinalizeSale }) => {
     setCart([]);
     setSelectedPayment(null);
     setConfirmedOrder(null);
+    setCustomerName('Consumidor Final');
   };
 
   return (
-    <div className="flex flex-col lg:flex-row h-full gap-4 overflow-hidden fade-in relative">
+    <div className="flex flex-col h-full overflow-hidden fade-in">
+      {/* Banner de sessão de caixa */}
+      {activeSession ? (
+        <div className="flex items-center justify-between px-4 py-2 bg-emerald-950/40 border-b border-emerald-800/40 text-xs shrink-0">
+          <div className="flex items-center gap-2 text-emerald-400 font-semibold">
+            <Unlock className="w-3 h-3" />
+            Caixa: {activeSession.cashierName}
+            <span className="text-emerald-600 font-normal">· aberto {new Date(activeSession.openedAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</span>
+          </div>
+          {onCloseSession && (
+            <button
+              onClick={() => onCloseSession(activeSession.id)}
+              className="text-slate-500 hover:text-red-400 font-medium transition-colors flex items-center gap-1"
+            >
+              <Lock className="w-3 h-3" /> Fechar Caixa
+            </button>
+          )}
+        </div>
+      ) : (
+        <div className="flex items-center justify-between px-4 py-2 bg-slate-900/60 border-b border-slate-800/50 text-xs shrink-0">
+          <span className="text-slate-600 flex items-center gap-1.5"><Lock className="w-3 h-3" /> Nenhuma sessão de caixa aberta</span>
+          {onOpenSession && (
+            <button
+              onClick={() => setShowSessionModal(true)}
+              className="text-amber-500 hover:text-amber-400 font-bold transition-colors"
+            >
+              Abrir Caixa →
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Modal de abertura de caixa */}
+      {showSessionModal && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl p-6 flex flex-col gap-4 w-80 shadow-2xl">
+            <h3 className="text-sm font-bold text-white">Abrir Sessão de Caixa</h3>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-[11px] text-slate-400 mb-1">Nome do caixa / operador</label>
+                <input
+                  type="text"
+                  value={sessionCashier}
+                  onChange={e => setSessionCashier(e.target.value)}
+                  placeholder="Ex: Caixa 1 — João"
+                  autoFocus
+                  className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white placeholder-slate-600 focus:outline-none focus:border-amber-500 transition-colors"
+                  onKeyDown={e => { if (e.key === 'Enter') handleOpenSessionSubmit(); if (e.key === 'Escape') setShowSessionModal(false); }}
+                />
+              </div>
+              <div>
+                <label className="block text-[11px] text-slate-400 mb-1">Saldo inicial (R$)</label>
+                <input
+                  type="number"
+                  value={sessionBalance}
+                  onChange={e => setSessionBalance(e.target.value)}
+                  min="0"
+                  step="0.01"
+                  className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-amber-500 transition-colors"
+                />
+              </div>
+            </div>
+            <div className="flex gap-2 pt-1">
+              <button
+                onClick={handleOpenSessionSubmit}
+                disabled={!sessionCashier.trim()}
+                className="flex-1 bg-amber-600 hover:bg-amber-500 disabled:opacity-40 text-white font-bold py-2 rounded-xl text-sm transition-colors"
+              >
+                Abrir Caixa
+              </button>
+              <button
+                onClick={() => setShowSessionModal(false)}
+                className="px-4 text-slate-400 hover:text-white text-sm transition-colors"
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="flex flex-col lg:flex-row flex-1 gap-4 overflow-hidden p-0 relative">
       {/* Overlay de confirmação */}
       {confirmedOrder && (
         <div className="absolute inset-0 z-50 flex items-center justify-center bg-slate-950/90 backdrop-blur-sm rounded-2xl">
@@ -233,6 +332,19 @@ const POS: React.FC<POSProps> = ({ masterProducts, onFinalizeSale }) => {
         </div>
 
         <div className="p-4 border-t border-slate-800 bg-slate-950 space-y-4 shrink-0">
+          {/* Campo de cliente */}
+          <div className="relative">
+            <User className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-500 pointer-events-none" />
+            <input
+              type="text"
+              value={customerName}
+              onChange={e => setCustomerName(e.target.value)}
+              onFocus={e => { if (e.target.value === 'Consumidor Final') e.target.select(); }}
+              placeholder="Consumidor Final"
+              className="w-full bg-slate-900 border border-slate-700 rounded-xl pl-8 pr-3 py-2 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-amber-500 transition-colors"
+            />
+          </div>
+
           <div className="space-y-2">
             <div className="flex justify-between text-sm text-slate-400">
               <span>Subtotal ({totalItems} itens)</span>
@@ -285,6 +397,7 @@ const POS: React.FC<POSProps> = ({ masterProducts, onFinalizeSale }) => {
             Finalizar Venda
           </button>
         </div>
+      </div>
       </div>
     </div>
   );
