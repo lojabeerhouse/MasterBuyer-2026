@@ -114,7 +114,7 @@ Este documento serve como mapa de referência para a localização de todos os c
 ### Gerais
 | Arquivo | Responsabilidade |
 |---|---|
-| `firebaseService.ts` | Integração Firestore. **Blob** (`loadUserData`/`saveUserData` + guards `hydrated`/`lastCount`). **Chunked** (`loadChunkedData`/`saveChunkedData`, usado por masterProducts). **Delta** (`loadAllSuppliers`/`upsertSuppliers`/`deleteSuppliers`, `loadAllPurchaseOrders`/`upsertPurchaseOrders`/`deletePurchaseOrders` — escrita por item, nunca dataset inteiro). `resetSessionGuards()` deve ser chamado no logout. |
+| `firebaseService.ts` | Integração Firestore. **Blob** (`loadUserData`/`saveUserData` + guards `hydrated`/`lastCount`). **Chunked** (`loadChunkedData`/`saveChunkedData`, usado por masterProducts). **Delta** (`loadAllSuppliers`/`upsertSuppliers`/`deleteSuppliers`, `loadAllPurchaseOrders`/`upsertPurchaseOrders`/`deletePurchaseOrders`, `loadAllSaleOrders`/`upsertSaleOrders`/`deleteSaleOrders`, `loadAllPdvSessions`/`upsertPdvSessions`, `loadAllStockMovements`/`appendStockMovements` — escrita por item, nunca dataset inteiro). `resetSessionGuards()` deve ser chamado no logout. |
 | `geminiService.ts` | Chamadas ao Gemini (parse PDF/imagem de cotações) |
 
 ---
@@ -138,6 +138,9 @@ Este documento serve como mapa de referência para a localização de todos os c
 | `users/{uid}/suppliers/{id}` | Fornecedores parceiros | `loadAllSuppliers` / `upsertSuppliers` / `deleteSuppliers` |
 | `users/{uid}/purchaseOrders/{id}` | Pedidos de compra (kanban) | `loadAllPurchaseOrders` / `upsertPurchaseOrders` / `deletePurchaseOrders` |
 | `users/{uid}/catalogs/{supplierId}` | Catálogo de cotações por fornecedor | `loadAllCatalogs` / `saveCatalog` (em `supplierCatalogService.ts`) |
+| `users/{uid}/saleOrders/{id}` | Pedidos de venda (PDV/B2B) — status: pending→stock_committed→invoiced→cancelled | `loadAllSaleOrders` / `upsertSaleOrders` / `deleteSaleOrders` |
+| `users/{uid}/pdvSessions/{id}` | Sessões de caixa do PDV | `loadAllPdvSessions` / `upsertPdvSessions` |
+| `users/{uid}/stockMovements/{id}` | Movimentos de estoque imutáveis (append-only) — nunca deletar/editar | `loadAllStockMovements` / `appendStockMovements` |
 
 ---
 

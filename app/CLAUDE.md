@@ -47,6 +47,9 @@ Adicione ao final do plano, antes do "Aguardando aprovação":
 - **Firestore (criar/alterar/remover campo ou coleção):** 
   ler `app/DATA_MODEL/DATA_MODEL.skill.md` antes de executar.
 
+- **Firestore (leitura, escrita ou alteração de esquema):** 
+  ler `app/SKILLS/FORCATO-STACK/CATO-DATA-INSTRUCTIONS/SKILL.md` obrigatoriamente antes de executar.
+
 ## Mover arquivos
 Sempre usar `git mv`. Nunca deletar e recriar para "mover" um arquivo.
 Após mover, atualizar imports com `sed` em massa. Nunca editar arquivos um a um.
@@ -83,8 +86,14 @@ Não invente padrões visuais ou de interação sem consultar essa skill primeir
 
 ### Modelo de dados Firestore
 
-### Modelo de dados Firestore
-Ao tocar no Firestore, siga `app/DATA_MODEL/DATA_MODEL.skill.md`.
+Ao tocar no Firestore para alterar esquemas, siga `app/DATA_MODEL/DATA_MODEL.skill.md`.
+
+### Persistência e Segurança do Firestore
+
+Sempre que a task envolver leitura, escrita ou esquema do Firestore:
+**leia `app/SKILLS/FORCATO-STACK/CATO-DATA-INSTRUCTIONS/SKILL.md`** — ele dita as diretrizes de segurança contra perdas de dados em produção.
+
+Não escreva lógicas de persistência globais ou em massa sem consultar essa skill primeiro.
 
 ### Banco de ideias
 

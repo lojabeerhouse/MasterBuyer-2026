@@ -5,6 +5,9 @@ import {
   saveUserData, loadUserData, saveChunkedData, loadChunkedData, resetSessionGuards,
   loadAllSuppliers, upsertSuppliers, deleteSuppliers,
   loadAllPurchaseOrders, upsertPurchaseOrders, deletePurchaseOrders,
+  loadAllSaleOrders, upsertSaleOrders, deleteSaleOrders,
+  loadAllPdvSessions, upsertPdvSessions,
+  loadAllStockMovements, appendStockMovements,
 } from './services/firebaseService';
 import { loadNotifications, saveNotifications, processBatchIntoHistory, resolveDuplicate, normalizeProductKey, loadPriceHistory, savePriceHistory } from './services/compras/historyService';
 import { initLogger, addLogListener } from './services/notifications_and_logs/loggerService';
@@ -57,6 +60,10 @@ import {
   InventoryCountTimestamps,
   CategoryTree,
   AppLog,
+  SaleOrder,
+  SaleOrderItem,
+  StockMovement,
+  PdvSession,
 } from './types';
 
 import {
@@ -344,6 +351,9 @@ const App: React.FC = () => {
   const [dbSheetUrl, setDbSheetUrl] = useState<string>("");
   const [globalPackRules, setGlobalPackRules] = useState<PackRule[]>(DEFAULT_GLOBAL_PACK_RULES);
   const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([]);
+  const [saleOrders, setSaleOrders] = useState<SaleOrder[]>([]);
+  const [pdvSessions, setPdvSessions] = useState<PdvSession[]>([]);
+  const [stockMovements, setStockMovements] = useState<StockMovement[]>([]);
   const [userProfile, setUserProfile] = useState<UserProfile>(DEFAULT_USER_PROFILE);
 
   // --- NOTIFICATIONS & LOGS ---
@@ -389,6 +399,8 @@ const App: React.FC = () => {
   // Atualizados em loadAllData e no useEffect de save após o flush para Firestore.
   const prevSuppliersRef = useRef<Supplier[]>([]);
   const prevPurchaseOrdersRef = useRef<PurchaseOrder[]>([]);
+  const prevSaleOrdersRef = useRef<SaleOrder[]>([]);
+  const prevPdvSessionsRef = useRef<PdvSession[]>([]);
 
   // Fecha dropdowns ao clicar fora
   useEffect(() => {
@@ -485,7 +497,7 @@ const App: React.FC = () => {
     setSupplierCatalogs(catalogsMap);
     setPriceValidityConfig(savedValidityConfig);
 
-    const [savedHidden, savedAppSettings, savedPurchaseOrders, savedUserProfile, savedQuoteStages, savedInventoryCount, savedCategoryTree, savedInventoryTimestamps] = await Promise.all([
+    const [savedHidden, savedAppSettings, savedPurchaseOrders, savedUserProfile, savedQuoteStages, savedInventoryCount, savedCategoryTree, savedInventoryTimestamps, savedSaleOrders, savedPdvSessions, savedStockMovements] = await Promise.all([
       loadUserData<HiddenProduct[]>(uid, 'hiddenProducts', []),
       loadUserData<AppSettings>(uid, 'appSettings', { showInactiveProducts: false, priceValidityDays: 7 }),
       loadAllPurchaseOrders<PurchaseOrder>(uid),
@@ -494,6 +506,9 @@ const App: React.FC = () => {
       loadUserData<InventoryCountMap>(uid, 'inventoryCount', {}),
       loadUserData<CategoryTree>(uid, 'categoryTree', {}),
       loadUserData<InventoryCountTimestamps>(uid, 'inventoryTimestamps', {}),
+      loadAllSaleOrders<SaleOrder>(uid),
+      loadAllPdvSessions<PdvSession>(uid),
+      loadAllStockMovements<StockMovement>(uid),
     ]);
     setHiddenProducts(savedHidden);
     setAppSettings(savedAppSettings);
@@ -505,6 +520,11 @@ const App: React.FC = () => {
     setInventoryCount(savedInventoryCount);
     setCategoryTree(savedCategoryTree);
     setInventoryTimestamps(savedInventoryTimestamps);
+    prevSaleOrdersRef.current = savedSaleOrders;
+    setSaleOrders(savedSaleOrders);
+    prevPdvSessionsRef.current = savedPdvSessions;
+    setPdvSessions(savedPdvSessions);
+    setStockMovements(savedStockMovements);
 
     setDataLoading(false);
     setIsLoaded(true);
@@ -559,6 +579,33 @@ const App: React.FC = () => {
     if (changed.length > 0) upsertPurchaseOrders(uid, changed);
     prevPurchaseOrdersRef.current = purchaseOrders;
   }, [purchaseOrders, uid, isLoaded]);
+  // Delta-write para saleOrders — mesma estratégia; pedidos nunca são deletados,
+  // mas o delta evita rewrites desnecessários.
+  useEffect(() => {
+    if (!uid || !isLoaded) return;
+    const prev = prevSaleOrdersRef.current;
+    const prevMap = new Map<string, SaleOrder>(prev.map((o) => [o.id, o]));
+    const changed: SaleOrder[] = [];
+    for (const o of saleOrders) {
+      const old = prevMap.get(o.id);
+      if (!old || JSON.stringify(old) !== JSON.stringify(o)) changed.push(o);
+    }
+    if (changed.length > 0) upsertSaleOrders(uid, changed);
+    prevSaleOrdersRef.current = saleOrders;
+  }, [saleOrders, uid, isLoaded]);
+  // Delta-write para pdvSessions.
+  useEffect(() => {
+    if (!uid || !isLoaded) return;
+    const prev = prevPdvSessionsRef.current;
+    const prevMap = new Map<string, PdvSession>(prev.map((s) => [s.id, s]));
+    const changed: PdvSession[] = [];
+    for (const s of pdvSessions) {
+      const old = prevMap.get(s.id);
+      if (!old || JSON.stringify(old) !== JSON.stringify(s)) changed.push(s);
+    }
+    if (changed.length > 0) upsertPdvSessions(uid, changed);
+    prevPdvSessionsRef.current = pdvSessions;
+  }, [pdvSessions, uid, isLoaded]);
   useEffect(() => { if (uid && isLoaded) saveUserData(uid, 'priceValidityConfig', priceValidityConfig); }, [priceValidityConfig, uid, isLoaded]);
   useEffect(() => { if (uid && isLoaded) saveUserData(uid, 'hiddenProducts', hiddenProducts); }, [hiddenProducts, uid, isLoaded]);
   useEffect(() => { if (uid && isLoaded) saveUserData(uid, 'appSettings', appSettings); }, [appSettings, uid, isLoaded]);
@@ -868,6 +915,8 @@ const App: React.FC = () => {
     // calculados contra os dados do usuário anterior.
     prevSuppliersRef.current = [];
     prevPurchaseOrdersRef.current = [];
+    prevSaleOrdersRef.current = [];
+    prevPdvSessionsRef.current = [];
     setUser(null);
     setSuppliers([]);
     setSalesData([]);
@@ -877,6 +926,9 @@ const App: React.FC = () => {
     setIgnoredMappings([]);
     setMasterProducts([]);
     setUserProfile(DEFAULT_USER_PROFILE);
+    setSaleOrders([]);
+    setPdvSessions([]);
+    setStockMovements([]);
   };
 
   // --- HELPERS ---
@@ -996,6 +1048,102 @@ const App: React.FC = () => {
     if (purchaseOrders.length === 0) return 1;
     return Math.max(...purchaseOrders.map(o => o.seqNumber || 0)) + 1;
   }, [purchaseOrders]);
+
+  // seqNumber automático para pedidos de venda
+  const getNextSaleSeqNumber = useCallback(() => {
+    if (saleOrders.length === 0) return 1;
+    return Math.max(...saleOrders.map(o => o.seqNumber || 0)) + 1;
+  }, [saleOrders]);
+
+  // Cria SaleOrder a partir do PDV (status inicial: pending, sem movimentação de estoque ainda)
+  const handleFinalizeSale = useCallback((
+    items: SaleOrderItem[],
+    paymentMethod: SaleOrder['paymentMethod'],
+  ): SaleOrder => {
+    const now = new Date().toISOString();
+    const subtotal = items.reduce((s, i) => s + i.total, 0);
+    const newOrder: SaleOrder = {
+      id: crypto.randomUUID(),
+      seqNumber: getNextSaleSeqNumber(),
+      origin: 'pdv',
+      status: 'pending',
+      items,
+      paymentMethod,
+      subtotal,
+      discount: 0,
+      total: subtotal,
+      stockMovementIds: [],
+      createdAt: now,
+      updatedAt: now,
+      createdBy: uid ?? '',
+    };
+    setSaleOrders(prev => [newOrder, ...prev]);
+    return newOrder;
+  }, [uid, getNextSaleSeqNumber]);
+
+  // Debita estoque: pending → stock_committed. Grava StockMovements append-only.
+  const handleCommitStock = useCallback((orderId: string) => {
+    if (!uid) return;
+    const order = saleOrders.find(o => o.id === orderId);
+    if (!order || order.status !== 'pending') return;
+    const now = new Date().toISOString();
+    const movements: StockMovement[] = order.items.map(item => ({
+      id: crypto.randomUUID(),
+      productId: item.productId,
+      sku: item.sku,
+      productName: item.name,
+      qty: -item.qty,
+      type: 'sale_out' as const,
+      refType: 'sale_order' as const,
+      refId: order.id,
+      performedBy: uid,
+      createdAt: now,
+    }));
+    appendStockMovements(uid, movements);
+    setStockMovements(prev => [...prev, ...movements]);
+    setMasterProducts(prev => prev.map(p => {
+      const mv = movements.find(m => m.productId === p.id);
+      return mv ? { ...p, stock: (p.stock || 0) + mv.qty } : p;
+    }));
+    const updatedOrder: SaleOrder = {
+      ...order,
+      status: 'stock_committed',
+      stockMovementIds: movements.map(m => m.id),
+      updatedAt: now,
+    };
+    setSaleOrders(prev => prev.map(o => o.id === orderId ? updatedOrder : o));
+  }, [uid, saleOrders]);
+
+  // Cancela pedido. Se estava stock_committed, gera reversals e devolve estoque.
+  const handleCancelOrder = useCallback((orderId: string, reason: string) => {
+    if (!uid) return;
+    const order = saleOrders.find(o => o.id === orderId);
+    if (!order || order.status === 'cancelled') return;
+    const now = new Date().toISOString();
+    if (order.status === 'stock_committed') {
+      const reversals: StockMovement[] = order.items.map(item => ({
+        id: crypto.randomUUID(),
+        productId: item.productId,
+        sku: item.sku,
+        productName: item.name,
+        qty: item.qty,
+        type: 'reversal' as const,
+        refType: 'sale_order' as const,
+        refId: order.id,
+        performedBy: uid,
+        createdAt: now,
+      }));
+      appendStockMovements(uid, reversals);
+      setStockMovements(prev => [...prev, ...reversals]);
+      setMasterProducts(prev => prev.map(p => {
+        const rv = reversals.find(r => r.productId === p.id);
+        return rv ? { ...p, stock: (p.stock || 0) + rv.qty } : p;
+      }));
+    }
+    setSaleOrders(prev => prev.map(o =>
+      o.id === orderId ? { ...o, status: 'cancelled', cancelReason: reason, updatedAt: now } : o
+    ));
+  }, [uid, saleOrders]);
 
   // Cria pedido a partir de itens processados no UploadCenter
   const handleCreateOrderFromUpload = useCallback((items: import('./types').CartItem[], supplierId: string) => {
@@ -1337,6 +1485,11 @@ const App: React.FC = () => {
                     salesConfig={salesConfig} setSalesConfig={setSalesConfig}
                     salesUrl={salesUrl} setSalesUrl={setSalesUrl}
                     masterProducts={masterProducts}
+                    onFinalizeSale={handleFinalizeSale}
+                    userId={uid ?? ''}
+                    saleOrders={saleOrders}
+                    onCommitStock={handleCommitStock}
+                    onCancelOrder={handleCancelOrder}
                   />
                 )}
                 {activeTab === 'comparator' && (

@@ -474,6 +474,81 @@ export interface CategoryNode {
 
 /** Árvore completa de categorias: Record<id, CategoryNode> */
 export type CategoryTree = Record<string, CategoryNode>;
+// ─── SALE ORDERS ─────────────────────────────────────────────────────────────
+
+/** Item de linha de um pedido de venda */
+export interface SaleOrderItem {
+  productId: string;    // MasterProduct.id
+  sku: string;
+  name: string;
+  unit: string;
+  qty: number;
+  unitPrice: number;
+  total: number;
+}
+
+export type SaleOrderStatus =
+  | 'pending'           // criado, aguardando ação
+  | 'stock_committed'   // estoque debitado via StockMovement
+  | 'invoiced'          // nota fiscal emitida
+  | 'cancelled';        // cancelado
+
+/** Pedido de venda — criado pelo PDV ou manualmente. Padrão delta no Firestore. */
+export interface SaleOrder {
+  id: string;
+  seqNumber?: number;           // ID sequencial imutável por usuário
+  origin: 'pdv' | 'b2b' | 'manual';
+  status: SaleOrderStatus;
+  items: SaleOrderItem[];
+  paymentMethod: 'cash' | 'card' | 'pix' | 'mixed';
+  subtotal: number;
+  discount: number;
+  total: number;
+  customerId?: string;
+  pdvSessionId?: string;        // link com PdvSession que originou a venda
+  stockMovementIds: string[];   // IDs dos StockMovements gerados por este pedido
+  financialEntryId?: string;    // reservado para futuro módulo financeiro
+  createdAt: string;            // ISO 8601
+  updatedAt: string;            // ISO 8601
+  createdBy: string;            // uid
+  cancelReason?: string;
+  notes?: string;
+}
+
+// ─── STOCK MOVEMENTS ─────────────────────────────────────────────────────────
+
+/** Evento imutável de movimentação de estoque — append-only, nunca deletar nem editar. */
+export interface StockMovement {
+  id: string;
+  productId: string;    // MasterProduct.id
+  sku: string;          // cache
+  productName: string;  // cache
+  /** Positivo = entrada, negativo = saída */
+  qty: number;
+  type: 'sale_out' | 'purchase_in' | 'count_sync' | 'adjustment' | 'reversal';
+  refType: 'sale_order' | 'purchase_order' | 'inventory_count' | 'manual';
+  refId: string;        // ID do documento que originou o movimento
+  performedBy: string;  // uid
+  createdAt: string;    // ISO 8601 — imutável após criação
+  note?: string;
+}
+
+// ─── PDV SESSION ─────────────────────────────────────────────────────────────
+
+export type PdvSessionStatus = 'open' | 'closed';
+
+/** Sessão de caixa — agrupa pedidos de venda de um turno. Padrão delta no Firestore. */
+export interface PdvSession {
+  id: string;
+  cashierName: string;
+  openedAt: string;           // ISO 8601
+  closedAt?: string;          // ISO 8601
+  openingBalance: number;     // valor em caixa ao abrir
+  saleOrderIds: string[];     // pedidos gerados nesta sessão
+  status: PdvSessionStatus;
+  createdBy: string;          // uid
+}
+
 // ─── LOG SYSTEM ─────────────────────────────────────────────────────────────
 
 export type LogLevel = 'info' | 'success' | 'warn' | 'error';

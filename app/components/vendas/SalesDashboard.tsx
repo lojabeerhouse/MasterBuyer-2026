@@ -1,5 +1,6 @@
 import React, { useState, Suspense, lazy } from 'react';
 import { ShoppingCart, ClipboardList, BarChart3 } from 'lucide-react';
+import { MasterProduct, SaleOrder, SaleOrderItem } from '../../types';
 
 const POS = lazy(() => import('./POS'));
 const SalesOrders = lazy(() => import('./SalesOrders'));
@@ -15,11 +16,18 @@ interface SalesDashboardProps {
     setSalesConfig: any;
     salesUrl: string;
     setSalesUrl: any;
-    masterProducts: any; // Using any or MasterProduct[] here
+    masterProducts: MasterProduct[];
+    onFinalizeSale: (items: SaleOrderItem[], paymentMethod: SaleOrder['paymentMethod']) => SaleOrder;
+    userId: string;
+    saleOrders: SaleOrder[];
+    onCommitStock: (orderId: string) => void;
+    onCancelOrder: (orderId: string, reason: string) => void;
 }
 
 const SalesDashboard: React.FC<SalesDashboardProps> = (props) => {
     const [salesTab, setSalesTab] = useState<'pos' | 'orders' | 'reports'>('pos');
+
+    const pendingCount = props.saleOrders.filter(o => o.status === 'pending').length;
 
     return (
         <div className="flex flex-col h-full gap-3 fade-in">
@@ -39,6 +47,11 @@ const SalesDashboard: React.FC<SalesDashboardProps> = (props) => {
                 }`}
               >
                 <ClipboardList className="w-4 h-4" /> Pedidos de Vendas
+                {pendingCount > 0 && (
+                  <span className="ml-0.5 bg-amber-500 text-white text-[10px] font-black leading-none px-1.5 py-0.5 rounded-full">
+                    {pendingCount}
+                  </span>
+                )}
               </button>
               <button
                 onClick={() => setSalesTab('reports')}
@@ -55,18 +68,29 @@ const SalesDashboard: React.FC<SalesDashboardProps> = (props) => {
                     <div className="w-10 h-10 border-4 border-amber-500/30 border-t-amber-500 rounded-full animate-spin" />
                     Carregando Módulo...
                 </div>}>
-                    {salesTab === 'pos' && <POS masterProducts={props.masterProducts} />}
-                    {salesTab === 'orders' && <SalesOrders />}
-                    {salesTab === 'reports' && <SalesAnalyzer 
-                        setForecast={props.setForecast} 
-                        salesData={props.salesData} 
-                        setSalesData={props.setSalesData} 
-                        csvContent={props.csvContent} 
-                        setCsvContent={props.setCsvContent} 
-                        salesConfig={props.salesConfig} 
-                        setSalesConfig={props.setSalesConfig} 
-                        salesUrl={props.salesUrl} 
-                        setSalesUrl={props.setSalesUrl} 
+                    {salesTab === 'pos' && (
+                      <POS
+                        masterProducts={props.masterProducts}
+                        onFinalizeSale={props.onFinalizeSale}
+                      />
+                    )}
+                    {salesTab === 'orders' && (
+                      <SalesOrders
+                        saleOrders={props.saleOrders}
+                        onCommitStock={props.onCommitStock}
+                        onCancelOrder={props.onCancelOrder}
+                      />
+                    )}
+                    {salesTab === 'reports' && <SalesAnalyzer
+                        setForecast={props.setForecast}
+                        salesData={props.salesData}
+                        setSalesData={props.setSalesData}
+                        csvContent={props.csvContent}
+                        setCsvContent={props.setCsvContent}
+                        salesConfig={props.salesConfig}
+                        setSalesConfig={props.setSalesConfig}
+                        salesUrl={props.salesUrl}
+                        setSalesUrl={props.setSalesUrl}
                     />}
                 </Suspense>
             </div>

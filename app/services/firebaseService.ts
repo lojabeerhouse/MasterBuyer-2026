@@ -312,3 +312,25 @@ export const upsertPurchaseOrders = <T extends DeltaItem>(uid: string, items: T[
   upsertDeltaItems<T>(uid, 'purchaseOrders', 'purchaseOrders', items);
 export const deletePurchaseOrders = (uid: string, ids: string[]) =>
   deleteDeltaItems(uid, 'purchaseOrders', 'purchaseOrders', ids);
+
+// ─── API pública: saleOrders ─────────────────────────────────────────────────
+export const loadAllSaleOrders = <T extends DeltaItem>(uid: string) =>
+  loadDeltaCollection<T>(uid, 'saleOrders', 'saleOrders');
+export const upsertSaleOrders = <T extends DeltaItem>(uid: string, items: T[]) =>
+  upsertDeltaItems<T>(uid, 'saleOrders', 'saleOrders', items);
+export const deleteSaleOrders = (uid: string, ids: string[]) =>
+  deleteDeltaItems(uid, 'saleOrders', 'saleOrders', ids);
+
+// ─── API pública: pdvSessions ────────────────────────────────────────────────
+export const loadAllPdvSessions = <T extends DeltaItem>(uid: string) =>
+  loadDeltaCollection<T>(uid, 'pdvSessions', 'pdvSessions');
+export const upsertPdvSessions = <T extends DeltaItem>(uid: string, items: T[]) =>
+  upsertDeltaItems<T>(uid, 'pdvSessions', 'pdvSessions', items);
+
+// ─── API pública: stockMovements ─────────────────────────────────────────────
+// Append-only — nunca deletar nem editar documentos existentes.
+// loadAllStockMovements deve ser chamado no loadAllData para hidratar o guard.
+export const loadAllStockMovements = <T extends DeltaItem>(uid: string) =>
+  loadDeltaCollection<T>(uid, 'stockMovements', 'stockMovements');
+export const appendStockMovements = <T extends DeltaItem>(uid: string, items: T[]) =>
+  upsertDeltaItems<T>(uid, 'stockMovements', 'stockMovements', items);
