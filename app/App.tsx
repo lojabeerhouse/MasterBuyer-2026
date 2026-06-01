@@ -8,6 +8,7 @@ import {
   loadAllSaleOrders, upsertSaleOrders, deleteSaleOrders,
   loadAllPdvSessions, upsertPdvSessions,
   loadAllStockMovements, appendStockMovements,
+  loadAllContacts, upsertContacts, deleteContacts,
 } from './services/firebaseService';
 import { loadNotifications, saveNotifications, processBatchIntoHistory, resolveDuplicate, normalizeProductKey, loadPriceHistory, savePriceHistory } from './services/compras/historyService';
 import { initLogger, addLogListener } from './services/notifications_and_logs/loggerService';
@@ -64,19 +65,21 @@ import {
   SaleOrderItem,
   StockMovement,
   PdvSession,
+  Contact,
 } from './types';
 
 import {
   BarChart3, Users, FileText, Database, Scale, Settings,
   CalendarDays, ClipboardList, LogOut, ChevronDown, Tag, MessageSquare,
   LayoutDashboard, Menu, X, UploadCloud, Package, TrendingUp, Lock, ChevronRight,
-  PackageSearch, Terminal,
+  PackageSearch, Terminal, UserCircle,
 } from 'lucide-react';
 
 const BuyingAssistant = lazy(() => import('./components/compras/BuyingAssistant'));
 const QuoteRequest = lazy(() => import('./components/compras/QuoteRequest'));
 const InventoryCount = lazy(() => import('./components/inventory_count/InventoryCount'));
 const CategoryManager = lazy(() => import('./components/category_manager/CategoryManager'));
+const ContactsDashboard = lazy(() => import('./components/contatos/ContactsDashboard'));
 
 // ─── defaults ────────────────────────────────────────────────────────────────
 // defaultGlobalPackRules movido para services/compras/packRulesService.ts
@@ -334,7 +337,7 @@ const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<
     'dashboard' | 'uploads' | 'sales' | 'comparator' | 'purchase_orders' | 'schedule' |
     'catalog' | 'suppliers' | 'database' | 'settings' | 'profile' | 'quote_request' |
-    'inventory_count' | 'category_manager'
+    'inventory_count' | 'category_manager' | 'contacts'
   >('dashboard');
 
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
@@ -354,6 +357,7 @@ const App: React.FC = () => {
   const [saleOrders, setSaleOrders] = useState<SaleOrder[]>([]);
   const [pdvSessions, setPdvSessions] = useState<PdvSession[]>([]);
   const [stockMovements, setStockMovements] = useState<StockMovement[]>([]);
+  const [contacts, setContacts] = useState<Contact[]>([]);
   const [userProfile, setUserProfile] = useState<UserProfile>(DEFAULT_USER_PROFILE);
 
   // --- NOTIFICATIONS & LOGS ---
@@ -401,6 +405,7 @@ const App: React.FC = () => {
   const prevPurchaseOrdersRef = useRef<PurchaseOrder[]>([]);
   const prevSaleOrdersRef = useRef<SaleOrder[]>([]);
   const prevPdvSessionsRef = useRef<PdvSession[]>([]);
+  const prevContactsRef = useRef<Contact[]>([]);
 
   // Fecha dropdowns ao clicar fora
   useEffect(() => {
@@ -526,6 +531,26 @@ const App: React.FC = () => {
     setPdvSessions(savedPdvSessions);
     setStockMovements(savedStockMovements);
 
+    const savedContacts = await loadAllContacts<Contact>(uid);
+    const hasDefault = savedContacts.some(c => c.id === 'consumidor-final');
+    let finalContacts = savedContacts;
+    if (!hasDefault) {
+      const seed: Contact = {
+        id: 'consumidor-final',
+        role: 'customer',
+        name: 'Consumidor Final',
+        isEnabled: true,
+        isDefault: true,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        createdBy: uid,
+      };
+      finalContacts = [seed, ...savedContacts];
+      upsertContacts(uid, [seed]);
+    }
+    prevContactsRef.current = finalContacts;
+    setContacts(finalContacts);
+
     setDataLoading(false);
     setIsLoaded(true);
   };
@@ -606,6 +631,25 @@ const App: React.FC = () => {
     if (changed.length > 0) upsertPdvSessions(uid, changed);
     prevPdvSessionsRef.current = pdvSessions;
   }, [pdvSessions, uid, isLoaded]);
+  // Delta-write para contacts — guard: nunca deletar id='consumidor-final'.
+  useEffect(() => {
+    if (!uid || !isLoaded) return;
+    const prev = prevContactsRef.current;
+    const prevMap = new Map<string, Contact>(prev.map((c) => [c.id, c]));
+    const nextMap = new Map<string, Contact>(contacts.map((c) => [c.id, c]));
+    const deletedIds: string[] = [];
+    for (const old of prev) {
+      if (!nextMap.has(old.id) && old.id !== 'consumidor-final') deletedIds.push(old.id);
+    }
+    const changed: Contact[] = [];
+    for (const c of contacts) {
+      const old = prevMap.get(c.id);
+      if (!old || JSON.stringify(old) !== JSON.stringify(c)) changed.push(c);
+    }
+    if (deletedIds.length > 0) deleteContacts(uid, deletedIds);
+    if (changed.length > 0) upsertContacts(uid, changed);
+    prevContactsRef.current = contacts;
+  }, [contacts, uid, isLoaded]);
   useEffect(() => { if (uid && isLoaded) saveUserData(uid, 'priceValidityConfig', priceValidityConfig); }, [priceValidityConfig, uid, isLoaded]);
   useEffect(() => { if (uid && isLoaded) saveUserData(uid, 'hiddenProducts', hiddenProducts); }, [hiddenProducts, uid, isLoaded]);
   useEffect(() => { if (uid && isLoaded) saveUserData(uid, 'appSettings', appSettings); }, [appSettings, uid, isLoaded]);
@@ -917,6 +961,7 @@ const App: React.FC = () => {
     prevPurchaseOrdersRef.current = [];
     prevSaleOrdersRef.current = [];
     prevPdvSessionsRef.current = [];
+    prevContactsRef.current = [];
     setUser(null);
     setSuppliers([]);
     setSalesData([]);
@@ -929,6 +974,7 @@ const App: React.FC = () => {
     setSaleOrders([]);
     setPdvSessions([]);
     setStockMovements([]);
+    setContacts([]);
   };
 
   // --- HELPERS ---
@@ -1182,6 +1228,26 @@ const App: React.FC = () => {
     ));
   }, []);
 
+  // Upsert de contatos (merge por id)
+  const handleUpsertContacts = useCallback((updated: Contact[]) => {
+    setContacts(prev => {
+      const result = [...prev];
+      for (const c of updated) {
+        const idx = result.findIndex(x => x.id === c.id);
+        if (idx >= 0) result[idx] = c;
+        else result.push(c);
+      }
+      return result;
+    });
+  }, []);
+
+  // Delete de contatos — guard: nunca deleta 'consumidor-final'
+  const handleDeleteContacts = useCallback((ids: string[]) => {
+    const safeIds = ids.filter(id => id !== 'consumidor-final');
+    if (safeIds.length === 0) return;
+    setContacts(prev => prev.filter(c => !safeIds.includes(c.id)));
+  }, []);
+
   // Cria pedido a partir de itens processados no UploadCenter
   const handleCreateOrderFromUpload = useCallback((items: import('./types').CartItem[], supplierId: string) => {
     const supplier = suppliers.find(s => s.id === supplierId);
@@ -1244,6 +1310,7 @@ const App: React.FC = () => {
   const navItems: { tab: typeof activeTab; icon: React.ReactNode; label: string; highlight?: boolean }[] = [
     { tab: 'dashboard', icon: <LayoutDashboard className="w-5 h-5" />, label: 'Início' },
     { tab: 'uploads', icon: <UploadCloud className="w-5 h-5" />, label: 'Uploads' },
+    { tab: 'contacts', icon: <UserCircle className="w-5 h-5" />, label: 'Contatos' },
     { tab: 'suppliers', icon: <Users className="w-5 h-5" />, label: 'Fornecedores' },
     { tab: 'inventory_count', icon: <PackageSearch className="w-5 h-5" />, label: 'Contagem de Estoque' },
     { tab: 'category_manager', icon: <Tag className="w-5 h-5" />, label: 'Categorias' },
@@ -1530,6 +1597,7 @@ const App: React.FC = () => {
                     activeSession={pdvSessions.find(s => s.status === 'open')}
                     onOpenSession={handleOpenSession}
                     onCloseSession={handleCloseSession}
+                    contacts={contacts}
                   />
                 )}
                 {activeTab === 'comparator' && (
@@ -1691,6 +1759,16 @@ const App: React.FC = () => {
                       userEmail={user.email || undefined}
                     />
                   </div>
+                )}
+                {activeTab === 'contacts' && (
+                  <Suspense fallback={<div className="flex items-center justify-center h-full text-slate-500 text-sm">Carregando...</div>}>
+                    <ContactsDashboard
+                      contacts={contacts}
+                      onUpsert={handleUpsertContacts}
+                      onDelete={handleDeleteContacts}
+                      userId={uid ?? ''}
+                    />
+                  </Suspense>
                 )}
               </Suspense>
             </main>

@@ -27,6 +27,14 @@ Este documento serve como mapa de referência para a localização de todos os c
 | `CategoryTreeNode.tsx` | Nó individual da árvore de categorias |
 | `CategoryProductList.tsx` | Lista de produtos dentro de uma categoria |
 
+### Contatos (`contatos/`)
+| Arquivo | Responsabilidade |
+|---|---|
+| `ContactsDashboard.tsx` | Orquestrador da aba Contatos com sub-abas Clientes/Colaboradores |
+| `ContactList.tsx` | Lista paginada de contatos filtrada por role com busca debounced |
+| `ContactFormModal.tsx` | Modal de criação/edição; guard: id='consumidor-final' não pode ser deletado nem ter nome alterado |
+| `ContactAutocomplete.tsx` | Dropdown de autocomplete de clientes para o PDV; sempre mostra 'Consumidor Final' primeiro |
+
 ### Vendas (`vendas/`)
 | Arquivo | Responsabilidade |
 |---|---|
@@ -111,10 +119,15 @@ Este documento serve como mapa de referência para a localização de todos os c
 |---|---|
 | `categoryService.ts` | Lógica de persistência e árvore de categorias |
 
+### Contatos (`contatos/`)
+| Arquivo | Responsabilidade |
+|---|---|
+| `contactService.ts` | Funções puras: `filterActiveCustomers`, `filterContactsByRole`, `searchContacts` (tokenized, sem Firestore) |
+
 ### Gerais
 | Arquivo | Responsabilidade |
 |---|---|
-| `firebaseService.ts` | Integração Firestore. **Blob** (`loadUserData`/`saveUserData` + guards `hydrated`/`lastCount`). **Chunked** (`loadChunkedData`/`saveChunkedData`, usado por masterProducts). **Delta** (`loadAllSuppliers`/`upsertSuppliers`/`deleteSuppliers`, `loadAllPurchaseOrders`/`upsertPurchaseOrders`/`deletePurchaseOrders`, `loadAllSaleOrders`/`upsertSaleOrders`/`deleteSaleOrders`, `loadAllPdvSessions`/`upsertPdvSessions`, `loadAllStockMovements`/`appendStockMovements` — escrita por item, nunca dataset inteiro). `resetSessionGuards()` deve ser chamado no logout. |
+| `firebaseService.ts` | Integração Firestore. **Blob** (`loadUserData`/`saveUserData` + guards `hydrated`/`lastCount`). **Chunked** (`loadChunkedData`/`saveChunkedData`, usado por masterProducts). **Delta** (`loadAllSuppliers`/`upsertSuppliers`/`deleteSuppliers`, `loadAllPurchaseOrders`/`upsertPurchaseOrders`/`deletePurchaseOrders`, `loadAllSaleOrders`/`upsertSaleOrders`/`deleteSaleOrders`, `loadAllPdvSessions`/`upsertPdvSessions`, `loadAllStockMovements`/`appendStockMovements`, `loadAllContacts`/`upsertContacts`/`deleteContacts` — escrita por item, nunca dataset inteiro). `resetSessionGuards()` deve ser chamado no logout. |
 | `geminiService.ts` | Chamadas ao Gemini (parse PDF/imagem de cotações) |
 
 ---
@@ -141,6 +154,7 @@ Este documento serve como mapa de referência para a localização de todos os c
 | `users/{uid}/saleOrders/{id}` | Pedidos de venda (PDV/B2B) — status: pending→stock_committed→invoiced→cancelled | `loadAllSaleOrders` / `upsertSaleOrders` / `deleteSaleOrders` |
 | `users/{uid}/pdvSessions/{id}` | Sessões de caixa do PDV | `loadAllPdvSessions` / `upsertPdvSessions` |
 | `users/{uid}/stockMovements/{id}` | Movimentos de estoque imutáveis (append-only) — nunca deletar/editar | `loadAllStockMovements` / `appendStockMovements` |
+| `users/{uid}/contacts/{id}` | Contatos (clientes e colaboradores). `id='consumidor-final'` é imutável e nunca deletado | `loadAllContacts` / `upsertContacts` / `deleteContacts` |
 
 ---
 

@@ -1,6 +1,6 @@
 import React, { useState, useMemo, Suspense, lazy } from 'react';
 import { ShoppingCart, ClipboardList, BarChart3 } from 'lucide-react';
-import { MasterProduct, SaleOrder, SaleOrderItem, PdvSession } from '../../types';
+import { MasterProduct, SaleOrder, SaleOrderItem, PdvSession, Contact } from '../../types';
 
 const POS = lazy(() => import('./POS'));
 const SalesOrders = lazy(() => import('./SalesOrders'));
@@ -25,6 +25,7 @@ interface SalesDashboardProps {
     activeSession?: PdvSession;
     onOpenSession?: (cashierName: string, openingBalance: number) => void;
     onCloseSession?: (sessionId: string) => void;
+    contacts?: Contact[];
 }
 
 // Helper local — data no fuso local (evita UTC shift após 21h BRT)
@@ -103,6 +104,7 @@ const SalesDashboard: React.FC<SalesDashboardProps> = (props) => {
                             activeSession={props.activeSession}
                             onOpenSession={props.onOpenSession}
                             onCloseSession={props.onCloseSession}
+                            contacts={props.contacts}
                         />
                     )}
                     {salesTab === 'orders' && (

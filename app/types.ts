@@ -550,6 +550,26 @@ export interface PdvSession {
   createdBy: string;          // uid
 }
 
+// ─── CONTACTS ────────────────────────────────────────────────────────────────
+
+export type ContactRole = 'customer' | 'collaborator';
+
+export interface Contact {
+  id: string;               // uuid; 'consumidor-final' é reservado (imutável)
+  role: ContactRole;
+  name: string;
+  isEnabled: boolean;       // false = não aparece em autocomplete
+  isDefault?: boolean;      // true apenas em id='consumidor-final'
+  document?: string;        // CPF ou CNPJ livre
+  phone?: string;
+  email?: string;
+  address?: string;
+  internalRole?: string;    // só role='collaborator'
+  createdAt: string;        // ISO 8601
+  updatedAt: string;
+  createdBy: string;        // uid
+}
+
 // ─── LOG SYSTEM ─────────────────────────────────────────────────────────────
 
 export type LogLevel = 'info' | 'success' | 'warn' | 'error';

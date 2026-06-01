@@ -334,3 +334,11 @@ export const loadAllStockMovements = <T extends DeltaItem>(uid: string) =>
   loadDeltaCollection<T>(uid, 'stockMovements', 'stockMovements');
 export const appendStockMovements = <T extends DeltaItem>(uid: string, items: T[]) =>
   upsertDeltaItems<T>(uid, 'stockMovements', 'stockMovements', items);
+
+// ─── API pública: contacts ───────────────────────────────────────────────────
+export const loadAllContacts = <T extends DeltaItem>(uid: string) =>
+  loadDeltaCollection<T>(uid, 'contacts', 'contacts');
+export const upsertContacts = <T extends DeltaItem>(uid: string, items: T[]) =>
+  upsertDeltaItems<T>(uid, 'contacts', 'contacts', items);
+export const deleteContacts = (uid: string, ids: string[]) =>
+  deleteDeltaItems(uid, 'contacts', 'contacts', ids);

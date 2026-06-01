@@ -439,9 +439,24 @@ const ProductDatabase: React.FC<ProductDatabaseProps> = ({ masterProducts = [], 
 
         console.log(`Detected separator: '${separator === '\t' ? 'TAB' : separator}'`);
 
-        const headers = headerLine.split(separator).map(h => h.trim().replace(/^"(.*)"$/, '$1').toLowerCase());
+        // Bling exports CSV with double-encoded UTF-8 (mojibake). E.g. "Preço" appears as "PreÃ§o".
+        // Fix: treat each char as a Latin-1 byte and re-decode as UTF-8. If invalid UTF-8, keep original.
+        const fixMojibake = (s: string): string => {
+            try {
+                const bytes = new Uint8Array([...s].map(c => c.charCodeAt(0)));
+                return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+            } catch {
+                return s;
+            }
+        };
 
-        const getIndex = (keywords: string[]) => headers.findIndex(h => keywords.some(k => h === k || h.includes(k)));
+        const headers = headerLine.split(separator).map(h => fixMojibake(h.trim().replace(/^"(.*)"$/, '$1')).toLowerCase().normalize('NFC'));
+
+        const getIndex = (keywords: string[]) => {
+            const exact = headers.findIndex(h => keywords.some(k => h === k));
+            if (exact !== -1) return exact;
+            return headers.findIndex(h => keywords.some(k => h.includes(k)));
+        };
 
         // --- MAPPING LOGIC START ---
         const map = {
@@ -451,7 +466,7 @@ const ProductDatabase: React.FC<ProductDatabaseProps> = ({ masterProducts = [], 
             unit: getIndex(['unid', 'unidade']),
             ncm: getIndex(['ncm']),
             origin: getIndex(['origem']),
-            priceSell: getIndex(['preço', 'preco', 'venda', 'saida']),
+            priceSell: getIndex(['preço de venda', 'preco de venda', 'preço', 'preco', 'venda', 'saida']),
             priceCost: getIndex(['custo', 'compra', 'preço de custo']),
             stock: getIndex(['estoque', 'qtd', 'saldo']),
 

@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
-import { Search, ShoppingCart, Plus, Minus, Trash2, CreditCard, Banknote, Tag, ScanBarcode, CheckCircle2, X, User, Lock, Unlock } from 'lucide-react';
-import { MasterProduct, SaleOrder, SaleOrderItem, PdvSession } from '../../types';
+import { Search, ShoppingCart, Plus, Minus, Trash2, CreditCard, Banknote, Tag, ScanBarcode, CheckCircle2, X, Lock, Unlock } from 'lucide-react';
+import { MasterProduct, SaleOrder, SaleOrderItem, PdvSession, Contact } from '../../types';
+import ContactAutocomplete from '../contatos/ContactAutocomplete';
 
 interface POSProps {
   masterProducts: MasterProduct[];
@@ -8,6 +9,7 @@ interface POSProps {
   activeSession?: PdvSession;
   onOpenSession?: (cashierName: string, openingBalance: number) => void;
   onCloseSession?: (sessionId: string) => void;
+  contacts?: Contact[];
 }
 
 interface CartItem {
@@ -24,7 +26,7 @@ const PAYMENT_LABELS: Record<PaymentMethod, string> = {
   mixed: 'Misto',
 };
 
-const POS: React.FC<POSProps> = ({ masterProducts, onFinalizeSale, activeSession, onOpenSession, onCloseSession }) => {
+const POS: React.FC<POSProps> = ({ masterProducts, onFinalizeSale, activeSession, onOpenSession, onCloseSession, contacts }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [cart, setCart] = useState<CartItem[]>([]);
   const [selectedPayment, setSelectedPayment] = useState<PaymentMethod | null>(null);
@@ -333,17 +335,24 @@ const POS: React.FC<POSProps> = ({ masterProducts, onFinalizeSale, activeSession
 
         <div className="p-4 border-t border-slate-800 bg-slate-950 space-y-4 shrink-0">
           {/* Campo de cliente */}
-          <div className="relative">
-            <User className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-500 pointer-events-none" />
-            <input
-              type="text"
+          {contacts && contacts.length > 0 ? (
+            <ContactAutocomplete
+              contacts={contacts}
               value={customerName}
-              onChange={e => setCustomerName(e.target.value)}
-              onFocus={e => { if (e.target.value === 'Consumidor Final') e.target.select(); }}
-              placeholder="Consumidor Final"
-              className="w-full bg-slate-900 border border-slate-700 rounded-xl pl-8 pr-3 py-2 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-amber-500 transition-colors"
+              onChange={setCustomerName}
             />
-          </div>
+          ) : (
+            <div className="relative">
+              <input
+                type="text"
+                value={customerName}
+                onChange={e => setCustomerName(e.target.value)}
+                onFocus={e => { if (e.target.value === 'Consumidor Final') e.target.select(); }}
+                placeholder="Consumidor Final"
+                className="w-full bg-slate-900 border border-slate-700 rounded-xl pl-4 pr-3 py-2 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-amber-500 transition-colors"
+              />
+            </div>
+          )}
 
           <div className="space-y-2">
             <div className="flex justify-between text-sm text-slate-400">
